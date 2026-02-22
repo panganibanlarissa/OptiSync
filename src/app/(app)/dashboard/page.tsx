@@ -250,13 +250,13 @@ const WEEKLY_MAX = 160000;
 // --- MAIN PAGE COMPONENT ---
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("daily");
-
+  
   return (
     <motion.div
       initial="hidden"
       animate="visible"
       variants={containerVariants}
-      className="min-h-screen mt-2 sm:mt-4 p-2 sm:p-4 space-y-3 sm:space-y-4"
+      className="min-h-screen mt-2 sm:mt-2 p-2 sm:p-4 space-y-3 sm:space-y-4"
     >
       {/* 1. VITALS BAR */}
       <motion.div

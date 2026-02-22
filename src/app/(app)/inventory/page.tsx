@@ -273,7 +273,7 @@ export default function InventoryPage() {
 
             {/* PRODUCT GRID */}
             <div className="p-2 sm:p-5 bg-gray-50/50">
-                <motion.div variants={containerVariants} initial="hidden" animate="visible" className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-4" : "flex flex-col gap-2 sm:gap-3"}>
+                <motion.div variants={containerVariants} initial="hidden" animate="visible" className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-4" : "flex flex-col gap-2 sm:gap-3"}>
                   <AnimatePresence mode="popLayout">
                     {filteredProducts.length > 0 ? (
                       filteredProducts.map((product) => (
@@ -297,7 +297,7 @@ export default function InventoryPage() {
                  <div className="p-1 sm:p-1.5 bg-red-100 rounded-md"><AlertTriangle size={14} className="text-red-600 sm:w-4 sm:h-4"/></div>
                  <h3 className="font-bold text-gray-800 text-[11px] sm:text-sm">Action Required</h3>
                </div>
-               <p className="text-[9px] sm:text-[11px] text-gray-500 mb-3 sm:mb-4 leading-relaxed">AI detects imminent stock-outs.</p>
+               <p className="text-[9px] sm:text-[11px] text-gray-500 mb-3 sm:mb-4 leading-relaxed">AI detects approaching stock-outs.</p>
                
                {displayLowStock.length > 0 ? (
                  <div className="space-y-2 sm:space-y-3">
@@ -433,7 +433,7 @@ export default function InventoryPage() {
                                     </td>
                                     <td className="p-2 sm:p-3 text-right">
                                       <button onClick={() => handleMarkReceived(order.id)} className="text-[8px] sm:text-[10px] font-bold text-emerald-600 border border-emerald-200 bg-emerald-50 px-2 py-1 sm:py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center gap-1 ml-auto shadow-sm">
-                                        <CheckCircle2 size={10} className="sm:w-3 sm:h-3"/> <span className="hidden sm:inline">Receive</span><span className="sm:hidden">Rcv</span>
+                                        <CheckCircle2 size={10} className="sm:w-3 sm:h-3"/> <span className="hidden sm:inline">Receive</span><span className="sm:hidden">Receive</span>
                                       </button>
                                     </td>
                                   </tr>

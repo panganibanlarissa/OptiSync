@@ -207,7 +207,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="min-h-screen w-full font-sans bg-slate-50/50 p-2 sm:p-4 lg:p-6 box-border pb-20 space-y-4 sm:space-y-6">
+    <div className="min-h-screen w-full font-sans sm:mt-2 p-2 sm:p-4 box-border pb-20 space-y-4 sm:space-y-6">
           
           {/* === HEADER & TABS === */}
           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-100">

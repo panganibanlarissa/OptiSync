@@ -229,15 +229,26 @@ export default function SalesPage() {
   };
 
   const generateReceipt = (trx: Transaction) => {
-    const doc = new jsPDF();
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let currentY = 20;
+
+    // Centered header in black/gray tones (matches reports ledger)
     doc.setFontSize(16);
-    doc.text("M.T. Olaso Optical Clinic", 14, 20);
-    doc.setFontSize(10);
-    doc.text("Official Receipt", 14, 28);
-    doc.text(`Receipt No: ${trx.id}`, 14, 34);
-    doc.text(`Date: ${trx.date.toLocaleString()}`, 14, 40);
-    doc.text(`Patient: ${trx.patientName}`, 14, 46);
-    doc.text(`Payment Method: ${trx.paymentMethod}`, 14, 52);
+    doc.setTextColor(0, 0, 0);
+    doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, currentY, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setTextColor(60, 60, 60);
+    doc.text("Official Receipt", pageWidth / 2, currentY + 8, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Receipt No: ${trx.id}  |  Date: ${trx.date.toLocaleString()}`, pageWidth / 2, currentY + 15, { align: 'center' });
+    doc.text(`Patient: ${trx.patientName}  |  Method: ${trx.paymentMethod}`, pageWidth / 2, currentY + 21, { align: 'center' });
+
+    currentY = 50;
 
     const tableData = trx.items.map(item => [
       item.name,
@@ -247,18 +258,34 @@ export default function SalesPage() {
     ]);
 
     autoTable(doc, {
-      startY: 60,
+      startY: currentY,
       head: [["Item Description", "Qty", "Unit Price", "Amount"]],
       body: tableData,
       theme: 'grid',
-      headStyles: { fillColor: [11, 60, 138] }
+      headStyles: { fillColor: [220, 220, 220], textColor: [0, 0, 0], fontStyle: 'bold', lineColor: [100, 100, 100] },
+      bodyStyles: { textColor: [0, 0, 0], lineColor: [200, 200, 200] },
+      styles: { fontSize: 9, cellPadding: 4 }
     });
 
     // Safely get the final Y position from the table
-    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 60;
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || currentY;
+
     doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
     doc.text(`Total Amount: PHP ${trx.total.toLocaleString()}`, 14, finalY + 10);
-    
+
+    // Footer - line + text + page numbers (B/W)
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    const totalPages = ((doc as unknown) as { internal: { pages: unknown[] } }).internal.pages.length - 1;
+    for (let i = 1; i <= totalPages; i++) {
+      ((doc as unknown) as { setPage: (pageNum: number) => void }).setPage(i);
+      doc.setDrawColor(180, 180, 180);
+      doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
+      doc.text("Confidential - For Record Keeping Only", 14, pageHeight - 8);
+      doc.text(`Page ${i} of ${totalPages}`, pageWidth - 30, pageHeight - 8);
+    }
+
     doc.save(`Receipt_${trx.id}.pdf`);
   };
 

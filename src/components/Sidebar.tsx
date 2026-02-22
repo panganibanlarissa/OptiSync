@@ -155,7 +155,7 @@ export default function Sidebar({ children }: SidebarProps) {
           {userRole === "admin" && (
             <Link href="/settings" className={linkClass("/settings")}>
               <Settings size={18} />
-              Settings & AI Tuning
+              Settings
             </Link>
           )}
         </nav>
