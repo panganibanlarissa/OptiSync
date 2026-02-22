@@ -510,7 +510,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Streamlined Workflow</h2>
-            <p className="text-slate-500 text-lg">Managing the clinic's inventory has never been this simple.</p>
+            <p className="text-slate-500 text-lg">Managing the clinic inventory has never been this simple.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -552,17 +552,15 @@ export default function LandingPage() {
               <div>
                 <h5 className="font-bold text-slate-900 mb-4">Contacts</h5>
                 <ul className="space-y-3 text-slate-500">
-                  <li><a href="#" className="hover:text-[#0B3C8A]">Developers</a></li>
                   <li>202311183@gordoncollege.edu.ph</li>
                   <li>202310500@gordoncollege.edu.ph</li>
                 </ul>
               </div>
               <div>
-                <h5 className="font-bold text-slate-900 mb-4">System</h5>
+                <h5 className="font-bold text-slate-900 mb-4">Developers</h5>
                 <ul className="space-y-3 text-slate-500">
-                  <li><a href="#" className="hover:text-[#0B3C8A]">Inventory</a></li>
-                  <li><a href="#" className="hover:text-[#0B3C8A]">Transactions</a></li>
-                  <li><a href="#" className="hover:text-[#0B3C8A]">Forecasting</a></li>
+                  <li>Larissa Panganiban</li>
+                  <li>Rejean Zapanta</li>
                 </ul>
               </div>
             </div>

@@ -1,30 +1,28 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { motion, AnimatePresence, Variants } from "framer-motion"; 
-// 1. Import the hook
 import { useNotification } from "@/components/NotificationProvider"; 
 import { 
-  TrendingUp, 
-  DollarSign, 
-  CreditCard, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Download, 
+  ShoppingCart, 
+  Trash2, 
   Plus, 
-  Search, 
-  Filter, 
+  Minus, 
+  CreditCard, 
+  Banknote, 
+  Smartphone, 
+  User, 
   CheckCircle2, 
   X, 
-  Save, 
-  Trash2, 
-  Edit, 
-  AlertCircle, 
-  Calendar, 
-  Eye, 
-  AlertTriangle 
+  AlertTriangle,
+  Receipt,
+  History,
+  Search,
+  Wifi,
+  WifiOff,
+  RefreshCcw
 } from "lucide-react";
 
 // --- THEME CONSTANTS ---
@@ -33,847 +31,602 @@ const THEME_HOVER = "hover:bg-[#082F6E]";
 const THEME_TEXT = "text-[#0B3C8A]";
 const THEME_RING = "focus:ring-[#0B3C8A]";
 
-// --- MOCK DATA SOURCES ---
+// --- TYPESCRIPT INTERFACES ---
+interface Product {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  stock: number | null; 
+  imageColor: string;
+}
 
-const PRODUCT_CATALOG = [
-  { id: 1, name: "Ray-Ban Aviator (Frame)", price: 5500 },
-  { id: 2, name: "Oakley Holbrook (Frame)", price: 6200 },
-  { id: 3, name: "Generic Titanium Frame", price: 2500 },
-  { id: 4, name: "Multi-coated Lens (Service)", price: 1500 },
-  { id: 5, name: "Photochromic Lens (Service)", price: 2500 },
-  { id: 6, name: "Eye Exam (Service)", price: 800 },
-  { id: 7, name: "Contact Lens Solution 350ml", price: 450 },
-  { id: 8, name: "Air Optix Colors (Contact Lens)", price: 1800 },
+interface CartItem extends Product {
+  quantity: number;
+}
+
+interface Transaction {
+  id: string;
+  patientName: string;
+  items: CartItem[];
+  total: number;
+  paymentMethod: string;
+  date: Date;
+  status: "completed" | "voided" | "refunded";
+  synced: boolean;
+}
+
+// --- MOCK DATA FOR OPTICAL CLINIC ---
+const INITIAL_CATALOG: Product[] = [
+  { id: "FRM-001", name: "Ray-Ban Wayfarer Frame", category: "Frames", price: 4500, stock: 12, imageColor: "bg-slate-200" },
+  { id: "FRM-002", name: "Oakley Crosslink Frame", category: "Frames", price: 5500, stock: 8, imageColor: "bg-gray-200" },
+  { id: "LNS-001", name: "Essilor Crizal Prevencia", category: "Lenses", price: 3200, stock: 50, imageColor: "bg-blue-100" },
+  { id: "LNS-002", name: "Transition Signature Gen 8", category: "Lenses", price: 4000, stock: 30, imageColor: "bg-indigo-100" },
+  { id: "CNT-001", name: "Air Optix Colors (Monthly)", category: "Contacts", price: 1500, stock: 24, imageColor: "bg-teal-100" },
+  { id: "CNT-002", name: "Acuvue Oasys (Daily)", category: "Contacts", price: 2100, stock: 45, imageColor: "bg-cyan-100" },
+  { id: "SOL-001", name: "Opti-Free PureMoist 300ml", category: "Solutions", price: 450, stock: 15, imageColor: "bg-blue-50" },
+  { id: "ACC-001", name: "Microfiber Cleaning Kit", category: "Accessories", price: 150, stock: 100, imageColor: "bg-slate-100" },
 ];
 
-const SHORT_TERM_FORECAST = [
-  { month: "Jan '26", actual: 52000, forecast: 48000, label: "Last Month" },
-  { month: "Feb '26", actual: 49000, forecast: 51000, label: "Present" },
-  { month: "Mar '26", actual: null, forecast: 58000, label: "Next Month" },
-];
+const CATEGORIES = ["All", "Frames", "Lenses", "Contacts", "Solutions", "Accessories"];
 
-const YEARLY_FORECAST = [
-  { month: "Jan", revenue: 52000 },
-  { month: "Feb", revenue: 49000 },
-  { month: "Mar", revenue: 58000 },
-  { month: "Apr", revenue: 61000 },
-  { month: "May", revenue: 63500 },
-  { month: "Jun", revenue: 59000 },
-  { month: "Jul", revenue: 65000 },
-  { month: "Aug", revenue: 68000 },
-  { month: "Sep", revenue: 70000 },
-  { month: "Oct", revenue: 72000 },
-  { month: "Nov", revenue: 75000 },
-  { month: "Dec", revenue: 82000 },
-];
-
-const INITIAL_TRANSACTIONS = [
-  { 
-    id: "TRX-1024", date: "2026-02-15", customer: "Maria Santos", 
-    items: "Ray-Ban Aviator (Frame)", amount: 5500, status: "Paid", method: "Cash",
-    note: "Customer requested gold frame specifically." 
-  },
-  { 
-    id: "TRX-1023", date: "2026-02-15", customer: "John Cruz", 
-    items: "Contact Lens Solution 350ml", amount: 450, status: "Paid", method: "GCash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1022", date: "2026-02-14", customer: "Elena Reyes", 
-    items: "Eye Exam (Service)", amount: 800, status: "Paid", method: "Cash",
-    note: "Follow up check-up in 6 months." 
-  },
-  { 
-    id: "TRX-1021", date: "2026-02-14", customer: "Miguel Olaso", 
-    items: "Generic Titanium Frame", amount: 2500, status: "Paid", method: "Cash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1020", date: "2026-02-13", customer: "Sarah Lim", 
-    items: "Air Optix Colors (Contact Lens)", amount: 1800, status: "Paid", method: "Cash",
-    note: "Prescription: -2.00 / -2.25" 
-  },
-  { 
-    id: "TRX-1019", date: "2026-01-28", customer: "Roberto Dy", 
-    items: "Multi-coated Lens (Service)", amount: 1500, status: "Paid", method: "GCash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1018", date: "2026-01-15", customer: "Anna Lopez", 
-    items: "Generic Titanium Frame", amount: 2500, status: "Paid", method: "Cash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1017", date: "2025-12-20", customer: "Chris Tiu", 
-    items: "Oakley Holbrook (Frame)", amount: 6200, status: "Paid", method: "Cash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1016", date: "2025-12-10", customer: "Bea Alonzo", 
-    items: "Contact Lens Solution 350ml", amount: 450, status: "Paid", method: "GCash",
-    note: "" 
-  },
-  { 
-    id: "TRX-1015", date: "2025-12-05", customer: "Dingdong Dantes", 
-    items: "Eye Exam (Service)", amount: 800, status: "Paid", method: "Cash",
-    note: "Family package discount applied." 
-  },
-];
+type PaymentMethodType = "Cash" | "GCash" | "Card";
 
 // --- ANIMATION VARIANTS ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
-  visible: { 
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
+  visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
 
 const itemVariants: Variants = {
-  hidden: { y: 20, opacity: 0 },
-  visible: { 
-    y: 0, 
-    opacity: 1,
-    transition: { type: "spring", stiffness: 100 }
-  }
-};
-
-const modalVariants: Variants = {
-  hidden: { opacity: 0, scale: 0.95 },
-  visible: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.95 }
+  hidden: { y: 10, opacity: 0 },
+  visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }
 };
 
 export default function SalesPage() {
-  // --- STATE ---
-  const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [monthFilter, setMonthFilter] = useState("All"); 
-  const [showAllHistory, setShowAllHistory] = useState(false);
-  const [forecastView, setForecastView] = useState<"3month" | "yearly">("3month");
+  const { showNotification } = useNotification();
   
-  // Modal & Selection States
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+  // --- STATE ---
+  const [activeTab, setActiveTab] = useState<"pos" | "history">("pos");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  
+  // REAL-TIME INVENTORY STATE
+  const [products, setProducts] = useState<Product[]>(INITIAL_CATALOG);
+  
+  // Network Status
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  
+  // Cart State
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [patientName, setPatientName] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>("Cash");
+  const [discount, setDiscount] = useState<number>(0);
+  
+  // Transaction State
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
+  
+  // Void State
+  const [voidModalOpen, setVoidModalOpen] = useState(false);
+  const [transactionToVoid, setTransactionToVoid] = useState<string | null>(null);
 
-  // 2. Initialize the Notification Hook
-  const { showNotification } = useNotification(); 
-
-  // --- STATS LOGIC ---
-  const currentMonthStats = useMemo(() => {
-    const presentMonthPrefix = "2026-02";
-    const currentTransactions = transactions.filter(t => t.date.startsWith(presentMonthPrefix));
-
-    const totalRevenue = currentTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const operationalCost = totalRevenue * 0.35; 
-    const netProfit = totalRevenue - operationalCost;
-    const forecast = totalRevenue * 1.15;
-
-    return { totalRevenue, operationalCost, netProfit, forecast };
-  }, [transactions]);
-
-  const formatCurrency = (val: number) => 
-    "₱" + val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-  // --- FILTER LOGIC ---
-  const tableTransactions = useMemo(() => {
-    return transactions.filter(trx => {
-      const matchesSearch = 
-        trx.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        trx.customer.toLowerCase().includes(searchQuery.toLowerCase());
+  // --- FILTERING LOGIC (Aligned exactly with the Inventory Page) ---
+  const filteredProducts = products.filter((product) => {
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch = 
+      product.name.toLowerCase().includes(searchLower) || 
+      product.id.toLowerCase().includes(searchLower);
       
-      const matchesMonth = monthFilter === "All" || trx.date.startsWith(monthFilter);
+    const matchesCategory = selectedCategory === "All" || product.category === selectedCategory;
+    
+    return matchesSearch && matchesCategory;
+  });
 
-      return matchesSearch && matchesMonth;
-    });
-  }, [searchQuery, monthFilter, transactions]);
-
-  const displayedTransactions = showAllHistory 
-    ? tableTransactions 
-    : tableTransactions.slice(0, 5);
+  // --- CART CALCULATIONS ---
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const total = Math.max(0, subtotal - discount);
 
   // --- HANDLERS ---
-  const handleAddNew = (newData: any) => {
-    const newId = `TRX-${Math.floor(Math.random() * 9000) + 1000}`;
-    const newTrx = { 
-      id: newId, 
-      date: "2026-02-15", 
-      status: "Paid", 
-      ...newData 
+  const addToCart = (product: Product) => {
+    if (product.stock !== null && product.stock <= 0) {
+       showNotification("Item is out of stock!", "error");
+       return;
+    }
+
+    setCart(prev => {
+      const existing = prev.find(item => item.id === product.id);
+      if (existing) {
+        if (product.stock !== null && existing.quantity >= product.stock) {
+           showNotification("Cannot exceed available stock!", "error");
+           return prev;
+        }
+        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+      }
+      return [...prev, { ...product, quantity: 1 }];
+    });
+  };
+
+  const updateQuantity = (id: string, delta: number) => {
+    setCart(prev => prev.map(item => {
+      if (item.id === id) {
+        const productData = products.find(p => p.id === id);
+        const maxStock = productData?.stock;
+        
+        let newQty = Math.max(1, item.quantity + delta);
+        if (maxStock !== null && maxStock !== undefined && newQty > maxStock) {
+           newQty = maxStock;
+           showNotification("Maximum stock limit reached.", "error");
+        }
+        return { ...item, quantity: newQty };
+      }
+      return item;
+    }));
+  };
+
+  const removeFromCart = (id: string) => {
+    setCart(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleCheckout = () => {
+    if (cart.length === 0) {
+      showNotification("Cart is empty", "error");
+      return;
+    }
+
+    // 1. DEDUCT INVENTORY IN REAL-TIME
+    setProducts(prevProducts => prevProducts.map(p => {
+       const cartItem = cart.find(c => c.id === p.id);
+       if (cartItem && p.stock !== null) {
+          return { ...p, stock: p.stock - cartItem.quantity };
+       }
+       return p;
+    }));
+
+    // 2. LOG TRANSACTION
+    const newTransaction: Transaction = {
+      id: `TRX-${Math.floor(100000 + Math.random() * 900000)}`,
+      patientName: patientName || "Walk-in Patient",
+      items: [...cart],
+      total: total,
+      paymentMethod,
+      date: new Date(),
+      status: "completed",
+      synced: isOnline
     };
-    setTransactions([newTrx, ...transactions]);
-    setIsAddModalOpen(false);
+
+    setTransactions([newTransaction, ...transactions]);
+    setLastTransaction(newTransaction);
+    setShowCheckoutModal(true);
     
-    // 3. Trigger Success Notification
-    showNotification("Transaction added successfully!", "success");
-  };
-
-  const handleEditClick = (trx: any) => { 
-    setSelectedTransaction(trx); 
-    setIsEditModalOpen(true); 
-  };
-
-  const handleDeleteTrigger = () => { 
-    setIsEditModalOpen(false); 
-    setIsDeleteConfirmOpen(true); 
-  };
-  
-  const confirmDelete = () => {
-    if (selectedTransaction) {
-      setTransactions(prev => prev.filter(t => t.id !== selectedTransaction.id));
-      setIsDeleteConfirmOpen(false);
-      setSelectedTransaction(null);
-      // 3. Trigger Error/Delete Notification
-      showNotification("Transaction deleted.", "error");
+    // 3. RESET CART
+    setCart([]);
+    setPatientName("");
+    setDiscount(0);
+    
+    if (!isOnline) {
+      showNotification("Saved locally. Stock updated.", "success");
+    } else {
+      showNotification("Transaction completed and synced!", "success");
     }
   };
 
-  const handleSaveChanges = (updatedData: any) => {
-    setTransactions(prev => prev.map(t => 
-      t.id === selectedTransaction.id ? { ...t, ...updatedData } : t
-    ));
-    setIsEditModalOpen(false);
-    setSelectedTransaction(null);
-    // 3. Trigger Update Notification
-    showNotification("Changes saved successfully!", "success");
+  const toggleNetwork = () => {
+    if (!isOnline) {
+      setSyncing(true);
+      setTimeout(() => {
+        setTransactions(prev => prev.map(t => ({ ...t, synced: true })));
+        setSyncing(false);
+        setIsOnline(true);
+        showNotification("All offline transactions synced with server.", "success");
+      }, 1500);
+    } else {
+      setIsOnline(false);
+      showNotification("Switched to Offline Mode. PWA will cache sales locally.", "error");
+    }
   };
 
-  const handleExportPDF = () => {
+  const generateReceipt = (trx: Transaction) => {
     const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("M.T. OLASO OPTICAL CLINIC", 14, 20);
-    doc.setFontSize(12);
-    doc.text("Sales & Revenue Report", 14, 28);
-    
-    const filterName = monthFilter === 'All' 
-        ? 'All History'
-        : new Date(monthFilter + "-01").toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
+    doc.setFontSize(16);
+    doc.text("M.T. Olaso Optical Clinic", 14, 20);
     doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 35);
-    doc.text(`Period: ${filterName}`, 14, 40);
+    doc.text("Official Receipt", 14, 28);
+    doc.text(`Receipt No: ${trx.id}`, 14, 34);
+    doc.text(`Date: ${trx.date.toLocaleString()}`, 14, 40);
+    doc.text(`Patient: ${trx.patientName}`, 14, 46);
+    doc.text(`Payment Method: ${trx.paymentMethod}`, 14, 52);
 
-    const totalRevenue = tableTransactions.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalTxn = tableTransactions.length;
-    
-    doc.setDrawColor(0);
-    doc.rect(14, 45, 180, 25); 
-    doc.setFontSize(10);
-    doc.text("Total Revenue", 20, 55);
-    doc.setFontSize(14);
-    doc.text(`PHP ${totalRevenue.toLocaleString()}`, 20, 63);
-    
-    doc.setFontSize(10);
-    doc.text("Transactions", 100, 55);
-    doc.setFontSize(14);
-    doc.text(`${totalTxn}`, 100, 63);
-
-    const tableColumn = ["ID", "Date", "Customer", "Items", "Amount", "Method", "Notes"];
-    const tableRows = tableTransactions.map(trx => [
-      trx.id, 
-      trx.date, 
-      trx.customer, 
-      trx.items, 
-      `P${trx.amount.toLocaleString()}`, 
-      trx.method,
-      trx.note || "" 
+    const tableData = trx.items.map(item => [
+      item.name,
+      item.quantity.toString(),
+      `PHP ${item.price.toLocaleString()}`,
+      `PHP ${(item.quantity * item.price).toLocaleString()}`
     ]);
 
     autoTable(doc, {
-      startY: 80,
-      head: [tableColumn],
-      body: tableRows,
-      theme: 'plain',
-      styles: { fontSize: 9, cellPadding: 2 },
-      headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
-      columnStyles: { 6: { cellWidth: 40 } }
+      startY: 60,
+      head: [["Item Description", "Qty", "Unit Price", "Amount"]],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [11, 60, 138] }
     });
 
-    doc.save(`Sales_Report_${monthFilter}.pdf`);
+    // Safely get the final Y position from the table
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 60;
+    doc.setFontSize(12);
+    doc.text(`Total Amount: PHP ${trx.total.toLocaleString()}`, 14, finalY + 10);
     
-    // 3. Trigger Export Notification
-    showNotification("PDF Report Downloaded.", "success");
+    doc.save(`Receipt_${trx.id}.pdf`);
+  };
+
+  const handleVoid = () => {
+    if (transactionToVoid) {
+      const trxToRefund = transactions.find(t => t.id === transactionToVoid);
+      
+      // RESTOCK ITEMS IN REAL-TIME
+      if (trxToRefund) {
+        setProducts(prevProducts => prevProducts.map(p => {
+           const refundedItem = trxToRefund.items.find(c => c.id === p.id);
+           if (refundedItem && p.stock !== null) {
+              return { ...p, stock: p.stock + refundedItem.quantity };
+           }
+           return p;
+        }));
+      }
+
+      setTransactions(prev => prev.map(t => t.id === transactionToVoid ? { ...t, status: "voided" } : t));
+      setVoidModalOpen(false);
+      setTransactionToVoid(null);
+      showNotification("Transaction voided. Stock returned to inventory instantly.", "success");
+    }
   };
 
   return (
-    <motion.div 
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      className="min-h-screen mt-4 p-2 lg:p-6 font-sans text-slate-800"
-    >
-      <div className="max-w-7xl mx-auto space-y-6">
-
-        {/* 1. HEADER */}
-        <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-900">
-              <TrendingUp className={THEME_TEXT} /> Sales & Revenue
-            </h1>
-            <p className="text-sm text-slate-500">
-              Track financial performance and transaction history.
-            </p>
-          </div>
-          <div className="flex gap-2">
+    // FULL PAGE SCROLL: Allows content to scroll naturally
+    <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
+      
+      {/* HEADER & TABS */}
+      <div className="shrink-0 flex items-center justify-between mb-2 sm:mb-4 border-b border-gray-200 pb-2">
+         <div className="flex items-center gap-2 sm:gap-4">
             <button 
-              onClick={handleExportPDF} 
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
+              onClick={() => setActiveTab("pos")}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 font-bold text-[11px] sm:text-sm rounded-t-lg transition-colors border-b-2 ${activeTab === 'pos' ? 'border-[#0B3C8A] text-[#0B3C8A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
             >
-              <Download size={16} /> Export PDF
+              <ShoppingCart size={16} className="sm:w-4.5 sm:h-4.5"/> Point of Sale
             </button>
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsAddModalOpen(true)} 
-              className={`flex items-center gap-2 ${THEME_BG} text-white px-4 py-2 rounded-lg text-sm font-medium ${THEME_HOVER} transition-colors shadow-sm`}
+            <button 
+              onClick={() => setActiveTab("history")}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 font-bold text-[11px] sm:text-sm rounded-t-lg transition-colors border-b-2 ${activeTab === 'history' ? 'border-[#0B3C8A] text-[#0B3C8A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
             >
-              <Plus size={16} /> New Sale
-            </motion.button>
-          </div>
-        </motion.div>
+              <History size={16} className="sm:w-4.5 sm:h-4.5"/> Transaction History
+            </button>
+         </div>
 
-        {/* 2. STATS CARDS */}
-        <motion.div variants={containerVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatsCard 
-            title="Revenue (Present Month)" 
-            value={formatCurrency(currentMonthStats.totalRevenue)} 
-            trend="+12.5%" 
-            isPositive={true} 
-            icon={<DollarSign size={20} className="text-white" />} 
-            color="bg-emerald-500"
-          />
-          <StatsCard 
-            title="Net Profit (Present Month)" 
-            value={formatCurrency(currentMonthStats.netProfit)} 
-            trend="+8.2%" 
-            isPositive={true} 
-            icon={<TrendingUp size={20} className="text-white" />} 
-            color={THEME_BG} 
-          />
-          <StatsCard 
-            title="Operational Cost" 
-            value={formatCurrency(currentMonthStats.operationalCost)} 
-            trend="+2.1%" 
-            isPositive={false} 
-            icon={<CreditCard size={20} className="text-white" />} 
-            color="bg-orange-500"
-          />
-           <StatsCard 
-            title="Forecast (Next Month)" 
-            value={formatCurrency(currentMonthStats.forecast)} 
-            trend="Very High Demand" 
-            isPositive={true} 
-            icon={<Eye size={20} className="text-white" />} 
-            color="bg-purple-500"
-          />
-        </motion.div>
+         {/* OFFLINE RESILIENCE TOGGLE */}
+         <button 
+           onClick={toggleNetwork}
+           className={`flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-[10px] font-bold transition-all shadow-sm ${
+             syncing ? 'bg-blue-100 text-blue-600' :
+             isOnline ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
+           }`}
+         >
+           {syncing ? <RefreshCcw size={12} className="animate-spin" /> : 
+            isOnline ? <Wifi size={12}/> : <WifiOff size={12}/>}
+           <span className="hidden sm:inline">{syncing ? 'SYNCING...' : isOnline ? 'ONLINE' : 'OFFLINE MODE'}</span>
+         </button>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {activeTab === "pos" ? (
+        /* === POS TAB === */
+        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(98vh-180px)]">
           
-          {/* 3. CHART: REVENUE FORECAST */}
-          <motion.div variants={itemVariants} className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-              <div>
-                <h3 className="font-bold text-slate-800 text-lg">Revenue Forecast</h3>
-                <p className="text-xs text-slate-500">
-                    {forecastView === '3month' 
-                      ? "Past, Present & Future Comparison" 
-                      : "Full Year Trend (2026)"}
-                </p>
-              </div>
-              
-              <div className="flex items-center gap-4">
-                  {/* LEGEND */}
-                  <div className="flex gap-3 text-xs bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100">
-                    <div className="flex items-center gap-1.5">
-                        <div className={`w-2.5 h-2.5 rounded-sm ${THEME_BG}`}></div>
-                        <span className="text-slate-600 font-medium">Actual</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-sm bg-purple-100 border border-purple-300"></div>
-                        <span className="text-slate-600 font-medium">Predicted</span>
-                    </div>
-                  </div>
+          {/* LEFT: PRODUCT SELECTION */}
+          <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
+             
+             <div className="shrink-0 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
+                <div className="relative group">
+                  <Search className={`absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:${THEME_TEXT}`} size={16} />
+                  <input 
+                    type="text" 
+                    placeholder="Search catalog items..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className={`w-full pl-8 sm:pl-10 pr-8 sm:pr-10 py-1.5 sm:py-2.5 rounded-lg border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-2 ${THEME_RING}`}
+                  />
+                  {searchQuery.trim() && (
+                    <button 
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Clear search"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                   {CATEGORIES.map(cat => (
+                     <button 
+                       key={cat}
+                       onClick={() => setSelectedCategory(cat)}
+                       className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[9px] sm:text-xs font-bold whitespace-nowrap transition-colors ${selectedCategory === cat ? `${THEME_BG} text-white shadow-md` : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                     >
+                       {cat}
+                     </button>
+                   ))}
+                </div>
+             </div>
 
-                  {/* VIEW TOGGLE */}
-                  <div className="flex bg-slate-100 p-1 rounded-lg">
-                    <button 
-                        onClick={() => setForecastView('3month')}
-                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                        forecastView === '3month' 
-                            ? 'bg-white text-slate-800 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                    >
-                        3-Month
-                    </button>
-                    <button 
-                        onClick={() => setForecastView('yearly')}
-                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                        forecastView === 'yearly' 
-                            ? 'bg-white text-slate-800 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                    >
-                        Yearly
-                    </button>
-                  </div>
-              </div>
-            </div>
-            
-            {/* 3-MONTH VIEW */}
-            {forecastView === '3month' && (
-                <div className="h-64 w-full flex items-end justify-around gap-4 px-2 border-b border-slate-100 pb-2">
-                {SHORT_TERM_FORECAST.map((data, i) => {
-                    const maxVal = 70000;
-                    const actualHeight = data.actual ? (data.actual / maxVal) * 100 : 0;
-                    const forecastHeight = (data.forecast / maxVal) * 100;
-                    return (
-                    <div key={i} className="flex flex-col items-center justify-end h-full w-24 sm:w-32 gap-3 group relative cursor-help">
-                        <div className="relative w-full max-w-[60px] h-full flex items-end justify-center">
-                        {/* Forecast Bar */}
+             {/* Inner scroll container for products only */}
+              <div className="flex-1 overflow-y-auto p-2 sm:p-4 bg-gray-50/50 lg:min-h-0">
+                <motion.div 
+                  key={`product-grid-${selectedCategory}-${searchQuery}`} // Add composite key
+                  variants={containerVariants} 
+                  initial="hidden" 
+                  animate="visible" 
+                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
+                >
+                  <AnimatePresence mode="popLayout">
+                    {filteredProducts.length > 0 ? (
+                      filteredProducts.map(product => (
                         <motion.div 
-                          initial={{ height: 0 }}
-                          animate={{ height: `${forecastHeight}%` }}
-                          transition={{ duration: 0.8, delay: i * 0.1 }}
-                          className="w-full bg-purple-50 border border-dashed border-purple-300 rounded-t-sm absolute bottom-0" 
-                        ></motion.div>
-                        
-                        {/* Actual Bar */}
-                        {data.actual !== null && (
-                            <motion.div 
-                              initial={{ height: 0 }}
-                              animate={{ height: `${actualHeight}%` }}
-                              transition={{ duration: 0.8, delay: i * 0.1 + 0.2 }}
-                              className={`w-full ${THEME_BG} rounded-t-sm z-10 hover:opacity-90 shadow-md`} 
-                            ></motion.div>
-                        )}
-                        <div className="opacity-0 group-hover:opacity-100 absolute -top-16 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl whitespace-nowrap z-50 pointer-events-none transition-opacity">
-                            <div className="font-bold border-b border-slate-600 pb-1 mb-1">{data.month}</div>
-                            <div>Actual: {data.actual ? `₱${data.actual.toLocaleString()}` : 'Pending'}</div>
-                            <div className="text-purple-300">Forecast: ₱{data.forecast.toLocaleString()}</div>
-                        </div>
-                        </div>
-                        <div className="text-center">
-                            <span className="block text-sm font-bold text-slate-700">{data.month}</span>
-                            <span className="block text-[10px] text-slate-400 uppercase tracking-wider">{data.label}</span>
-                        </div>
-                    </div>
-                    );
-                })}
-                </div>
-            )}
-
-            {/* YEARLY VIEW */}
-            {forecastView === 'yearly' && (
-                <div className="h-64 w-full flex items-end justify-between gap-1 sm:gap-2 px-2 border-b border-slate-100 pb-2">
-                    {YEARLY_FORECAST.map((data, i) => {
-                        const maxVal = 90000;
-                        const height = (data.revenue / maxVal) * 100;
-                        const isPastOrPresent = i <= 1; // Jan, Feb
-                        return (
-                            <div key={i} className="flex flex-col items-center justify-end h-full flex-1 gap-1 group relative cursor-help">
-                                <motion.div 
-                                    initial={{ height: 0 }}
-                                    animate={{ height: `${height}%` }}
-                                    transition={{ duration: 0.5, delay: i * 0.05 }}
-                                    className={`w-full max-w-[24px] rounded-t-sm ${
-                                      isPastOrPresent ? THEME_BG : "bg-purple-200"
-                                    }`} 
-                                ></motion.div>
-                                <span className="text-[10px] font-medium text-slate-500">{data.month}</span>
-                                <div className="opacity-0 group-hover:opacity-100 absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl whitespace-nowrap z-50 pointer-events-none">
-                                    <div className="font-bold">{data.month} 2026</div>
-                                    <div>₱{data.revenue.toLocaleString()}</div>
-                                </div>
-                            </div>
-                        )
-                    })}
-                </div>
-            )}
-          </motion.div>
-
-          {/* 4. SIDEBAR */}
-          <motion.div variants={itemVariants} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col">
-             <h3 className="font-bold text-slate-800 text-lg mb-4">Categories Overview</h3>
-             <div className="space-y-5 flex-1">
-                <CategoryProgress label="Prescription Frames" value={45} amount="₱58,200" color={THEME_BG} />
-                <CategoryProgress label="Multicoated Lenses" value={30} amount="₱32,150" color="bg-cyan-600" />
-                <CategoryProgress label="Contact Lenses" value={15} amount="₱18,400" color="bg-teal-600" />
-             </div>
-             <div className="mt-6 p-4 bg-purple-50 rounded-lg border border-purple-100 flex gap-3">
-                <AlertCircle className="text-purple-600 shrink-0" size={18} />
-                <div>
-                   <h4 className="text-sm font-bold text-purple-900 mb-1">Smart Forecast</h4>
-                   <p className="text-xs text-purple-800 leading-snug">
-                     Demand for <strong>Photochromic Lenses</strong> is trending up in 2026.
-                   </p>
-                </div>
-             </div>
-          </motion.div>
-        </div>
-
-        {/* 5. TABLE */}
-        <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[400px]">
-           <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-4">
-              <h3 className="font-bold text-slate-800 text-lg">Transaction History</h3>
-              <div className="flex gap-2 w-full sm:w-auto">
-                 {/* Search */}
-                 <div className="relative flex-1 sm:flex-none sm:w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <input 
-                      type="text" 
-                      placeholder="Search ID or Name..." 
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className={`pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 ${THEME_RING} w-full`}
-                    />
-                 </div>
-                 {/* Filter */}
-                 <div className="relative">
-                    <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                    <select 
-                      value={monthFilter}
-                      onChange={(e) => setMonthFilter(e.target.value)}
-                      className="appearance-none pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none cursor-pointer hover:bg-slate-50 font-medium"
-                    >
-                      <option value="All">All History</option>
-                      <option value="2026-02">February 2026 (Present)</option>
-                      <option value="2026-01">January 2026</option>
-                      <option value="2025-12">December 2025</option>
-                    </select>
-                    <Filter size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                 </div>
-              </div>
-           </div>
-           
-           <div className="overflow-x-auto pb-4">
-             <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-semibold border-b border-slate-100">
-                   <tr>
-                      <th className="px-6 py-4">ID</th>
-                      <th className="px-6 py-4">Date</th>
-                      <th className="px-6 py-4">Customer</th>
-                      <th className="px-6 py-4">Items</th>
-                      <th className="px-6 py-4">Amount</th>
-                      <th className="px-6 py-4">Payment</th>
-                      <th className="px-6 py-4">Status</th>
-                      <th className="px-6 py-4 text-right">Edit</th>
-                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                   {displayedTransactions.length > 0 ? (
-                     displayedTransactions.map((trx, index) => (
-                        <motion.tr 
+                          key={product.id} 
+                          variants={itemVariants} 
+                          layout
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.05 }}
-                          key={trx.id} 
-                          onClick={() => handleEditClick(trx)} 
-                          className="hover:bg-slate-50 transition-colors cursor-pointer"
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={{ duration: 0.2 }}
+                          onClick={() => addToCart(product)}
+                          className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${product.stock === 0 ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:shadow-md hover:border-blue-300'}`}
                         >
-                           <td className="px-6 py-4 font-mono text-xs font-medium text-slate-500">{trx.id}</td>
-                           <td className="px-6 py-4">{trx.date}</td>
-                           <td className="px-6 py-4 font-medium text-slate-900">{trx.customer}</td>
-                           <td className="px-6 py-4 max-w-xs truncate" title={trx.items}>{trx.items}</td>
-                           <td className="px-6 py-4 font-bold text-slate-800">₱{trx.amount.toLocaleString()}</td>
-                           <td className="px-6 py-4 text-slate-500 text-xs uppercase">{trx.method}</td>
-                           <td className="px-6 py-4">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                                <CheckCircle2 size={12}/> Paid
+                          <div className={`w-full aspect-4/3 sm:aspect-video ${product.imageColor} rounded-lg mb-1.5 sm:mb-2 flex items-center justify-center`}>
+                            <span className="text-[9px] sm:text-[10px] font-mono font-bold text-black/30">{product.id}</span>
+                          </div>
+                          <h3 className="text-[11px] sm:text-xs font-semibold text-gray-800 line-clamp-2 leading-tight flex-1">{product.name}</h3>
+                          <div className="mt-1.5 sm:mt-2 flex justify-between items-end">
+                            <span className={`${THEME_TEXT} font-bold text-xs sm:text-sm`}>₱{product.price.toLocaleString()}</span>
+                            {product.stock !== null && (
+                              <span className={`text-[8px] sm:text-[9px] font-bold ${product.stock <= 0 ? 'text-red-600' : product.stock < 10 ? 'text-orange-500' : 'text-gray-400'}`}>
+                                {product.stock <= 0 ? 'OUT' : `${product.stock} left`}
                               </span>
-                           </td>
-                           <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  handleEditClick(trx); 
-                                }} 
-                                className={`p-2 rounded-lg text-slate-400 hover:${THEME_TEXT} hover:bg-slate-100 transition-colors`}
-                              >
-                                 <Edit size={18} />
-                              </button>
-                           </td>
-                        </motion.tr>
-                     ))
-                   ) : (
-                     <tr>
-                       <td colSpan={8} className="px-6 py-10 text-center text-slate-400">
-                         No transactions found for the selected period.
-                       </td>
-                     </tr>
-                   )}
-                </tbody>
-             </table>
-           </div>
-           
-           {tableTransactions.length > 5 && (
-             <div className="p-4 border-t border-slate-100 text-center bg-slate-50/50">
+                            )}
+                          </div>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <motion.div 
+                        key="no-results"
+                        initial={{ opacity: 0 }} 
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="col-span-full py-10 text-center text-gray-500 text-sm"
+                      >
+                        No products found matching your search.
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              </div>
+          </div>
+
+          {/* RIGHT: CART & CHECKOUT */}
+          <div className="w-full lg:w-95 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 shrink-0 lg:min-h-0">
+             
+             <div className="shrink-0 p-2.5 sm:p-4 border-b border-gray-100 bg-slate-50 flex flex-col gap-2 sm:gap-3">
+                <div className="flex items-center justify-between">
+                   <h2 className="font-bold text-gray-800 text-sm sm:text-base flex items-center gap-1.5 sm:gap-2"><ShoppingCart size={16} className="sm:w-4.5 sm:h-4.5"/> Current Order</h2>
+                   <span className="bg-blue-100 text-[#0B3C8A] text-[10px] sm:text-[11px] font-bold px-2 py-0.5 sm:py-1 rounded-full">{cart.length} Items</span>
+                </div>
+                <div className="relative">
+                  <User className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                  <input 
+                    type="text" 
+                    placeholder="Patient Name (Optional)" 
+                    value={patientName}
+                    onChange={(e) => setPatientName(e.target.value)}
+                    className={`w-full pl-8 sm:pl-9 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 ${THEME_RING}`}
+                  />
+                </div>
+             </div>
+
+             {/* Inner scroll container for Cart Items */}
+             <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 sm:space-y-2 lg:min-h-0">
+               {cart.length === 0 ? (
+                 <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-1 sm:space-y-2">
+                    <ShoppingCart size={36} className="sm:w-12 sm:h-12 opacity-20"/>
+                    <p className="text-xs sm:text-sm font-medium">Cart is empty</p>
+                 </div>
+               ) : (
+                 <AnimatePresence>
+                   {cart.map(item => (
+                     <motion.div key={item.id} layout initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+                       className="flex items-center justify-between bg-white border border-gray-100 p-2 sm:p-2.5 rounded-lg shadow-sm"
+                     >
+                        <div className="flex-1 min-w-0 pr-2">
+                           <h4 className="text-[10px] sm:text-[11px] font-bold text-gray-800 truncate">{item.name}</h4>
+                           <div className="text-[9px] sm:text-[10px] text-gray-500 font-mono">₱{item.price.toLocaleString()}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                           <div className="flex items-center border border-gray-200 rounded-md">
+                             <button onClick={() => updateQuantity(item.id, -1)} className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"><Minus size={12}/></button>
+                             <span className="w-4 sm:w-5 text-center text-[10px] sm:text-[11px] font-bold">{item.quantity}</span>
+                             <button onClick={() => updateQuantity(item.id, 1)} className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"><Plus size={12}/></button>
+                           </div>
+                           <button onClick={() => removeFromCart(item.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                             <Trash2 size={14}/>
+                           </button>
+                        </div>
+                     </motion.div>
+                   ))}
+                 </AnimatePresence>
+               )}
+             </div>
+
+             <div className="shrink-0 p-2.5 sm:p-4 border-t border-gray-100 bg-slate-50">
+                <div className="grid grid-cols-3 gap-1 sm:gap-2 mb-2 sm:mb-4">
+                  {[
+                    { id: 'Cash', icon: Banknote },
+                    { id: 'GCash', icon: Smartphone },
+                    { id: 'Card', icon: CreditCard }
+                  ].map(method => (
+                    <button 
+                      key={method.id} onClick={() => setPaymentMethod(method.id as PaymentMethodType)}
+                      className={`flex flex-col items-center justify-center py-1 sm:py-2 rounded-md sm:rounded-lg border text-[9px] sm:text-[10px] font-bold transition-all ${paymentMethod === method.id ? `border-[#0B3C8A] bg-blue-50 ${THEME_TEXT} shadow-sm` : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'}`}
+                    >
+                      <method.icon size={12} className="sm:w-3.5 sm:h-3.5 mb-0.5 sm:mb-1"/> {method.id}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-1 sm:space-y-1.5 mb-2 sm:mb-4">
+                   <div className="flex justify-between text-[10px] sm:text-[11px] text-gray-500">
+                     <span>Subtotal</span><span>₱{subtotal.toLocaleString()}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-gray-500">
+                     <span>Discount</span>
+                     <input type="number" value={discount || ''} onChange={(e) => setDiscount(Number(e.target.value))} placeholder="0" className="w-12 sm:w-16 px-1 py-0.5 text-right border border-gray-200 rounded"/>
+                   </div>
+                   <div className="flex justify-between text-sm sm:text-base font-black text-gray-800 pt-1.5 sm:pt-2 border-t border-gray-200">
+                     <span>Total</span><span className={THEME_TEXT}>₱{total.toLocaleString()}</span>
+                   </div>
+                </div>
+
                 <button 
-                  onClick={() => setShowAllHistory(!showAllHistory)} 
-                  className={`text-sm font-medium ${THEME_TEXT} hover:underline transition-all`}
+                  onClick={handleCheckout} disabled={cart.length === 0}
+                  className={`w-full py-1.5 sm:py-2.5 rounded-md sm:rounded-lg font-bold text-white shadow-md transition-all text-xs sm:text-sm ${cart.length === 0 ? 'bg-gray-400 cursor-not-allowed' : `${THEME_BG} ${THEME_HOVER}`}`}
                 >
-                  {showAllHistory ? "Show Less" : `View All History (${tableTransactions.length})`}
+                  Pay ₱{total.toLocaleString()}
                 </button>
              </div>
-           )}
+          </div>
+        </div>
+
+      ) : (
+        /* === TRANSACTION HISTORY TAB === */
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(98vh-180px)]">
+           <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200 flex justify-between items-center">
+              <div>
+                <h2 className="text-base sm:text-lg font-bold text-gray-800">Today&apos;s Transactions</h2>
+                <p className="text-[10px] sm:text-[11px] text-gray-500">View daily sales, generate receipts, and process refunds.</p>
+              </div>
+           </div>
+
+           <div className="flex-1 min-h-0 overflow-y-auto lg:min-h-0">
+             {transactions.length === 0 ? (
+               <div className="py-20 text-center text-gray-400 flex flex-col items-center">
+                  <History size={36} className="sm:w-12 sm:h-12 mb-3 sm:mb-4 opacity-20"/>
+                  <p className="text-xs sm:text-sm">No transactions recorded today.</p>
+               </div>
+             ) : (
+               <div className="overflow-x-auto w-full">
+                 <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
+                   <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
+                     <tr>
+                       <th className="p-2 sm:p-3">Receipt No.</th>
+                       <th className="p-2 sm:p-3">Time</th>
+                       <th className="p-2 sm:p-3">Patient Name</th>
+                       <th className="p-2 sm:p-3">Method</th>
+                       <th className="p-2 sm:p-3 text-right">Amount</th>
+                       <th className="p-2 sm:p-3 text-center">Sync</th>
+                       <th className="p-2 sm:p-3 text-center">Status</th>
+                       <th className="p-2 sm:p-3 text-right">Actions</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-gray-100">
+                     {transactions.map(trx => (
+                       <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
+                         <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id}</td>
+                         <td className="p-2 sm:p-3 text-gray-600">{trx.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                         <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
+                         <td className="p-2 sm:p-3 text-gray-600">{trx.paymentMethod}</td>
+                         <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+                         <td className="p-2 sm:p-3 text-center">
+                           {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
+                         </td>
+                         <td className="p-2 sm:p-3 text-center">
+                           <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                             {trx.status}
+                           </span>
+                         </td>
+                         <td className="p-2 sm:p-3 text-right">
+                           <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                              <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
+                                <Receipt size={14}/>
+                              </button>
+                              {trx.status === 'completed' && (
+                                <button onClick={() => { setTransactionToVoid(trx.id); setVoidModalOpen(true); }} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
+                                  <X size={14}/>
+                                </button>
+                              )}
+                           </div>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             )}
+           </div>
         </motion.div>
-      </div>
+      )}
 
       {/* --- MODALS --- */}
+      
+      {/* Checkout Success Modal */}
       <AnimatePresence>
-        {isAddModalOpen && (
-            <AddSaleModal onClose={() => setIsAddModalOpen(false)} onSave={handleAddNew} />
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {isEditModalOpen && selectedTransaction && (
-            <EditSaleModal 
-            transaction={selectedTransaction} 
-            onClose={() => setIsEditModalOpen(false)} 
-            onSave={handleSaveChanges} 
-            onDelete={handleDeleteTrigger} 
-            />
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {isDeleteConfirmOpen && (
-            <DeleteConfirmationModal 
-            onClose={() => setIsDeleteConfirmOpen(false)} 
-            onConfirm={confirmDelete} 
-            itemName={selectedTransaction?.id} 
-            />
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
-// --- SUB-COMPONENTS ---
-
-function StatsCard({ title, value, trend, isPositive, icon, color }: any) {
-  return (
-    <motion.div 
-      variants={itemVariants}
-      whileHover={{ y: -5, boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)" }}
-      className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex items-start justify-between"
-    >
-       <div>
-          <p className="text-xs font-medium text-slate-500 mb-1">{title}</p>
-          <h3 className="text-2xl font-bold text-slate-800 mb-2">{value}</h3>
-          <div className={`flex items-center gap-1 text-xs font-medium ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
-             {isPositive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} <span>{trend}</span>
-          </div>
-       </div>
-       <div className={`p-3 rounded-lg shadow-lg shadow-slate-200/50 ${color}`}>{icon}</div>
-    </motion.div>
-  );
-}
-
-function CategoryProgress({ label, value, amount, color }: any) {
-   return (
-      <div>
-         <div className="flex justify-between text-sm mb-1">
-            <span className="font-medium text-slate-700">{label}</span>
-            <span className="font-bold text-slate-900">{amount}</span>
-         </div>
-         <div className="w-full bg-slate-100 rounded-full h-2">
-            <motion.div 
-                initial={{ width: 0 }}
-                whileInView={{ width: `${value}%` }}
-                viewport={{ once: true }}
-                transition={{ duration: 1, ease: "easeOut" }}
-                className={`h-2 rounded-full ${color}`} 
-            ></motion.div>
-         </div>
-      </div>
-   );
-}
-
-function AddSaleModal({ onClose, onSave }: { onClose: () => void, onSave: (data:any) => void }) {
-  const [customer, setCustomer] = useState("");
-  const [itemText, setItemText] = useState("");
-  const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("Cash");
-  const [note, setNote] = useState("");
-
-  const handleProductSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedName = e.target.value;
-    const product = PRODUCT_CATALOG.find(p => p.name === selectedName);
-    setItemText(selectedName);
-    if (product) setAmount(product.price.toString());
-  };
-
-  const handleSave = () => {
-    if(!customer.trim() || !amount) return alert("Please enter customer name and amount.");
-    onSave({ 
-        customer, 
-        items: itemText || "General Service", 
-        amount: Number(amount), 
-        method, 
-        note 
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <motion.div 
-        variants={modalVariants}
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]"
-      >
-         <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50 rounded-t-xl">
-            <h2 className="text-lg font-bold text-slate-800">New Transaction</h2>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={20} /></button>
-         </div>
-         <div className="p-6 space-y-4 overflow-y-auto">
-            {/* Form Fields */}
-            <div>
-               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Customer Info</label>
-               <input 
-                 type="text" 
-                 placeholder="Customer Name" 
-                 value={customer} 
-                 onChange={e => setCustomer(e.target.value)} 
-                 className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING} mb-2`} 
-               />
-               <input type="text" placeholder="Phone Number (Optional)" className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`} />
-            </div>
-            <div>
-               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Select Item</label>
-               <div className="flex gap-2 mb-2">
-                  <select value={itemText} onChange={handleProductSelect} className={`flex-1 p-2.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 ${THEME_RING}`}>
-                     <option value="">-- Choose Product --</option>
-                     {PRODUCT_CATALOG.map((prod) => (<option key={prod.id} value={prod.name}>{prod.name}</option>))}
-                  </select>
-                  <input type="number" placeholder="Qty" className={`w-20 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`} defaultValue={1} />
-               </div>
-               <button className={`text-xs font-medium ${THEME_TEXT} hover:underline flex items-center gap-1`}><Plus size={12} /> Add another item</button>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-               <div>
-                 <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Payment Method</label>
-                 <select value={method} onChange={e => setMethod(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 ${THEME_RING}`}>
-                   <option value="Cash">Cash</option>
-                   <option value="GCash">GCash</option>
-                 </select>
-               </div>
-               <div>
-                 <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Amount Paid (₱)</label>
-                 <input type="number" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING} font-bold`} />
-               </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Notes</label>
-              <textarea 
-                rows={2} 
-                placeholder="Prescription notes or remarks..." 
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`}
-              ></textarea>
-            </div>
-         </div>
-         <div className="p-5 border-t border-slate-100 bg-slate-50 rounded-b-xl flex gap-3">
-            <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-slate-700 font-medium hover:bg-white transition-colors">Cancel</button>
-            <button onClick={handleSave} className={`flex-1 px-4 py-2 ${THEME_BG} text-white rounded-lg font-medium ${THEME_HOVER} transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/10`}>
-              <Save size={18} /> Record Sale
-            </button>
-         </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function EditSaleModal({ transaction, onClose, onSave, onDelete }: { transaction: any, onClose: () => void, onSave: (data:any) => void, onDelete: () => void }) {
-  const [customer, setCustomer] = useState(transaction.customer);
-  const [itemText, setItemText] = useState(transaction.items);
-  const [amount, setAmount] = useState(transaction.amount);
-  const [method, setMethod] = useState(transaction.method);
-  const [note, setNote] = useState(transaction.note || ""); 
-
-  const handleUpdate = () => { onSave({ customer, items: itemText, amount: Number(amount), method, note }); };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <motion.div 
-        variants={modalVariants}
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]"
-      >
-         <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50 rounded-t-xl">
-            <div><h2 className="text-lg font-bold text-slate-800">Edit Transaction</h2><p className="text-xs text-slate-500 font-mono">{transaction.id}</p></div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={20} /></button>
-         </div>
-         <div className="p-6 space-y-4 overflow-y-auto">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Customer Info</label>
-              <input type="text" value={customer} onChange={(e) => setCustomer(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Items</label>
-              <input type="text" value={itemText} onChange={(e) => setItemText(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-               <div>
-                 <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Payment</label>
-                 <select value={method} onChange={(e) => setMethod(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 ${THEME_RING}`}>
-                   <option value="Cash">Cash</option>
-                   <option value="GCash">GCash</option>
-                 </select>
-               </div>
-               <div>
-                 <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Amount</label>
-                 <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`} />
-               </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Notes</label>
-              <textarea 
-                rows={2} 
-                placeholder="Prescription notes or remarks..." 
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                className={`w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 ${THEME_RING}`}
-              ></textarea>
-            </div>
-         </div>
-         <div className="p-5 border-t border-slate-100 bg-slate-50 rounded-b-xl flex justify-between items-center gap-3">
-            <button onClick={onDelete} className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"><Trash2 size={16} /> Delete</button>
-            <div className="flex gap-3">
-                <button onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 text-sm font-medium hover:bg-white transition-colors">Cancel</button>
-                <button onClick={handleUpdate} className={`px-4 py-2 ${THEME_BG} text-white rounded-lg text-sm font-medium ${THEME_HOVER} transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/10`}>Save Changes</button>
-            </div>
-         </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function DeleteConfirmationModal({ onClose, onConfirm, itemName }: { onClose: () => void, onConfirm: () => void, itemName: string }) {
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
-            <motion.div 
-              variants={modalVariants}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 text-center"
-            >
-                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600"><AlertTriangle size={24} /></div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">Delete Transaction?</h3>
-                <p className="text-sm text-slate-500 mb-6">Are you sure you want to delete <span className="font-mono text-slate-700 font-bold">{itemName}</span>? This action cannot be undone.</p>
-                <div className="flex gap-3 justify-center">
-                    <button onClick={onClose} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors shadow-sm">Confirm Delete</button>
+        {showCheckoutModal && lastTransaction && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-emerald-600">
+                   <CheckCircle2 size={28} className="sm:w-8 sm:h-8" />
                 </div>
-            </motion.div>
-        </div>
-    );
+                <h2 className="text-lg sm:text-xl font-black text-gray-800 mb-1">Payment Successful</h2>
+                <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4 font-mono">{lastTransaction.id}</p>
+                <div className="text-2xl sm:text-3xl font-black text-[#0B3C8A] mb-5 sm:mb-6">₱{lastTransaction.total.toLocaleString()}</div>
+                
+                <div className="flex flex-col gap-2">
+                   <button onClick={() => generateReceipt(lastTransaction)} className={`w-full py-2 sm:py-2.5 rounded-lg border border-gray-200 text-gray-700 text-xs sm:text-sm font-bold hover:bg-gray-50 flex justify-center items-center gap-2 transition-colors`}>
+                     <Receipt size={14} className="sm:w-4 sm:h-4"/> Print / Download Receipt
+                   </button>
+                   <button onClick={() => setShowCheckoutModal(false)} className={`w-full py-2 sm:py-2.5 rounded-lg ${THEME_BG} text-white text-xs sm:text-sm font-bold ${THEME_HOVER} transition-colors`}>
+                     New Transaction
+                   </button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Void Confirmation Modal */}
+      <AnimatePresence>
+        {voidModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-red-600">
+                   <AlertTriangle size={20} className="sm:w-6 sm:h-6" />
+                </div>
+                <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-1 sm:mb-2">Refund Transaction?</h3>
+                <p className="text-[11px] sm:text-xs text-gray-500 mb-5 sm:mb-6">Are you sure you want to void receipt <span className="font-mono font-bold text-gray-700">{transactionToVoid}</span>? This will record the sale as refunded and instantly return the items to stock.</p>
+                <div className="flex gap-2 sm:gap-3">
+                   <button onClick={() => setVoidModalOpen(false)} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm font-medium hover:bg-gray-50">Cancel</button>
+                   <button onClick={handleVoid} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-red-700 shadow-md">Void & Refund</button>
+                </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}
+
+// Mini components for table icons
+function CloudCheckIcon() {
+  return <div className="flex justify-center" title="Synced to Server"><CheckCircle2 size={12} className="sm:w-3.5 sm:h-3.5 text-emerald-500" /></div>;
+}
+function CloudPendingIcon() {
+  return <div className="flex justify-center" title="Pending Sync (Offline)"><WifiOff size={12} className="sm:w-3.5 sm:h-3.5 text-red-400" /></div>;
 }
