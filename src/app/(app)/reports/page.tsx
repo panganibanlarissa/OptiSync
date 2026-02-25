@@ -81,12 +81,12 @@ const FORECAST_VALUES = [
 
 // --- MOCK DATA: TRANSACTIONS (With ISO Dates for Filtering) ---
 const MOCK_TRANSACTIONS = [
-  { id: "TRX-90214", date: "2026-01-05T10:30:00", patient: "Juan Dela Cruz", items: "1x Titanium Frame, 2x Essilor Lenses", method: "GCash", total: 8500, status: "completed" },
-  { id: "TRX-90215", date: "2026-01-05T11:15:00", patient: "Maria Santos", items: "2x Air Optix Contacts", method: "Cash", total: 3000, status: "completed" },
-  { id: "TRX-90216", date: "2026-01-10T13:45:00", patient: "Walk-in Patient", items: "1x PureMoist Solution", method: "Cash", total: 450, status: "completed" },
-  { id: "TRX-90217", date: "2026-02-10T09:20:00", patient: "Carlos Reyes", items: "1x Ray-Ban Frame", method: "Card", total: 5500, status: "voided" },
-  { id: "TRX-90218", date: "2026-02-20T14:10:00", patient: "Elena Gomez", items: "1x Comprehensive Eye Exam", method: "Cash", total: 500, status: "completed" },
-  { id: "TRX-90219", date: "2026-02-25T10:05:00", patient: "Mark Bautista", items: "1x Transition Gen 8", method: "GCash", total: 4000, status: "completed" },
+  { id: "TRX-90214", date: "2026-01-05T10:30:00", patient: "Juan Dela Cruz", items: "1x Titanium Frame, 2x Essilor Lenses", total: 8500, status: "completed" },
+  { id: "TRX-90215", date: "2026-01-05T11:15:00", patient: "Maria Santos", items: "2x Air Optix Contacts", total: 3000, status: "completed" },
+  { id: "TRX-90216", date: "2026-01-10T13:45:00", patient: "Walk-in Patient", items: "1x PureMoist Solution", total: 450, status: "completed" },
+  { id: "TRX-90217", date: "2026-02-10T09:20:00", patient: "Carlos Reyes", items: "1x Ray-Ban Frame", total: 5500, status: "voided" },
+  { id: "TRX-90218", date: "2026-02-20T14:10:00", patient: "Elena Gomez", items: "1x Comprehensive Eye Exam", total: 500, status: "completed" },
+  { id: "TRX-90219", date: "2026-02-25T10:05:00", patient: "Mark Bautista", items: "1x Transition Gen 8", total: 4000, status: "completed" },
 ];
 
 export default function ReportsPage() {
@@ -141,12 +141,11 @@ export default function ReportsPage() {
     // --- TABLE ---
     autoTable(doc, {
       startY: currentY,
-      head: [['Receipt No', 'Date', 'Patient Name', 'Method', 'Status', 'Amount (PHP)']],
+      head: [['Receipt No', 'Date', 'Patient Name', 'Status', 'Amount (PHP)']],
       body: filteredTransactions.map(t => [
         t.id, 
         new Date(t.date).toLocaleDateString(), 
         t.patient, 
-        t.method, 
         t.status.toUpperCase(), 
         t.total.toLocaleString()
       ]),
@@ -541,7 +540,6 @@ export default function ReportsPage() {
                                <th className="p-4">Date & Time</th>
                                <th className="p-4">Patient Name</th>
                                <th className="p-4">Items / Services</th>
-                               <th className="p-4 text-center">Method</th>
                                <th className="p-4 text-right">Amount (₱)</th>
                                <th className="p-4 text-center">Status</th>
                             </tr>
@@ -559,11 +557,6 @@ export default function ReportsPage() {
                                         <td className="p-4 text-gray-600">{formattedDate} <span className="text-[10px] text-gray-400">{formattedTime}</span></td>
                                         <td className="p-4 font-semibold text-gray-800">{trx.patient}</td>
                                         <td className="p-4 text-gray-600 truncate max-w-50" title={trx.items}>{trx.items}</td>
-                                        <td className="p-4 text-center">
-                                           <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-[10px] font-semibold border border-gray-200">
-                                              {trx.method}
-                                           </span>
-                                        </td>
                                         <td className={`p-4 text-right font-bold ${trx.status === 'voided' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                                            {trx.total.toLocaleString()}
                                         </td>

@@ -129,7 +129,7 @@ export default function LandingPage() {
               </span>
             </h1>
             <p className="text-base sm:text-lg text-slate-500 mb-8 leading-relaxed max-w-lg mx-auto lg:mx-0 font-medium">
-              Easily process patient checkouts, track your glasses and lenses, and let our smart system predict your future sales so you never run out of stock.
+              Streamline your optical clinic with an all-in-one POS, automated inventory tracking, and smart predictions. Process sales, manage stock levels, and get insights—all in one system.
             </p>
             
             <div className="flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
@@ -227,7 +227,7 @@ export default function LandingPage() {
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Everything You Need in One System</h2>
             <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
-              Designed specifically for the fast-paced environment of an optical clinic. No confusing tech jargon—just tools that work.
+              Designed specifically for the fast-paced environment of an optical clinic.
             </p>
           </div>
 
@@ -244,9 +244,9 @@ export default function LandingPage() {
                 <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'checkout' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
                   <ShoppingCart size={20} className="sm:w-6 sm:h-6" />
                 </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'checkout' ? 'text-slate-900' : 'text-slate-600'}`}>Patient Checkout</h3>
+                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'checkout' ? 'text-slate-900' : 'text-slate-600'}`}>Point of Sale</h3>
                 <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  Quickly serve walk-in patients, add glasses or lenses to their cart, apply discounts, and print official receipts.
+                  Fast patient checkouts with cart management, receipt generation, and transaction history. Process sales instantly and track every transaction.
                 </p>
               </button>
 
@@ -258,9 +258,9 @@ export default function LandingPage() {
                 <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'inventory' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
                   <Package size={20} className="sm:w-6 sm:h-6" />
                 </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'inventory' ? 'text-slate-900' : 'text-slate-600'}`}>Stock Management</h3>
+                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'inventory' ? 'text-slate-900' : 'text-slate-600'}`}>Inventory Catalog</h3>
                 <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  Keep track of all your frames and lenses. The system automatically warns you when you're running low or if items aren't selling.
+                  Organize all frames and lenses in one place. Get automatic alerts for low stock, deadstock items, and manage restock adjustments with multiple reason categories.
                 </p>
               </button>
 
@@ -272,9 +272,9 @@ export default function LandingPage() {
                 <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'reports' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
                   <BrainCircuit size={20} className="sm:w-6 sm:h-6" />
                 </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'reports' ? 'text-slate-900' : 'text-slate-600'}`}>Reports & Predictions</h3>
+                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'reports' ? 'text-slate-900' : 'text-slate-600'}`}>Analytics & Forecasting</h3>
                 <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  See which items sell the most, easily print monthly sales records, and get smart predictions for upcoming busy seasons.
+                  View top-selling items, deadstock analysis, and sales forecasts. Export transaction ledgers as PDFs for accounting and reporting.
                 </p>
               </button>
             </div>
@@ -288,30 +288,28 @@ export default function LandingPage() {
                  {activeTab === 'checkout' && (
                    <div className="animate-in slide-in-from-right-8 fade-in duration-500 bg-white rounded-xl sm:rounded-2xl shadow-lg border border-slate-200 overflow-hidden flex flex-col h-full w-full">
                       <div className="bg-slate-50 p-3 sm:p-4 border-b border-slate-100 flex justify-between items-center">
-                         <div className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2"><ShoppingCart size={16} className={`${THEME_TEXT} sm:w-[18px] sm:h-[18px]`}/> Current Sale</div>
-                         <div className="text-[10px] sm:text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">In Progress</div>
+                         <div className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2"><ShoppingCart size={16} className={`${THEME_TEXT} sm:w-[18px] sm:h-[18px]`}/> Sales Order</div>
+                         <div className="text-[10px] sm:text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">Processing</div>
                       </div>
-                      <div className="p-3 sm:p-4 space-y-2 sm:space-y-3 bg-white">
+                      <div className="p-3 sm:p-4 space-y-2 sm:space-y-3 bg-white flex-1">
                          <div className="flex justify-between items-center p-2 sm:p-3 border border-slate-100 rounded-lg sm:rounded-xl">
                             <div>
-                               <div className="font-bold text-xs sm:text-sm text-slate-800 truncate pr-2">Titanium Rimless Frame</div>
-                               <div className="text-[10px] sm:text-xs text-slate-400">Qty: 1</div>
+                               <div className="font-bold text-xs sm:text-sm text-slate-800 truncate pr-2">Air Optix Monthly Contacts</div>
+                               <div className="text-[10px] sm:text-xs text-slate-400">Qty: 2</div>
                             </div>
-                            <div className="font-black text-sm sm:text-base text-slate-800">₱3,500</div>
+                            <div className="font-black text-sm sm:text-base text-slate-800">₱3,000</div>
                          </div>
                          <div className="flex justify-between items-center p-2 sm:p-3 border border-slate-100 rounded-lg sm:rounded-xl">
                             <div>
-                               <div className="font-bold text-xs sm:text-sm text-slate-800 truncate pr-2">Anti-Rad Lenses</div>
+                               <div className="font-bold text-xs sm:text-sm text-slate-800 truncate pr-2">Essilor Anti-Rad Lenses</div>
                                <div className="text-[10px] sm:text-xs text-slate-400">Qty: 1</div>
                             </div>
-                            <div className="font-black text-sm sm:text-base text-slate-800">₱1,200</div>
+                            <div className="font-black text-sm sm:text-base text-slate-800">₱3,200</div>
                          </div>
                       </div>
-                      <div className="mt-auto bg-slate-50 p-3 sm:p-4 border-t border-slate-200">
-                         <div className="flex justify-between text-xs sm:text-sm text-slate-500 mb-1"><span>Subtotal</span> <span>₱4,700</span></div>
-                         <div className="flex justify-between text-[10px] sm:text-xs text-slate-400 mb-2 sm:mb-3"><span>Tax (12%)</span> <span>₱564</span></div>
-                         <div className="flex justify-between text-base sm:text-lg font-black text-slate-900 mb-3 sm:mb-4"><span>Total Amount</span> <span>₱5,264</span></div>
-                         <div className="w-full bg-[#0B3C8A] text-white text-center py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-sm sm:text-base font-bold shadow-md cursor-pointer hover:bg-[#082F6E]">Complete Checkout</div>
+                      <div className="bg-slate-50 p-3 sm:p-4 border-t border-slate-200">
+                         <div className="flex justify-between text-xs sm:text-sm text-slate-500 mb-2 sm:mb-3"><span>Total</span> <span className="font-bold text-slate-900">₱6,200</span></div>
+                         <div className="w-full bg-[#0B3C8A] text-white text-center py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-sm sm:text-base font-bold shadow-md cursor-pointer hover:bg-[#082F6E]">Complete Sale</div>
                       </div>
                    </div>
                  )}
@@ -319,12 +317,12 @@ export default function LandingPage() {
                  {/* --- MOCKUP 2: INVENTORY --- */}
                  {activeTab === 'inventory' && (
                    <div className="animate-in slide-in-from-right-8 fade-in duration-500 space-y-3 sm:space-y-4 w-full">
-                      {/* Alert Card */}
-                      <div className="bg-white p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border-l-4 border-l-red-500 flex items-start gap-3 sm:gap-4">
-                         <div className="bg-red-50 p-1.5 sm:p-2 rounded-lg text-red-600 shrink-0"><AlertTriangle size={18} className="sm:w-5 sm:h-5"/></div>
+                      {/* Low Stock Alert Card */}
+                      <div className="bg-white p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border-l-4 border-l-orange-500 flex items-start gap-3 sm:gap-4">
+                         <div className="bg-orange-50 p-1.5 sm:p-2 rounded-lg text-orange-600 shrink-0"><AlertTriangle size={18} className="sm:w-5 sm:h-5"/></div>
                          <div>
-                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Action Required: Low Stock</h4>
-                            <p className="text-[10px] sm:text-xs text-slate-500 mt-1">System warning for <strong>Multi-Purpose Solution</strong>. Only 5 units left.</p>
+                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Low Stock Warning</h4>
+                            <p className="text-[10px] sm:text-xs text-slate-500 mt-1"><strong>Essilor Crizal Prevencia</strong> — Only 8 units remaining</p>
                          </div>
                       </div>
 
@@ -332,25 +330,21 @@ export default function LandingPage() {
                       <div className="bg-white p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border-l-4 border-l-slate-600 flex items-start gap-3 sm:gap-4">
                          <div className="bg-slate-100 p-1.5 sm:p-2 rounded-lg text-slate-600 shrink-0"><Clock size={18} className="sm:w-5 sm:h-5"/></div>
                          <div>
-                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Slow-Moving Item Identified</h4>
-                            <p className="text-[10px] sm:text-xs text-slate-500 mt-1"><strong>Kids Flexible Frames</strong> hasn't sold in over a month.</p>
+                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Deadstock Detected</h4>
+                            <p className="text-[10px] sm:text-xs text-slate-500 mt-1"><strong>Kids Flexible Frames</strong> not sold in 85+ days</p>
                          </div>
                       </div>
 
-                      {/* Supplier Track */}
+                      {/* Stock Adjustment Info */}
                       <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
                          <div className="bg-slate-50 p-2.5 sm:p-3 border-b border-slate-100 font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-2">
-                           <Truck size={14} className="text-blue-600 sm:w-4 sm:h-4"/> Restock Deliveries
+                           <Package size={14} className="text-blue-600 sm:w-4 sm:h-4"/> Stock Adjustments
                          </div>
-                         <div className="p-3 sm:p-4 flex justify-between items-center">
-                            <div>
-                               <div className="font-bold text-xs sm:text-sm text-slate-800">50x Anti-Rad Lenses</div>
-                               <div className="text-[10px] sm:text-xs text-slate-500">From: Essilor Vision</div>
-                            </div>
-                            <div className="text-right">
-                               <div className="text-[9px] sm:text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 sm:py-1 rounded">ON THE WAY</div>
-                               <div className="text-[9px] sm:text-[10px] text-slate-400 mt-1">Arriving: 3 Days</div>
-                            </div>
+                         <div className="p-3 sm:p-4 space-y-2 text-[10px] sm:text-xs text-slate-600">
+                            <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500 shrink-0"/> Manual Count / Audit</div>
+                            <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500 shrink-0"/> Damaged Item</div>
+                            <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500 shrink-0"/> Return / Exchange</div>
+                            <div className="flex items-center gap-2"><CheckCircle2 size={14} className="text-blue-500 shrink-0"/> Restock</div>
                          </div>
                       </div>
                    </div>
@@ -360,18 +354,24 @@ export default function LandingPage() {
                  {activeTab === 'reports' && (
                    <div className="animate-in slide-in-from-right-8 fade-in duration-500 space-y-3 sm:space-y-4 w-full">
                       
-                      {/* AI Chart */}
+                      {/* Revenue KPI */}
                       <div className="bg-white p-4 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-lg">
-                         <div className="flex justify-between items-center mb-4 sm:mb-6">
-                            <div className="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-1.5 sm:gap-2"><TrendingUp size={14} className={`${THEME_TEXT} sm:w-4 sm:h-4`}/> Projected Sales</div>
+                         <div className="flex justify-between items-center mb-2 sm:mb-3">
+                            <div className="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-1.5 sm:gap-2"><TrendingUp size={14} className={`${THEME_TEXT} sm:w-4 sm:h-4`}/> Monthly Revenue</div>
+                            <div className="text-xs sm:text-sm text-emerald-700 font-bold bg-emerald-50 px-2 py-1 rounded">+12.5%</div>
                          </div>
-                         <div className="relative h-24 sm:h-32 flex items-end justify-between px-1 sm:px-2">
-                            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-0">
-                                <div className="border-t border-slate-100 border-dashed w-full h-full"></div>
-                                <div className="border-t border-slate-100 border-dashed w-full h-full"></div>
-                            </div>
+                         <div className="text-2xl sm:text-3xl font-black text-slate-900">₱145,200</div>
+                         <p className="text-[10px] sm:text-xs text-slate-500 mt-2">Up from last month</p>
+                      </div>
+
+                      {/* Sales Forecast Chart */}
+                      <div className="bg-white p-4 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-lg">
+                         <div className="flex justify-between items-center mb-4 sm:mb-5">
+                            <div className="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-1.5 sm:gap-2"><BrainCircuit size={14} className="text-purple-600 sm:w-4 sm:h-4"/> Sales Forecast</div>
+                         </div>
+                         <div className="relative h-20 sm:h-24 flex items-end justify-between px-1 sm:px-2">
                             {FORECAST_DATA.slice(2, 7).map((item, i) => (
-                               <div key={i} className="relative w-6 sm:w-8 flex flex-col justify-end items-center h-full z-10">
+                               <div key={i} className="relative w-5 sm:w-7 flex flex-col justify-end items-center h-full">
                                   <div 
                                     className={`w-full rounded-t-sm sm:rounded-t-md transition-all ${item.type === 'history' ? 'bg-[#0B3C8A]' : 'bg-orange-400'}`} 
                                     style={{ height: `${item.value}%` }}
@@ -379,19 +379,17 @@ export default function LandingPage() {
                                </div>
                             ))}
                          </div>
-                         <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-slate-100 flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-slate-600 font-medium">
-                            <BrainCircuit size={14} className="text-purple-600 shrink-0"/> The system predicts a 25% sales jump next month.
-                         </div>
+                         <div className="mt-3 sm:mt-4 text-[9px] sm:text-xs text-slate-500"><strong>Blue</strong> = Historical | <strong>Orange</strong> = Predicted</div>
                       </div>
 
-                      {/* Ledger Export */}
+                      {/* Export Option */}
                       <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 shadow-lg p-4 sm:p-5 flex items-center justify-between">
                          <div>
-                            <h4 className="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-1.5 sm:gap-2"><FileText size={14} className="text-emerald-600 sm:w-4 sm:h-4"/> Monthly Sales Record</h4>
-                            <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1">Ready for accounting</p>
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-800 flex items-center gap-1.5 sm:gap-2"><FileText size={14} className="text-emerald-600 sm:w-4 sm:h-4"/> Ledger Export</h4>
+                            <p className="text-[10px] sm:text-xs text-slate-500 mt-1">PDF transaction records</p>
                          </div>
-                         <button className="bg-emerald-50 text-emerald-700 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold border border-emerald-200 shrink-0 whitespace-nowrap">
-                            Save as PDF
+                         <button className="bg-emerald-50 text-emerald-700 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold border border-emerald-200 shrink-0 whitespace-nowrap hover:bg-emerald-100">
+                            Export
                          </button>
                       </div>
                    </div>
@@ -438,20 +436,20 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
              <div className="text-center px-4 sm:px-6">
                 <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 text-slate-400 font-black text-xl sm:text-2xl shadow-inner border border-slate-100">1</div>
-                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">Secure Login</h4>
-                <p className="text-slate-500 leading-relaxed text-sm font-medium">Access the system using Admin or Staff accounts, keeping clinic data secure and organized.</p>
+                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">Login & Access</h4>
+                <p className="text-slate-500 leading-relaxed text-sm font-medium">Staff and admins log in with secure accounts. View dashboard and access relevant modules based on your role.</p>
              </div>
              <div className="text-center px-4 sm:px-6 relative">
                 <div className="hidden md:block absolute top-8 sm:top-10 -left-1/2 w-full h-[2px] bg-gradient-to-r from-transparent via-slate-200 to-transparent"></div>
                 <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 text-[#0B3C8A] font-black text-xl sm:text-2xl shadow-sm relative z-10">2</div>
-                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">Manage Sales & Stock</h4>
-                <p className="text-slate-500 leading-relaxed text-sm font-medium">Front desk staff easily process patient checkouts, which automatically updates your inventory.</p>
+                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">Process & Track</h4>
+                <p className="text-slate-500 leading-relaxed text-sm font-medium">Complete patient sales instantly with our POS system. Inventory updates automatically as items are sold.</p>
              </div>
              <div className="text-center px-4 sm:px-6 relative">
                 <div className="hidden md:block absolute top-8 sm:top-10 -left-1/2 w-full h-[2px] bg-gradient-to-r from-transparent via-slate-200 to-transparent"></div>
                 <div className="w-14 h-14 sm:w-16 sm:h-16 bg-purple-50 border border-purple-100 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 text-purple-600 font-black text-xl sm:text-2xl shadow-sm relative z-10">3</div>
-                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">View Reports</h4>
-                <p className="text-slate-500 leading-relaxed text-sm font-medium">Admins can review smart sales predictions, see restock warnings, and download simple PDF records.</p>
+                <h4 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3">Analyze & Plan</h4>
+                <p className="text-slate-500 leading-relaxed text-sm font-medium">View analytics, get stock alerts, see which items perform best, and plan future inventory based on forecasts.</p>
              </div>
           </div>
         </div>

@@ -10,9 +10,6 @@ import {
   Trash2, 
   Plus, 
   Minus, 
-  CreditCard, 
-  Banknote, 
-  Smartphone, 
   User, 
   CheckCircle2, 
   X, 
@@ -50,7 +47,6 @@ interface Transaction {
   patientName: string;
   items: CartItem[];
   total: number;
-  paymentMethod: string;
   date: Date;
   status: "completed" | "voided" | "refunded";
   synced: boolean;
@@ -69,8 +65,6 @@ const INITIAL_CATALOG: Product[] = [
 ];
 
 const CATEGORIES = ["All", "Frames", "Lenses", "Contacts", "Solutions", "Accessories"];
-
-type PaymentMethodType = "Cash" | "GCash" | "Card";
 
 // --- ANIMATION VARIANTS ---
 const containerVariants: Variants = {
@@ -101,8 +95,6 @@ export default function SalesPage() {
   // Cart State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [patientName, setPatientName] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>("Cash");
-  const [discount, setDiscount] = useState<number>(0);
   
   // Transaction State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -127,7 +119,7 @@ export default function SalesPage() {
 
   // --- CART CALCULATIONS ---
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const total = Math.max(0, subtotal - discount);
+  const total = subtotal;
 
   // --- HANDLERS ---
   const addToCart = (product: Product) => {
@@ -191,7 +183,6 @@ export default function SalesPage() {
       patientName: patientName || "Walk-in Patient",
       items: [...cart],
       total: total,
-      paymentMethod,
       date: new Date(),
       status: "completed",
       synced: isOnline
@@ -204,7 +195,6 @@ export default function SalesPage() {
     // 3. RESET CART
     setCart([]);
     setPatientName("");
-    setDiscount(0);
     
     if (!isOnline) {
       showNotification("Saved locally. Stock updated.", "success");
@@ -246,7 +236,7 @@ export default function SalesPage() {
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
     doc.text(`Receipt No: ${trx.id}  |  Date: ${trx.date.toLocaleString()}`, pageWidth / 2, currentY + 15, { align: 'center' });
-    doc.text(`Patient: ${trx.patientName}  |  Method: ${trx.paymentMethod}`, pageWidth / 2, currentY + 21, { align: 'center' });
+    doc.text(`Patient: ${trx.patientName}`, pageWidth / 2, currentY + 21, { align: 'center' });
 
     currentY = 50;
 
@@ -348,7 +338,7 @@ export default function SalesPage() {
 
       {activeTab === "pos" ? (
         /* === POS TAB === */
-        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(98vh-180px)]">
+        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
           
           {/* LEFT: PRODUCT SELECTION */}
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
@@ -494,28 +484,10 @@ export default function SalesPage() {
 
              <div className="shrink-0 p-2.5 sm:p-4 border-t border-gray-100 bg-slate-50">
                 <div className="grid grid-cols-3 gap-1 sm:gap-2 mb-2 sm:mb-4">
-                  {[
-                    { id: 'Cash', icon: Banknote },
-                    { id: 'GCash', icon: Smartphone },
-                    { id: 'Card', icon: CreditCard }
-                  ].map(method => (
-                    <button 
-                      key={method.id} onClick={() => setPaymentMethod(method.id as PaymentMethodType)}
-                      className={`flex flex-col items-center justify-center py-1 sm:py-2 rounded-md sm:rounded-lg border text-[9px] sm:text-[10px] font-bold transition-all ${paymentMethod === method.id ? `border-[#0B3C8A] bg-blue-50 ${THEME_TEXT} shadow-sm` : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'}`}
-                    >
-                      <method.icon size={12} className="sm:w-3.5 sm:h-3.5 mb-0.5 sm:mb-1"/> {method.id}
-                    </button>
-                  ))}
+
                 </div>
 
-                <div className="space-y-1 sm:space-y-1.5 mb-2 sm:mb-4">
-                   <div className="flex justify-between text-[10px] sm:text-[11px] text-gray-500">
-                     <span>Subtotal</span><span>₱{subtotal.toLocaleString()}</span>
-                   </div>
-                   <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-gray-500">
-                     <span>Discount</span>
-                     <input type="number" value={discount || ''} onChange={(e) => setDiscount(Number(e.target.value))} placeholder="0" className="w-12 sm:w-16 px-1 py-0.5 text-right border border-gray-200 rounded"/>
-                   </div>
+                <div className="space-y-1 sm:space-y-1.5 mb-3 sm:mb-4">
                    <div className="flex justify-between text-sm sm:text-base font-black text-gray-800 pt-1.5 sm:pt-2 border-t border-gray-200">
                      <span>Total</span><span className={THEME_TEXT}>₱{total.toLocaleString()}</span>
                    </div>
@@ -533,7 +505,7 @@ export default function SalesPage() {
 
       ) : (
         /* === TRANSACTION HISTORY TAB === */
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(98vh-180px)]">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(99vh-180px)]">
            <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200 flex justify-between items-center">
               <div>
                 <h2 className="text-base sm:text-lg font-bold text-gray-800">Today&apos;s Transactions</h2>
@@ -555,7 +527,6 @@ export default function SalesPage() {
                        <th className="p-2 sm:p-3">Receipt No.</th>
                        <th className="p-2 sm:p-3">Time</th>
                        <th className="p-2 sm:p-3">Patient Name</th>
-                       <th className="p-2 sm:p-3">Method</th>
                        <th className="p-2 sm:p-3 text-right">Amount</th>
                        <th className="p-2 sm:p-3 text-center">Sync</th>
                        <th className="p-2 sm:p-3 text-center">Status</th>
@@ -568,7 +539,6 @@ export default function SalesPage() {
                          <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id}</td>
                          <td className="p-2 sm:p-3 text-gray-600">{trx.date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                          <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
-                         <td className="p-2 sm:p-3 text-gray-600">{trx.paymentMethod}</td>
                          <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
                          <td className="p-2 sm:p-3 text-center">
                            {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}

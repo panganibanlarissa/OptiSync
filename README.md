@@ -26,7 +26,7 @@ A comprehensive **Inventory Management, Point of Sale (POS), and AI Demand Forec
 - **Official Receipts:** Instant generation of beautifully formatted, printable PDF receipts.
 
 ### 🔹 **AI Analytics & Reports**
-- **Smart Predictions:** Utilizes FBProphet / XGBoost logic to identify seasonal trends (e.g., back-to-school surges).
+- **Smart Predictions:** Utilizes FBProphet / XGBoost logic to identify seasonal trends.
 - **Smart Restock Engine:** Calculates exact order dates based on supplier lead times.
 - **Transaction Ledger:** Monthly searchable sales records exportable as professional PDF reports for accounting.
 
@@ -80,10 +80,10 @@ src/
 ├── app/
 │   ├── (app)/              # Protected application routes (Requires Login)
 │   │   ├── dashboard/      # Main analytics & alerts dashboard
-│   │   ├── pos/            # Point of Sale & patient checkout
+│   │   ├── sales/            # Point of Sale & patient checkout
 │   │   ├── inventory/      # Stock management & deadstock tracking
 │   │   ├── reports/        # AI Forecasting & PDF Ledger exports
-│   │   └── settings/       # System configuration & User management
+│   │   └── settings/       # User management
 │   ├── (auth)/             # Authentication routes
 │   │   └── login/          # Secure Login page with RA 10173 policy
 │   ├── page.tsx            # Animated Landing page

@@ -3,12 +3,12 @@
 import React, { useState, useRef } from "react";
 import { useNotification } from "@/components/NotificationProvider"; 
 import { motion, AnimatePresence, Variants } from "framer-motion";
-import { 
-  Search, 
-  Plus, 
-  LayoutGrid, 
-  List as ListIcon, 
-  Edit3, 
+import {
+  Search,
+  Plus,
+  LayoutGrid,
+  List as ListIcon,
+  Edit3,
   AlertTriangle,
   Glasses,
   X,
@@ -17,11 +17,6 @@ import {
   Trash2,
   Clock,
   ArrowRightLeft,
-  Truck,
-  CheckCircle2,
-  Calendar,
-  History,
-  Package
 } from "lucide-react";
 
 const THEME_BG = "bg-[#0B3C8A]";
@@ -58,18 +53,6 @@ interface ProductModalProps {
   onDelete: (id: number) => void;
 }
 
-interface SupplierOrder {
-  id: string;
-  productId: number;
-  vendor: string;
-  item: string;
-  qty: number;
-  orderDate: string;
-  expectedLeadTime: number;
-  status: "In Transit" | "Delayed" | "Delivered";
-  receivedDate?: string;
-}
-
 // --- MOCK DATA ---
 const INITIAL_PRODUCTS: InventoryData[] = [
   { id: 1, sku: "FRM-001", name: "Titanium Rimless Frames", category: "Frames", specifications: "Dimensions: 50-18-140", baseCost: 1500, markupPrice: 3500, supplierInfo: "Luxottica Inc.", stock: 8, lastMovedDaysAgo: 2, imageColor: "bg-slate-200", image: null, leadTimeDays: 7, reorderPoint: 10 },
@@ -81,27 +64,13 @@ const INITIAL_PRODUCTS: InventoryData[] = [
   { id: 7, sku: "FRM-102", name: "Kids Flexible Frames (Blue)", category: "Frames", specifications: "Dimensions: 45-15-125", baseCost: 600, markupPrice: 1500, supplierInfo: "Miraflex", stock: 12, lastMovedDaysAgo: 42, imageColor: "bg-blue-200", image: null, leadTimeDays: 10, reorderPoint: 5 },
 ];
 
-const INITIAL_SUPPLIER_ORDERS: SupplierOrder[] = [
-  { id: "PO-1042", productId: 2, vendor: "Luxottica Inc.", item: "Titanium Rimless Frames", qty: 20, orderDate: "Oct 12, 2026", expectedLeadTime: 7, status: "In Transit" },
-  { id: "PO-1043", productId: 5, vendor: "Generic Supplies Co.", item: "Microfiber Cleaning Cloth", qty: 150, orderDate: "Oct 05, 2026", expectedLeadTime: 14, status: "Delayed" },
-  { id: "PO-1044", productId: 2, vendor: "Essilor Vision", item: "Anti-Rad Blue Cut Lenses", qty: 50, orderDate: "Oct 16, 2026", expectedLeadTime: 3, status: "In Transit" },
-];
-
-const INITIAL_COMPLETED_ORDERS: SupplierOrder[] = [
-  { id: "PO-1039", productId: 6, vendor: "Bausch & Lomb", item: "Multi-Purpose Lens Solution", qty: 30, orderDate: "Sep 20, 2026", expectedLeadTime: 4, status: "Delivered", receivedDate: "Sep 24, 2026" },
-  { id: "PO-1040", productId: 3, vendor: "Alcon PH", item: "Air Optix Monthly Contacts", qty: 40, orderDate: "Oct 01, 2026", expectedLeadTime: 2, status: "Delivered", receivedDate: "Oct 04, 2026" },
-];
-
 // --- ANIMATION VARIANTS ---
 const containerVariants: Variants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.05 } }};
 const itemVariants: Variants = { hidden: { y: 15, opacity: 0 }, visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }};
 const modalVariants: Variants = { hidden: { opacity: 0, scale: 0.95 }, visible: { opacity: 1, scale: 1 }, exit: { opacity: 0, scale: 0.95 }};
 
 export default function InventoryPage() {
-  const [activeTab, setActiveTab] = useState<"catalog" | "suppliers">("catalog");
   const [products, setProducts] = useState<InventoryData[]>(INITIAL_PRODUCTS);
-  const [supplierOrders, setSupplierOrders] = useState<SupplierOrder[]>(INITIAL_SUPPLIER_ORDERS);
-  const [completedOrders, setCompletedOrders] = useState<SupplierOrder[]>(INITIAL_COMPLETED_ORDERS);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   const [searchQuery, setSearchQuery] = useState("");
@@ -111,7 +80,6 @@ export default function InventoryPage() {
   const [modalMode, setModalMode] = useState<'add' | 'edit' | 'adjust'>('add');
   const [currentProduct, setCurrentProduct] = useState<ProductFormData | null>(null);
   
-  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<InventoryData | null>(null);
 
@@ -190,50 +158,10 @@ export default function InventoryPage() {
     }
   };
 
-  const handleLogSupplierOrder = (newOrder: SupplierOrder) => {
-     setSupplierOrders([newOrder, ...supplierOrders]);
-     setIsSupplierModalOpen(false);
-     showNotification("Supplier order logged successfully!", "success");
-  };
-
-  const handleMarkReceived = (orderId: string) => {
-     const orderToReceive = supplierOrders.find(o => o.id === orderId);
-     if (orderToReceive) {
-        setProducts(prev => prev.map(p => p.id === orderToReceive.productId ? { ...p, stock: p.stock + orderToReceive.qty } : p));
-        const completedOrder: SupplierOrder = {
-          ...orderToReceive,
-          status: "Delivered",
-          receivedDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-        };
-        setCompletedOrders([completedOrder, ...completedOrders]);
-        setSupplierOrders(prev => prev.filter(o => o.id !== orderId));
-        showNotification(`${orderToReceive.qty} units added to inventory.`, "success");
-     }
-  };
-
   return (
     <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
-      
-      {/* HEADER TABS */}
-      <div className="shrink-0 flex items-center gap-2 sm:gap-4 mb-2 sm:mb-4 border-b border-gray-200 pb-2">
-         <button 
-           onClick={() => setActiveTab("catalog")}
-           className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-[11px] sm:text-sm rounded-t-lg transition-colors border-b-2 ${activeTab === 'catalog' ? 'border-[#0B3C8A] text-[#0B3C8A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-         >
-           <Package size={14} className="sm:w-4.5 sm:h-4.5"/> Product Catalog
-         </button>
-         <button 
-           onClick={() => setActiveTab("suppliers")}
-           className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 font-bold text-[11px] sm:text-sm rounded-t-lg transition-colors border-b-2 ${activeTab === 'suppliers' ? 'border-[#0B3C8A] text-[#0B3C8A]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-         >
-           <Truck size={14} className="sm:w-4.5 sm:h-4.5"/> Supplier Tracking
-         </button>
-      </div>
-
-      {activeTab === "catalog" ? (
-        
-        /* === CATALOG TAB LAYOUT === */
-        <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
+      {/* Inventory Catalog */}
+      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
           
           {/* LEFT COLUMN: MAIN PRODUCT AREA */}
           <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col order-first lg:order-0">
@@ -347,153 +275,7 @@ export default function InventoryPage() {
                )}
             </motion.div>
           </aside>
-        </div>
-
-      ) : (
-
-        /* === SUPPLIER LEAD-TIME TRACKING TAB === */
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col bg-white rounded-xl shadow-sm border border-slate-200">
-           
-           {/* Header Area */}
-           <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 flex justify-between items-center gap-2 bg-slate-50">
-              <div>
-                <h2 className="text-sm sm:text-lg font-bold text-gray-800">Supplier Lead-Time Tracking</h2>
-                <p className="text-[9px] sm:text-xs text-gray-500 mt-0.5 max-w-xl hidden sm:block">Log orders to allow AI to track delivery speed and dynamically adjust reorder points.</p>
-              </div>
-              <button 
-                onClick={() => setIsSupplierModalOpen(true)}
-                className={`flex items-center justify-center gap-1 sm:gap-2 ${THEME_BG} ${THEME_HOVER} text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors shadow-sm whitespace-nowrap`}
-              >
-                <Plus size={14} /> <span className="hidden sm:inline">Log New Order</span><span className="sm:hidden">Log Order</span>
-              </button>
-           </div>
-
-           <div className="flex flex-col p-2.5 sm:p-5 bg-gray-50/50">
-             
-             {/* Vendor Lead Time Summary Cards (App-like compact row on mobile) */}
-             <div className="shrink-0 flex flex-col sm:grid sm:grid-cols-3 gap-2 sm:gap-4 mb-3 sm:mb-5">
-                {products.filter(p => p.supplierInfo).slice(0, 3).map((product, idx) => (
-                  <div key={idx} className="bg-white p-2 sm:p-4 rounded-lg sm:rounded-xl border border-gray-200 shadow-sm flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-stretch gap-2">
-                     <div className="flex flex-col flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5 sm:mb-2">
-                           <span className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate">{product.supplierInfo}</span>
-                        </div>
-                        <h3 className="text-[11px] sm:text-sm font-semibold text-gray-800 truncate">{product.name}</h3>
-                     </div>
-                     <div className="flex flex-col items-end sm:items-start sm:mt-auto sm:w-full sm:bg-slate-50 sm:p-3 sm:rounded-lg sm:border sm:border-gray-100">
-                        <span className="text-[9px] sm:text-xs text-gray-500 hidden sm:inline">Auto Reorder Point</span>
-                        <span className="font-bold text-[10px] sm:text-xs text-orange-500">{product.reorderPoint} units</span>
-                        <span className="bg-blue-50 text-blue-700 text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full flex items-center gap-1 mt-1">
-                          <Clock size={10} className="hidden sm:block"/> Avg {product.leadTimeDays}d
-                        </span>
-                     </div>
-                  </div>
-                ))}
-             </div>
-
-             {/* Split Tables Container */}
-             <div className="flex flex-col lg:flex-row gap-3 sm:gap-5">
-                
-                {/* TABLE 1: Active Deliveries */}
-                <div className="flex-1 flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm lg:min-h-0 lg:overflow-hidden">
-                    <div className="shrink-0 p-2.5 sm:p-4 bg-slate-50 border-b border-gray-200 flex items-center gap-1.5 sm:gap-2">
-                        <Truck size={14} className="text-blue-600 sm:w-4 sm:h-4"/>
-                        <h3 className="text-[11px] sm:text-sm font-bold text-gray-800">Active Restock</h3>
-                        <span className="bg-blue-100 text-blue-800 text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full ml-auto">{supplierOrders.length}</span>
-                    </div>
-                    <div className="flex-1 overflow-auto p-0">
-                        {supplierOrders.length === 0 ? (
-                            <div className="p-6 sm:p-10 text-center text-gray-400">
-                                <Truck size={28} className="mx-auto mb-2 opacity-20 sm:w-10 sm:h-10"/>
-                                <p className="text-[10px] sm:text-xs">No active supplier deliveries.</p>
-                            </div>
-                        ) : (
-                            <table className="w-full text-left text-[9px] sm:text-xs whitespace-nowrap min-w-75">
-                              <thead className="bg-slate-50/80 text-gray-500 font-semibold sticky top-0 backdrop-blur-sm border-b border-gray-100">
-                                <tr>
-                                  <th className="p-2 sm:p-3">Order Details</th>
-                                  <th className="p-2 sm:p-3 text-center">Status</th>
-                                  <th className="p-2 sm:p-3 text-right">Action</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {supplierOrders.map((order) => (
-                                  <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-2 sm:p-3">
-                                        <div className="font-semibold text-gray-800">{order.qty}x {order.item}</div>
-                                        <div className="text-[8px] sm:text-[10px] text-gray-500 mt-0.5">{order.vendor}</div>
-                                    </td>
-                                    <td className="p-2 sm:p-3 text-center">
-                                      <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded-md uppercase ${
-                                         order.status === 'In Transit' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
-                                      }`}>
-                                        {order.status}
-                                      </span>
-                                      <div className="text-[8px] sm:text-[9px] text-gray-400 mt-1 font-mono">ETA: {order.expectedLeadTime}d</div>
-                                    </td>
-                                    <td className="p-2 sm:p-3 text-right">
-                                      <button onClick={() => handleMarkReceived(order.id)} className="text-[8px] sm:text-[10px] font-bold text-emerald-600 border border-emerald-200 bg-emerald-50 px-2 py-1 sm:py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center gap-1 ml-auto shadow-sm">
-                                        <CheckCircle2 size={10} className="sm:w-3 sm:h-3"/> <span className="hidden sm:inline">Receive</span><span className="sm:hidden">Receive</span>
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                        )}
-                    </div>
-                </div>
-
-                {/* TABLE 2: Completed Orders */}
-                <div className="flex-1 flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm lg:min-h-0 lg:overflow-hidden sm:min-h-0 min-h-auto">
-                    <div className="shrink-0 p-2.5 sm:p-4 bg-slate-50 border-b border-gray-200 flex items-center gap-1.5 sm:gap-2">
-                        <History size={14} className="text-emerald-600 sm:w-4 sm:h-4"/>
-                        <h3 className="text-[11px] sm:text-sm font-bold text-gray-800">Order History</h3>
-                        <span className="bg-emerald-100 text-emerald-800 text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full ml-auto">{completedOrders.length}</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-0">
-                        {completedOrders.length === 0 ? (
-                            <div className="p-6 text-center text-gray-400">
-                                <History size={28} className="mx-auto mb-2 opacity-20 sm:w-10 sm:h-10"/>
-                                <p className="text-[10px] sm:text-xs">No completed orders yet.</p>
-                            </div>
-                        ) : (
-                            <table className="w-full text-left text-[9px] sm:text-xs whitespace-nowrap min-w-75">
-                              <thead className="bg-slate-50/80 text-gray-500 font-semibold sticky top-0 backdrop-blur-sm border-b border-gray-100">
-                                <tr>
-                                  <th className="p-2 sm:p-3">Order Details</th>
-                                  <th className="p-2 sm:p-3 text-center">Dates</th>
-                                  <th className="p-2 sm:p-3 text-right">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {completedOrders.map((order) => (
-                                  <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-2 sm:p-3">
-                                        <div className="font-semibold text-gray-800">{order.qty}x {order.item}</div>
-                                        <div className="text-[8px] sm:text-[10px] text-gray-500 mt-0.5">{order.vendor}</div>
-                                    </td>
-                                    <td className="p-2 sm:p-3 text-center">
-                                        <div className="text-gray-500 text-[8px] sm:text-[9px]">Ord: {order.orderDate}</div>
-                                        <div className="text-gray-800 font-medium text-[8px] sm:text-[9px] mt-0.5">Rcv: {order.receivedDate}</div>
-                                    </td>
-                                    <td className="p-2 sm:p-3 text-right">
-                                      <span className="px-1.5 py-0.5 text-[8px] font-bold rounded-md uppercase bg-emerald-100 text-emerald-700">
-                                        {order.status}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                        )}
-                    </div>
-                </div>
-
-             </div>
-           </div>
-        </motion.div>
-      )}
+      </div>
 
       {/* --- MODALS --- */}
       <AnimatePresence>
@@ -505,12 +287,6 @@ export default function InventoryPage() {
       <AnimatePresence>
         {isDeleteModalOpen && productToDelete && (
           <DeleteConfirmationModal productName={productToDelete.name} onCancel={() => { setIsDeleteModalOpen(false); setProductToDelete(null); }} onConfirm={confirmDelete} />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isSupplierModalOpen && (
-          <SupplierOrderModal products={products} onClose={() => setIsSupplierModalOpen(false)} onSave={handleLogSupplierOrder} />
         )}
       </AnimatePresence>
     </div>
@@ -622,7 +398,7 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
             <p className="text-[9px] sm:text-[11px] text-gray-500 mb-4 sm:mb-5 p-2 bg-blue-50 rounded-md border border-blue-100">Log deliveries, damaged items, or manual audit counts to correct physical stock.</p>
             <form id="stock-form" onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
               <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">New Physical Count</label><input required name="stock" value={formData.stock || ''} onChange={handleChange} type="number" min="0" placeholder="0" className={`w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
-              <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Reason for Adjustment</label><select name="adjustmentReason" value={formData.adjustmentReason || "Manual Count"} onChange={handleChange} className={`w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`}><option>Manual Count / Audit</option><option>Damaged Item</option><option>Return / Exchange</option></select></div>
+              <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Reason for Adjustment</label><select name="adjustmentReason" value={formData.adjustmentReason || "Manual Count"} onChange={handleChange} className={`w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`}><option>Manual Count / Audit</option><option>Damaged Item</option><option>Return / Exchange</option><option>Restock</option></select></div>
             </form>
           </div>
           <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3"><button type="button" onClick={onClose} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100">Cancel</button><button type="submit" form="stock-form" className={`flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg ${THEME_BG} text-white text-[11px] sm:text-sm font-medium ${THEME_HOVER}`}>Update Stock</button></div>
@@ -651,12 +427,8 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
                 <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Item Name</label><input required name="name" value={formData.name} onChange={handleChange} type="text" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
                 <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Category</label><select required name="category" value={formData.category} onChange={handleChange} className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`}><option>Frames</option><option>Lenses</option><option>Contact Lenses</option><option>Solutions</option><option>Accessories</option></select></div>
              </div>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Optical Specs</label><input required name="specifications" value={formData.specifications} onChange={handleChange} type="text" placeholder="e.g., 50-18-140" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
-                <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Supplier Info</label><input required name="supplierInfo" value={formData.supplierInfo} onChange={handleChange} type="text" placeholder="Vendor name" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
-             </div>
              <div className="grid grid-cols-3 gap-2 sm:gap-4">
-                <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Cost (₱)</label><input required name="baseCost" value={formData.baseCost || ''} onChange={handleChange} type="number" min="0" placeholder="0" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
+                <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Initial Cost (₱)</label><input required name="baseCost" value={formData.baseCost || ''} onChange={handleChange} type="number" min="0" placeholder="0" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
                 <div><label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Price (₱)</label><input required name="markupPrice" value={formData.markupPrice || ''} onChange={handleChange} type="number" min="0" placeholder="0" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} /></div>
                 <div>
                    <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Initial Stock</label>
@@ -675,85 +447,7 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
   );
 }
 
-// 3. LOG SUPPLIER ORDER MODAL
-function SupplierOrderModal({ products, onClose, onSave }: { products: InventoryData[], onClose: () => void, onSave: (order: SupplierOrder) => void }) {
-    const [selectedProductId, setSelectedProductId] = useState<number>(products[0]?.id || 0);
-    const [qty, setQty] = useState(10);
-    const [expectedLeadTime, setExpectedLeadTime] = useState(products[0]?.leadTimeDays || 7);
-  
-    const handleSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
-      const product = products.find(p => p.id === selectedProductId);
-      if (!product) return;
-  
-      const newOrder: SupplierOrder = {
-        id: `PO-${Math.floor(1000 + Math.random() * 9000)}`,
-        productId: product.id,
-        vendor: product.supplierInfo || "Unknown Vendor",
-        item: product.name,
-        qty: qty,
-        orderDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        expectedLeadTime: expectedLeadTime,
-        status: "In Transit"
-      };
-      onSave(newOrder);
-    };
-  
-    const handleProductSelect = (id: number) => {
-        setSelectedProductId(id);
-        const prod = products.find(p => p.id === id);
-        if (prod) setExpectedLeadTime(prod.leadTimeDays || 7);
-    };
-  
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-            <motion.div variants={modalVariants} initial="hidden" animate="visible" exit="exit" className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
-                <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-100 bg-slate-50">
-                    <h2 className="text-sm sm:text-lg font-bold text-gray-800 flex items-center gap-1.5 sm:gap-2"><Truck size={16} className="sm:w-4.5 sm:h-4.5"/> Log Supplier Order</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors"><X size={16} className="text-gray-500 sm:w-5 sm:h-5" /></button>
-                </div>
-                <form id="supplier-form" onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3 sm:space-y-4">
-                    <p className="text-[9px] sm:text-[11px] text-gray-500 bg-blue-50 p-2 sm:p-2.5 rounded-md border border-blue-100 mb-2 sm:mb-4">
-                       This tells the AI an order was placed. Clicking &quot;Mark Received&quot; later will calculate the actual lead time.
-                    </p>
-                    <div>
-                        <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Select Item to Restock</label>
-                        <select 
-                            required 
-                            value={selectedProductId} 
-                            onChange={(e) => handleProductSelect(Number(e.target.value))} 
-                            className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`}
-                        >
-                            {products.map(p => (
-                                <option key={p.id} value={p.id}>{p.name} ({p.supplierInfo})</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                        <div>
-                            <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Order Quantity</label>
-                            <input required type="number" min="1" value={qty || ''} onChange={e => setQty(Number(e.target.value))} placeholder="0" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} />
-                        </div>
-                        <div>
-                            <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Expected Days</label>
-                            <input required type="number" min="1" value={expectedLeadTime || ''} onChange={e => setExpectedLeadTime(Number(e.target.value))} placeholder="0" className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none`} />
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-2">
-                        <Calendar size={12} className="sm:w-3.5 sm:h-3.5 text-gray-400"/>
-                        <span className="text-[9px] sm:text-[11px] text-gray-500 font-medium">Order Date: Today</span>
-                    </div>
-                </form>
-                <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
-                    <button type="button" onClick={onClose} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors">Cancel</button>
-                    <button type="submit" form="supplier-form" className={`flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg ${THEME_BG} text-white text-[11px] sm:text-sm font-medium ${THEME_HOVER} transition-colors`}>Log Order</button>
-                </div>
-            </motion.div>
-        </div>
-    );
-}
-
-// 4. DELETE CONFIRMATION MODAL
+// 3. DELETE CONFIRMATION MODAL
 function DeleteConfirmationModal({ productName, onCancel, onConfirm }: { productName: string, onCancel: () => void, onConfirm: () => void }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">

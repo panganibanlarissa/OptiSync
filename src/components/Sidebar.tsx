@@ -9,7 +9,7 @@ import {
   LogOut,
   LayoutDashboard,
   Boxes,
-  Settings,
+  Users,
   BarChart3,
   X,
   Shield,
@@ -151,11 +151,11 @@ export default function Sidebar({ children }: SidebarProps) {
             </Link>
           )}
 
-          {/* Settings & AI Tuning - Admin only */}
+          {/* Staff Management - Admin only */}
           {userRole === "admin" && (
             <Link href="/settings" className={linkClass("/settings")}>
-              <Settings size={18} />
-              Settings
+              <Users size={18} />
+              Staff Management
             </Link>
           )}
         </nav>
