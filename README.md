@@ -80,7 +80,7 @@ src/
 ├── app/
 │   ├── (app)/              # Protected application routes (Requires Login)
 │   │   ├── dashboard/      # Main analytics & alerts dashboard
-│   │   ├── sales/            # Point of Sale & patient checkout
+│   │   ├── sales/          # Point of Sale & patient checkout
 │   │   ├── inventory/      # Stock management & deadstock tracking
 │   │   ├── reports/        # AI Forecasting & PDF Ledger exports
 │   │   └── settings/       # User management
