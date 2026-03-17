@@ -1,9 +1,10 @@
+// src/components/Sidebar.tsx
 "use client";
 
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Menu,
   LogOut,
@@ -12,14 +13,10 @@ import {
   Users,
   BarChart3,
   X,
-  Shield,
-  User,
 } from "lucide-react";
 
 import Notifications from "@/components/Notifications";
-
-// User role type
- type UserRole = "staff" | "admin";
+import { useFirebase } from "@/context/FirebaseContext";
 
 interface SidebarProps {
   children: React.ReactNode;
@@ -27,13 +24,10 @@ interface SidebarProps {
 
 export default function Sidebar({ children }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
+  const { appUser, logout } = useFirebase();
 
   const [open, setOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  
-  // DEV TOGGLE: For testing different roles without backend
-  const [userRole, setUserRole] = useState<UserRole>("staff");
 
   const linkClass = (path: string) =>
     `flex items-center gap-3 px-4 py-2 rounded-md transition-colors ${
@@ -42,46 +36,18 @@ export default function Sidebar({ children }: SidebarProps) {
         : "text-gray-600 hover:bg-gray-100 hover:text-[#0B3C8A]"
     }`;
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setShowLogoutModal(false);
-    router.push("/login");
+    await logout();
   };
 
-  // Role-based display names
-  const displayName = userRole === "admin" ? "Admin User" : "Staff User";
-  const displayRole = userRole === "admin" ? "Administrator" : "Staff";
-
-  // Toggle role for testing
-  const toggleRole = () => {
-    setUserRole((prev) => (prev === "staff" ? "admin" : "staff"));
-  };
+  // Role-based display
+  const displayName = appUser?.email?.split('@')[0] || "User";
+  const displayRole = appUser?.role === "admin" ? "Administrator" : "Staff";
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* DEV TOGGLE BUTTON - Remove when backend is ready */}
-      <button
-        onClick={toggleRole}
-        className={`fixed bottom-4 right-4 z-70 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 transition-all duration-300 hover:scale-105 ${
-          userRole === "admin"
-            ? "bg-purple-600 hover:bg-purple-700 text-white"
-            : "bg-green-600 hover:bg-green-700 text-white"
-        }`}
-        title={`Currently: ${userRole === "admin" ? "Administrator" : "Staff"} - Click to switch`}
-      >
-        {userRole === "admin" ? (
-          <>
-            <Shield size={18} />
-            <span className="font-medium">Admin Mode</span>
-            <span className="text-xs bg-white/20 px-2 py-0.5 rounded">Click for Staff</span>
-          </>
-        ) : (
-          <>
-            <User size={18} />
-            <span className="font-medium">Staff Mode</span>
-            <span className="text-xs bg-white/20 px-2 py-0.5 rounded">Click for Admin</span>
-          </>
-        )}
-      </button>
+      {/* (Optional: you can keep or remove the dev toggle) */}
 
       {/* HEADER */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-white shadow-sm px-4 md:px-6 py-3 flex items-center justify-between h-16">
@@ -90,9 +56,7 @@ export default function Sidebar({ children }: SidebarProps) {
           <button onClick={() => setOpen(!open)} className="text-gray-600 hover:text-[#0B3C8A] transition-colors">
             <Menu size={24} />
           </button>
-
           <Image src="/logo.png" alt="Smart Inventory Logo" width={34} height={34} />
-
           <h1 className="text-lg font-bold text-[#0B3C8A] hidden sm:block">
             M.T. Olaso Optical Clinic Inventory System
           </h1>
@@ -100,15 +64,11 @@ export default function Sidebar({ children }: SidebarProps) {
 
         {/* RIGHT */}
         <div className="flex items-center gap-4 relative">
-          
-          {/* NOTIFICATION DROPDOWN */}
           <Notifications />
-
           <div className="hidden sm:flex flex-col items-end mr-2">
-             <span className="text-sm font-semibold text-gray-700 leading-none">{displayName}</span>
-             <span className="text-[10px] text-gray-500 tracking-wide">{displayRole}</span>
+            <span className="text-sm font-semibold text-gray-700 leading-none">{displayName}</span>
+            <span className="text-[10px] text-gray-500 tracking-wide">{displayRole}</span>
           </div>
-
           <button 
             onClick={() => setShowLogoutModal(true)}
             className="p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
@@ -125,34 +85,27 @@ export default function Sidebar({ children }: SidebarProps) {
         ${open ? "translate-x-0" : "-translate-x-full"}`}
       >
         <nav className="px-4 py-6 space-y-2">
-          {/* Dashboard - Available to all roles */}
           <Link href="/dashboard" className={linkClass("/dashboard")}>
             <LayoutDashboard size={18} />
             Dashboard
           </Link>
-
-          {/* Inventory - Available to all roles (Staff can view/edit stock) */}
           <Link href="/inventory" className={linkClass("/inventory")}>
             <Boxes size={18} />
             Inventory
           </Link>
-
-          {/* Sales - Available to all roles */}
           <Link href="/sales" className={linkClass("/sales")}>
             <span className="text-[18px] font-bold leading-none flex items-center justify-center w-4.5">₱</span>
             Sales
           </Link>
 
-          {/* Forecasting & Reports - Admin only (view profit/reports) */}
-          {userRole === "admin" && (
+          {/* Reports & Settings – only for admin */}
+          {appUser?.role === "admin" && (
             <Link href="/reports" className={linkClass("/reports")}>
               <BarChart3 size={18} />
               Forecasting & Reports
             </Link>
           )}
-
-          {/* Staff Management - Admin only */}
-          {userRole === "admin" && (
+          {appUser?.role === "admin" && (
             <Link href="/settings" className={linkClass("/settings")}>
               <Users size={18} />
               Staff Management
@@ -160,10 +113,10 @@ export default function Sidebar({ children }: SidebarProps) {
           )}
         </nav>
 
-        {/* Role indicator at bottom of sidebar */}
+        {/* Role indicator */}
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
           <div className="flex items-center gap-2 text-xs text-gray-500">
-            <div className={`w-2 h-2 rounded-full ${userRole === "admin" ? "bg-purple-500" : "bg-green-500"}`} />
+            <div className={`w-2 h-2 rounded-full ${appUser?.role === "admin" ? "bg-purple-500" : "bg-green-500"}`} />
             <span>Logged in as {displayRole}</span>
           </div>
         </div>

@@ -1,21 +1,19 @@
+// src/app/(auth)/login/page.tsx
 "use client";
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-// 1. Import Hook & Animation Libs
 import { useNotification } from "@/components/NotificationProvider";
+import { useFirebase } from "@/context/FirebaseContext";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { 
   User, 
   Lock, 
   Eye, 
   EyeOff, 
-  ChevronLeft, 
   CheckCircle, 
   Mail, 
-  KeyRound, 
-  ShieldCheck,
   FileText,
   Shield
 } from "lucide-react";
@@ -30,28 +28,37 @@ const staggerContainer: Variants = {
   visible: { transition: { staggerChildren: 0.1 } },
 };
 
+// Define error type
+interface ErrorWithMessage {
+  message: string;
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const { login, user } = useFirebase();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [acceptTerms, setAcceptTerms] = useState(false); // Added Terms State
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   
   // Modal States
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
 
-  // 2. Initialize Notification Hook
   const { showNotification } = useNotification();
 
-  // Clear error when user types or checks the box
+  // Redirect if already logged in
   useEffect(() => {
-    if (error) setError("");
-  }, [username, password, acceptTerms]);
+    if (user) {
+      router.push("/dashboard");
+    }
+  }, [user, router]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // Handle login attempt
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Check if Terms and Privacy Policy are accepted
@@ -61,17 +68,58 @@ export default function LoginPage() {
     }
 
     if (username && password) {
-      // 3. Trigger Success Notification
-      showNotification("Login successful! Redirecting...", "success");
+      setIsLoading(true);
+      setError(""); // Clear any previous errors
       
-      // Simulate slight delay for effect before redirect
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 800);
+      try {
+        // Use email format - you can modify this logic based on your needs
+        const email = username.includes('@') ? username : `${username}@clinic.local`;
+        await login(email, password);
+        // Toast removed - no success message needed
+      } catch (err: unknown) {
+        console.error("Login error:", err);
+        
+        const error = err as ErrorWithMessage;
+        
+        if (error.message === "This account has been deactivated. Please contact an administrator.") {
+          setError("This account has been deactivated. Please contact an administrator.");
+          showNotification("Account deactivated. Contact admin.", "error");
+        } else {
+          setError("Invalid username or password.");
+          showNotification("Login failed. Please check your credentials.", "error");
+        }
+        
+        setIsLoading(false);
+      }
     } else {
       setError("Please enter both username and password.");
-      showNotification("Invalid credentials.", "error");
     }
+  };
+
+  // Clear error when user starts typing
+  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUsername(e.target.value);
+    if (error) setError("");
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+    if (error) setError("");
+  };
+
+  const handleTermsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAcceptTerms(e.target.checked);
+    if (error) setError("");
+  };
+
+  const handlePrivacyAgree = () => {
+    setAcceptTerms(true);
+    setIsPrivacyModalOpen(false);
+  };
+
+  const handleTermsAgree = () => {
+    setAcceptTerms(true);
+    setIsTermsModalOpen(false);
   };
 
   return (
@@ -156,7 +204,7 @@ export default function LoginPage() {
                       type="text"
                       placeholder="Username"
                       value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      onChange={handleUsernameChange}
                       className="w-full rounded-xl border border-gray-200 bg-gray-50/50 pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A] transition-all"
                     />
                   </div>
@@ -170,7 +218,7 @@ export default function LoginPage() {
                       type={showPassword ? "text" : "password"}
                       placeholder="Password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={handlePasswordChange}
                       className="w-full rounded-xl border border-gray-200 bg-gray-50/50 pl-10 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A] transition-all"
                     />
                     <button
@@ -190,7 +238,7 @@ export default function LoginPage() {
                       type="checkbox"
                       id="terms"
                       checked={acceptTerms}
-                      onChange={(e) => setAcceptTerms(e.target.checked)}
+                      onChange={handleTermsChange}
                       className="w-4 h-4 text-[#0B3C8A] border-gray-300 rounded focus:ring-[#0B3C8A] cursor-pointer"
                     />
                   </div>
@@ -233,9 +281,10 @@ export default function LoginPage() {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   type="submit"
-                  className="w-full rounded-xl mt-2 bg-[#0B3C8A] py-3.5 text-white font-bold shadow-lg shadow-blue-900/20 hover:bg-[#092e6b] hover:shadow-blue-900/30 transition-all duration-300"
+                  disabled={isLoading}
+                  className={`w-full rounded-xl mt-2 ${isLoading ? 'bg-blue-400' : 'bg-[#0B3C8A] hover:bg-[#092e6b]'} py-3.5 text-white font-bold shadow-lg shadow-blue-900/20 transition-all duration-300`}
                 >
-                  LOG IN
+                  {isLoading ? 'LOGGING IN...' : 'LOG IN'}
                 </motion.button>
               </form>
 
@@ -256,7 +305,6 @@ export default function LoginPage() {
       <AnimatePresence>
         {isForgotPasswordOpen && (
           <ForgotPasswordModal
-            isOpen={isForgotPasswordOpen}
             onClose={() => setIsForgotPasswordOpen(false)}
           />
         )}
@@ -268,9 +316,10 @@ export default function LoginPage() {
             title="Privacy Policy"
             icon={<Shield className="w-6 h-6" />}
             onClose={() => setIsPrivacyModalOpen(false)}
+            onAgree={handlePrivacyAgree}
           >
             <p>
-              M.T. Olaso Optical Clinic ("we," "our," or "us") is committed to protecting your privacy and ensuring the security of your personal data. This Privacy Policy explains how we collect, use, and protect your information when you use our Optical Inventory Management System.
+              M.T. Olaso Optical Clinic (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;) is committed to protecting your privacy and ensuring the security of your personal data. This Privacy Policy explains how we collect, use, and protect your information when you use our Optical Inventory Management System.
             </p>
             <h4 className="font-bold text-gray-900 mt-4 mb-2">1. Compliance with the Data Privacy Act of 2012</h4>
             <p>
@@ -300,6 +349,7 @@ export default function LoginPage() {
             title="Terms & Conditions"
             icon={<FileText className="w-6 h-6" />}
             onClose={() => setIsTermsModalOpen(false)}
+            onAgree={handleTermsAgree}
           >
             <p>
               Welcome to the M.T. Olaso Optical Clinic Inventory Management System. By accessing or using this system, you agree to be bound by the following Terms and Conditions.
@@ -334,11 +384,13 @@ function LegalModal({
   icon,
   children,
   onClose,
+  onAgree,
 }: {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
   onClose: () => void;
+  onAgree: () => void;
 }) {
   return (
     <motion.div 
@@ -369,7 +421,6 @@ function LegalModal({
             onClick={onClose}
             className="p-2 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition"
           >
-            <ChevronLeft className="w-5 h-5 hidden" /> {/* Just for spacing consistency if needed */}
             ✕
           </button>
         </div>
@@ -382,7 +433,7 @@ function LegalModal({
         {/* Modal Footer */}
         <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end shrink-0">
           <button
-            onClick={onClose}
+            onClick={onAgree}
             className="px-6 py-2.5 rounded-xl bg-[#0B3C8A] text-white font-semibold hover:bg-[#092e6b] transition-colors"
           >
             I Understand
@@ -395,37 +446,61 @@ function LegalModal({
 
 // --- FORGOT PASSWORD MODAL COMPONENT ---
 function ForgotPasswordModal({
-  isOpen,
   onClose,
 }: {
-  isOpen: boolean;
   onClose: () => void;
 }) {
-  const [step, setStep] = useState<"email" | "code" | "reset" | "success">("email");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSent, setIsSent] = useState(false);
+  const [error, setError] = useState("");
 
   const { showNotification } = useNotification();
+  const { resetStaffPassword } = useFirebase();
 
   const handleClose = () => {
     onClose();
     setTimeout(() => {
-      setStep("email");
       setEmail("");
-      setCode("");
-      setPassword("");
-      setConfirmPassword("");
+      setIsSent(false);
+      setError("");
     }, 300);
   };
 
-  const validatePassword = (password: string) => ({
-    length: password.length >= 8,
-    uppercase: /[A-Z]/.test(password),
-    number: /[0-9]/.test(password),
-    symbol: /[^A-Za-z0-9]/.test(password),
-  });
+  const handleSendResetEmail = async () => {
+    if (!email.trim()) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      await resetStaffPassword(email);
+      setIsSent(true);
+      showNotification(`Password reset email sent to ${email}`, "success");
+    } catch (err: unknown) {
+      console.error("Password reset error:", err);
+      
+      const error = err as { message: string };
+      setError(error.message);
+      showNotification("Failed to send reset email", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !isLoading && !isSent) {
+      handleSendResetEmail();
+    }
+  };
 
   return (
     <motion.div 
@@ -442,138 +517,73 @@ function ForgotPasswordModal({
         className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8 relative overflow-hidden"
       >
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#0B3C8A] to-blue-400" />
-        <button onClick={handleClose} className="absolute top-4 right-4 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition">✕</button>
+        <button 
+          onClick={handleClose} 
+          className="absolute top-4 right-4 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition"
+        >
+          ✕
+        </button>
 
-        {step === "email" && (
-          <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="space-y-6">
+        {!isSent ? (
+          <div className="space-y-6">
             <div className="text-center">
               <div className="mx-auto w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-4 text-[#0B3C8A]">
                 <Mail className="w-6 h-6" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900">Reset Password</h3>
-              <p className="text-sm text-gray-500 mt-2">Enter your email address and we'll send you a code to reset your password.</p>
+              <p className="text-sm text-gray-500 mt-2">
+                Enter your email address and we&apos;ll send you a link to reset your password.
+              </p>
             </div>
+
             <div className="space-y-4">
-              <input
-                type="email"
-                required
-                placeholder="name@company.com"
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A] transition-all"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <button
-                onClick={() => {
-                    setStep("code");
-                    showNotification("Verification code sent to email.", "success");
-                }}
-                className="w-full rounded-xl bg-[#0B3C8A] py-3 text-white font-semibold hover:bg-[#092e6b] transition-colors"
-              >
-                Send Code
-              </button>
-            </div>
-          </motion.div>
-        )}
-
-        {step === "code" && (
-          <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="space-y-6">
-            <div className="text-center">
-              <div className="mx-auto w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-4 text-[#0B3C8A]">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <h3 className="text-2xl font-bold text-gray-900">Enter Code</h3>
-              <p className="text-sm text-gray-500 mt-2">We sent a code to <span className="font-semibold text-gray-800">{email}</span></p>
-            </div>
-            <div className="space-y-4">
-              <input
-                type="text"
-                placeholder="• • • • • •"
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-center text-2xl tracking-[0.5em] font-bold text-[#0B3C8A] focus:outline-none focus:ring-2 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A] transition-all"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                maxLength={6}
-              />
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setStep("email")}
-                  className="flex items-center justify-center gap-2 px-6 rounded-xl border border-gray-200 py-3 text-gray-600 font-medium hover:bg-gray-50 transition"
-                >
-                  <ChevronLeft className="w-4 h-4" /> Back
-                </button>
-                <button
-                  onClick={() => setStep("reset")}
-                  className="flex-1 rounded-xl bg-[#0B3C8A] py-3 text-white font-semibold hover:bg-[#092e6b] transition-colors"
-                >
-                  Verify
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {step === "reset" && (() => {
-          const rules = validatePassword(password);
-          const isValid = rules.length && rules.uppercase && rules.number && rules.symbol;
-          const isMatch = password === confirmPassword && password !== "";
-
-          return (
-            <motion.div initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="space-y-4">
-              <div className="text-center mb-2">
-                 <div className="mx-auto w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-4 text-[#0B3C8A]">
-                  <KeyRound className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900">New Password</h3>
-              </div>
-
-              <div className="space-y-3">
-                <div className="relative">
-                   <input
-                    type="password"
-                    placeholder="New password"
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A] transition-all"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
+              <div>
                 <input
-                  type="password"
-                  placeholder="Confirm password"
-                  className={`w-full rounded-xl border px-4 py-3 focus:outline-none focus:ring-2 transition-all ${
-                    confirmPassword && !isMatch 
-                      ? "border-red-300 focus:ring-red-200 focus:border-red-500" 
-                      : "border-gray-300 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A]"
-                  }`}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  type="email"
+                  required
+                  placeholder="Enter your email"
+                  className={`w-full rounded-xl border ${
+                    error ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-[#0B3C8A]/20 focus:border-[#0B3C8A]'
+                  } px-4 py-3 focus:outline-none focus:ring-2 transition-all`}
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError("");
+                  }}
+                  onKeyPress={handleKeyPress}
+                  disabled={isLoading}
                 />
-              </div>
-
-              <div className="bg-gray-50 p-3 rounded-lg grid grid-cols-2 gap-2 text-xs">
-                 <RuleItem valid={rules.length} text="8+ Characters" />
-                 <RuleItem valid={rules.uppercase} text="Uppercase" />
-                 <RuleItem valid={rules.number} text="Number" />
-                 <RuleItem valid={rules.symbol} text="Symbol" />
+                {error && (
+                  <p className="text-red-500 text-xs mt-2">{error}</p>
+                )}
               </div>
 
               <button
-                disabled={!isValid || !isMatch}
-                onClick={() => {
-                    setStep("success");
-                    showNotification("Password has been reset!", "success");
-                }}
-                className={`w-full rounded-xl py-3 font-bold transition-all duration-300 ${
-                  isValid && isMatch
-                    ? "bg-[#0B3C8A] text-white shadow-lg hover:bg-[#092e6b]"
-                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                }`}
+                onClick={handleSendResetEmail}
+                disabled={isLoading}
+                className={`w-full rounded-xl ${
+                  isLoading ? 'bg-blue-400' : 'bg-[#0B3C8A] hover:bg-[#092e6b]'
+                } py-3 text-white font-semibold transition-colors flex items-center justify-center gap-2`}
               >
-                Reset Password
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    SENDING...
+                  </>
+                ) : (
+                  'SEND RESET LINK'
+                )}
               </button>
-            </motion.div>
-          );
-        })()}
 
-        {step === "success" && (
+              <button
+                onClick={handleClose}
+                className="w-full text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Back to Login
+              </button>
+            </div>
+          </div>
+        ) : (
           <motion.div 
             initial={{ scale: 0.8, opacity: 0 }} 
             animate={{ scale: 1, opacity: 1 }} 
@@ -589,32 +599,34 @@ function ForgotPasswordModal({
             </motion.div>
 
             <h3 className="text-2xl font-bold text-gray-900 mb-2">
-              All Set!
+              Check Your Email
             </h3>
 
             <p className="text-sm text-gray-600 mb-8 max-w-xs mx-auto">
-              Your password has been successfully updated. You can now log in securely.
+              We&apos;ve sent a password reset link to <span className="font-semibold text-gray-800">{email}</span>. Please check your inbox and follow the instructions.
             </p>
 
-            <button
-              onClick={handleClose}
-              className="w-full rounded-xl bg-[#0B3C8A] py-3 text-white font-bold hover:bg-[#092e6b] shadow-lg transition-all"
-            >
-              Back to Login
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={handleClose}
+                className="w-full rounded-xl bg-[#0B3C8A] py-3 text-white font-bold hover:bg-[#092e6b] shadow-lg transition-all"
+              >
+                Back to Login
+              </button>
+              
+              <button
+                onClick={() => {
+                  setIsSent(false);
+                  setEmail("");
+                }}
+                className="w-full text-sm text-[#0B3C8A] hover:text-[#092e6b] transition-colors"
+              >
+                Send to different email
+              </button>
+            </div>
           </motion.div>
         )}
       </motion.div>
     </motion.div>
-  );
-}
-
-// Helper for password rules
-function RuleItem({ valid, text }: { valid: boolean; text: string }) {
-  return (
-    <div className={`flex items-center gap-1.5 ${valid ? "text-green-600" : "text-gray-400"}`}>
-      {valid ? <CheckCircle className="w-3 h-3" /> : <div className="w-3 h-3 rounded-full border border-gray-300" />}
-      <span>{text}</span>
-    </div>
   );
 }

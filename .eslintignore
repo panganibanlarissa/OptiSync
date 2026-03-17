@@ -1,0 +1,13 @@
+# .eslintignore
+node_modules/
+.next/
+out/
+public/
+
+# Ignore third-party JS files in node_modules
+node_modules/**/*.js
+
+# Ignore matplotlib and prophet JS files
+**/matplotlib/**
+**/prophet/**
+**/stan_model/**

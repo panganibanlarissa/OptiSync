@@ -1,0 +1,23 @@
+# ml-service/docker-compose.yml
+version: '3.8'
+
+services:
+  ml-service:
+    build: .
+    container_name: optisync-ml
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - FRONTEND_URL=http://localhost:3000
+      - LOG_LEVEL=info
+    volumes:
+      - ./models/saved:/app/models/saved
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - optisync-network
+
+networks:
+  optisync-network:
+    driver: bridge

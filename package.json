@@ -9,21 +9,29 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "framer-motion": "^12.34.0",
-    "jspdf": "^4.1.0",
+    "@cloudinary/url-gen": "^1.11.0",
+    "cloudinary": "^2.9.0",
+    "date-fns": "^4.1.0",
+    "firebase": "^12.10.0",
+    "framer-motion": "^12.35.2",
+    "idb": "^8.0.3",
+    "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
+    "next-cloudinary": "^5.0.0",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/date-fns": "^2.5.3",
     "@types/node": "^20",
-    "@types/react": "^19",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "tailwind-scrollbar": "^4.0.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
