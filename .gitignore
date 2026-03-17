@@ -31,7 +31,12 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+.env
+.env.*
+!.env.example
+.env.local
+.env.production
+.env.development
 
 # vercel
 .vercel
@@ -39,3 +44,91 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python virtual environment (ML Service)
+ml-service/venv/
+ml-service/env/
+ml-service/.venv/
+ml-service/__pycache__/
+ml-service/*.pyc
+ml-service/*.pyo
+ml-service/*.pyd
+ml-service/.Python
+ml-service/venv.bak/
+ml-service/*.log
+ml-service/.coverage
+ml-service/.pytest_cache/
+ml-service/.mypy_cache/
+ml-service/.ruff_cache/
+
+# Python distribution / packaging
+ml-service/.Python
+ml-service/build/
+ml-service/develop-eggs/
+ml-service/dist/
+ml-service/downloads/
+ml-service/eggs/
+ml-service/.eggs/
+ml-service/lib/
+ml-service/lib64/
+ml-service/parts/
+ml-service/sdist/
+ml-service/var/
+ml-service/wheels/
+ml-service/share/python-wheels/
+ml-service/*.egg-info/
+ml-service/.installed.cfg
+ml-service/*.egg
+ml-service/MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Package manager locks (optional - uncomment if you want to commit them)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
