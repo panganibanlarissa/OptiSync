@@ -457,7 +457,6 @@ export default function SettingsPage() {
                     value={userForm.name} 
                     onChange={handleUserFormChange}
                     type="text" 
-                    placeholder="e.g. John Doe" 
                     className={`w-full px-4 py-2.5 rounded-xl border ${
                       formErrors.name ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-2'
                     } text-sm ${THEME_RING} focus:outline-none bg-slate-50`} 
@@ -477,7 +476,6 @@ export default function SettingsPage() {
                     value={userForm.email} 
                     onChange={handleUserFormChange}
                     type="email" 
-                    placeholder="john@clinic.com" 
                     className={`w-full px-4 py-2.5 rounded-xl border ${
                       formErrors.email ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-2'
                     } text-sm ${THEME_RING} focus:outline-none bg-slate-50`} 
@@ -490,7 +488,7 @@ export default function SettingsPage() {
                 {modalMode === "add" && (
                   <div>
                     <label className="block text-xs font-bold text-gray-600 mb-1.5">
-                      Temporary Password <span className="text-red-500">*</span>
+                      Password <span className="text-red-500">*</span>
                     </label>
                     <input 
                       required 

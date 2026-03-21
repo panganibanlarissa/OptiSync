@@ -961,7 +961,6 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
                 value={formData.supplierInfo} 
                 onChange={handleChange} 
                 type="text" 
-                placeholder="e.g., Luxottica Inc." 
                 className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none text-gray-700 placeholder-gray-400`} 
               />
             </div>
