@@ -1,0 +1,428 @@
+// src/app/(app)/reports/page.tsx
+"use client";
+
+import React, { useState, useMemo } from "react";
+import { useNotification } from "@/components/NotificationProvider";
+import { useFirebase } from "@/context/FirebaseContext";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { 
+  Download, 
+  Receipt,
+  Search,
+  CheckCircle2,
+  XCircle,
+  FileText,
+  Filter
+} from "lucide-react";
+
+interface TransactionType {
+  id: string;
+  patientName: string;
+  items: Array<{ name: string; quantity: number; price: number }>;
+  total: number;
+  date: Date;
+  status: "completed" | "voided";
+}
+
+const THEME_BG = "bg-[#0B3C8A]";
+const THEME_HOVER = "hover:bg-[#082F6E]";
+const THEME_TEXT = "text-[#0B3C8A]";
+
+// Generate available months for filtering
+const getAvailableMonths = (transactions: TransactionType[]) => {
+  const months = new Set<string>();
+  transactions.forEach(trx => {
+    const date = new Date(trx.date);
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    months.add(monthKey);
+  });
+  return Array.from(months).sort().reverse();
+};
+
+// Generate available years for filtering
+const getAvailableYears = (transactions: TransactionType[]) => {
+  const years = new Set<number>();
+  transactions.forEach(trx => {
+    const year = new Date(trx.date).getFullYear();
+    years.add(year);
+  });
+  return Array.from(years).sort().reverse();
+};
+
+export default function ReportsPage() {
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "voided">("all");
+  
+  const { showNotification } = useNotification();
+  const { 
+    transactions: firebaseTransactions
+  } = useFirebase();
+
+  const transactions = useMemo(() => {
+    return firebaseTransactions as TransactionType[];
+  }, [firebaseTransactions]);
+
+  // Get available months based on selected year
+  const availableMonths = useMemo(() => {
+    const months = getAvailableMonths(transactions);
+    return months.filter(month => parseInt(month.split('-')[0]) === selectedYear);
+  }, [transactions, selectedYear]);
+
+  // Get available years
+  const availableYears = useMemo(() => {
+    return getAvailableYears(transactions);
+  }, [transactions]);
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(trx => {
+      const searchLower = searchQuery.toLowerCase();
+      const matchesSearch = searchQuery === "" || 
+        trx.id.toLowerCase().includes(searchLower) ||
+        trx.patientName.toLowerCase().includes(searchLower) ||
+        trx.items.some(item => item.name.toLowerCase().includes(searchLower));
+      
+      const transactionDate = new Date(trx.date);
+      const transactionYear = transactionDate.getFullYear();
+      const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
+      const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
+      const matchesStatus = statusFilter === "all" || trx.status === statusFilter;
+      
+      return matchesSearch && matchesYear && matchesMonth && matchesStatus;
+    });
+  }, [transactions, searchQuery, selectedYear, selectedMonth, statusFilter]);
+
+  const exportLedgerReport = () => {
+    if (filteredTransactions.length === 0) {
+      showNotification("No transactions found for this period to export.", "error");
+      return;
+    }
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    let periodText = "";
+    if (selectedYear !== 0) {
+      if (selectedMonth !== "all") {
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const monthIndex = parseInt(selectedMonth.split('-')[1]) - 1;
+        periodText = `${monthNames[monthIndex]} ${selectedYear}`;
+      } else {
+        periodText = `Year ${selectedYear}`;
+      }
+    } else {
+      periodText = "All Time";
+    }
+
+    const validTransactions = filteredTransactions.filter(t => t.status === 'completed');
+    const totalRevenue = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
+
+    // Generate table with footer callback
+    autoTable(doc, {
+      startY: 40,
+      margin: { top: 40, right: 14, left: 14, bottom: 20 },
+      head: [['Receipt No', 'Date', 'Patient Name', 'Items', 'Status', 'Amount (PHP)']],
+      body: filteredTransactions.map(t => {
+        const itemsStr = t.items.map(i => `${i.quantity}x ${i.name}`).join(', ');
+        return [
+          t.id.slice(-8).toUpperCase(), 
+          new Date(t.date).toLocaleDateString(), 
+          t.patientName, 
+          itemsStr,
+          t.status.toUpperCase(),
+          t.total.toLocaleString()
+        ];
+      }),
+      theme: 'grid',
+      headStyles: { fillColor: [220, 220, 220], textColor: [0, 0, 0], fontStyle: 'bold' },
+      styles: { fontSize: 9 },
+      didDrawPage: (data) => {
+        // Add header to every page
+        doc.setFontSize(16);
+        doc.setTextColor(0, 0, 0);
+        doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
+        
+        doc.setFontSize(11);
+        doc.setTextColor(60, 60, 60);
+        doc.text("Sales Transaction Ledger", pageWidth / 2, 23, { align: 'center' });
+        
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Period: ${periodText} | Generated: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
+        
+        // Add horizontal line under header
+        doc.setDrawColor(200, 200, 200);
+        doc.line(14, 32, pageWidth - 14, 32);
+        
+        // Footer (temporary - will be updated in second pass)
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        
+        const footerText = "Confidential - For Record Keeping Only";
+        const lineY = pageHeight - 15;
+        doc.setDrawColor(200, 200, 200);
+        doc.line(14, lineY, pageWidth - 14, lineY);
+        doc.text(footerText, 14, lineY + 5);
+        // Page number will be filled in after
+        doc.text("", pageWidth - 14, lineY + 5, { align: 'right' });
+      }
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 40;
+    
+    // Summary section
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Total Transactions: ${validTransactions.length}`, 14, finalY + 10);
+    
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, finalY + 20);
+
+    // Update page numbers on all pages with correct total
+    const totalPages = doc.getNumberOfPages();
+    const lineY = pageHeight - 15;
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, lineY + 5, { align: 'right' });
+    }
+
+    const fileName = periodText.replace(/ /g, '_');
+    doc.save(`Sales_Ledger_${fileName}.pdf`);
+  };
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setSelectedMonth("all");
+    setSelectedYear(new Date().getFullYear());
+    setStatusFilter("all");
+  };
+
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear();
+
+  return (
+    <div className="min-h-screen w-full font-sans sm:mt-2 p-2 sm:p-4 box-border pb-20 space-y-4 sm:space-y-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="p-4 sm:p-6 border-b border-gray-100">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <div className="p-1.5 sm:p-2 bg-blue-50 rounded-lg">
+                  <Receipt className={THEME_TEXT} size={24} />
+                </div>
+                Transaction Ledger
+              </h1>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                View and export all sales transactions
+              </p>
+            </div>
+            
+            <button 
+              onClick={exportLedgerReport}
+              className={`flex items-center justify-center gap-1.5 ${THEME_BG} ${THEME_HOVER} text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors shrink-0 w-full sm:w-auto`}
+            >
+              <Download size={14} /> Export Report
+            </button>
+          </div>
+        </div>
+
+        {/* Filters - All in one line on desktop */}
+        <div className="p-4 sm:p-6 border-b border-gray-100 bg-gray-50/30">
+          <div className="flex flex-col lg:flex-row gap-3">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+              <input 
+                type="text" 
+                placeholder="Search by receipt, patient, or item..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+              />
+            </div>
+
+            {/* Status */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "voided")}
+              className="px-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700 w-full lg:w-32"
+            >
+              <option value="all">All Status</option>
+              <option value="completed">Completed</option>
+              <option value="voided">Voided</option>
+            </select>
+
+            {/* Year */}
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                setSelectedYear(parseInt(e.target.value));
+                setSelectedMonth("all");
+              }}
+              className="px-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700 w-full lg:w-32"
+            >
+              <option value={0}>All Years</option>
+              {availableYears.map(year => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+
+            {/* Month */}
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              disabled={selectedYear === 0}
+              className="px-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700 disabled:bg-gray-100 disabled:cursor-not-allowed w-full lg:w-36"
+            >
+              <option value="all">All Months</option>
+              {availableMonths.map(month => {
+                const [year, monthNum] = month.split('-');
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return (
+                  <option key={month} value={month}>
+                    {monthNames[parseInt(monthNum) - 1]} {year}
+                  </option>
+                );
+              })}
+            </select>
+
+            {/* Clear Button */}
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="px-3 py-2 text-xs sm:text-sm text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors flex items-center justify-center gap-1 w-full lg:w-auto lg:px-4"
+              >
+                <Filter size={14} /> Clear
+              </button>
+            )}
+          </div>
+
+          {/* Results count */}
+          <div className="text-xs text-gray-500 mt-3">
+            Showing {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+
+        {/* Transactions Table */}
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-left text-[11px] sm:text-sm whitespace-nowrap">
+            <thead className="bg-gray-50 text-gray-500 font-semibold text-[10px] sm:text-xs border-b border-gray-200">
+              <tr>
+                <th className="p-4">Receipt No.</th>
+                <th className="p-4">Date</th>
+                <th className="p-4">Patient Name</th>
+                <th className="p-4">Items</th>
+                <th className="p-4 text-right">Amount (₱)</th>
+                <th className="p-4 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredTransactions.length > 0 ? (
+                filteredTransactions.map((trx, idx) => {
+                  const dateObj = new Date(trx.date);
+                  const formattedDate = dateObj.toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    year: 'numeric' 
+                  });
+                  const formattedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                  return (
+                    <tr key={`ledger-${idx}`} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="p-4 font-mono font-medium text-gray-500">
+                        {trx.id.slice(-8).toUpperCase()}
+                      </td>
+                      <td className="p-4 text-gray-600">
+                        {formattedDate} {formattedTime}
+                      </td>
+                      <td className="p-4 font-semibold text-gray-800">
+                        {trx.patientName}
+                      </td>
+                      <td className="p-4 text-gray-600 max-w-xs">
+                        <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
+                          {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+                        </div>
+                      </td>
+                      <td className="p-4 text-right font-bold text-gray-800">
+                        ₱{trx.total.toLocaleString()}
+                      </td>
+                      <td className="p-4 text-center">
+                        {trx.status === 'completed' ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">
+                            <CheckCircle2 size={12}/> COMPLETED
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-red-700 bg-red-50 px-2 py-0.5 rounded text-[10px] font-bold">
+                            <XCircle size={12}/> VOIDED
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-gray-400">
+                    <Receipt size={32} className="mx-auto mb-2 opacity-20"/>
+                    No transactions found.
+                    {hasActiveFilters && (
+                      <button
+                        onClick={clearFilters}
+                        className="block mx-auto mt-2 text-xs text-[#0B3C8A] hover:underline"
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Summary Footer */}
+        {filteredTransactions.length > 0 && (
+          <div className="p-4 bg-gray-50 border-t border-gray-100">
+            <div className="flex flex-col sm:flex-row justify-between gap-4">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div>
+                  <span className="text-gray-500">Total:</span>
+                  <span className="ml-2 font-bold text-gray-800">{filteredTransactions.length}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Completed:</span>
+                  <span className="ml-2 font-bold text-emerald-600">
+                    {filteredTransactions.filter(t => t.status === 'completed').length}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Voided:</span>
+                  <span className="ml-2 font-bold text-red-600">
+                    {filteredTransactions.filter(t => t.status === 'voided').length}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <span className="text-gray-500">Total Revenue:</span>
+                <span className="ml-2 font-bold text-[#0B3C8A] text-lg">
+                  ₱{filteredTransactions
+                    .filter(t => t.status === 'completed')
+                    .reduce((sum, t) => sum + t.total, 0)
+                    .toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

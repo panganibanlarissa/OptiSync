@@ -1,6 +1,6 @@
-# M.T. Olaso Optical Clinic - AI Inventory & Forecasting System
+# M.T. Olaso Optical Clinic - Inventory & POS Management System
 
-A comprehensive **Inventory Management, Point of Sale (POS), and AI Demand Forecasting System** designed specifically for the **M.T. Olaso Optical Clinic**. This web application modernizes clinic operations by tracking eyewear and supplies, processing patient sales, and utilizing machine learning to accurately predict future restock needs.
+A comprehensive **Inventory Management and Point of Sale (POS) System** designed specifically for the **M.T. Olaso Optical Clinic**. This web application modernizes clinic operations by tracking eyewear and supplies with QR code integration, processing patient sales efficiently, and maintaining real-time inventory records.
 
 ## 🚀 Key Features
 
@@ -12,11 +12,12 @@ A comprehensive **Inventory Management, Point of Sale (POS), and AI Demand Forec
 ### 🔹 **Main Dashboard**
 - **Clinic Analytics:** Real-time KPI cards for Revenue, Gross Profit, and Sales Trends.
 - **At-a-glance Alerts:** Immediate warnings for low-stock and deadstock items.
-- **AI Visuals:** Interactive charts comparing historical data to predicted future demand.
+- **Sales Insights:** Track daily transactions and performance metrics.
 
 ### 🔹 **Inventory Management**
 - **Live Catalog:** Add, Edit, and Delete frames, lenses, and clinic supplies.
 - **Smart Triggers:** Color-coded status indicators ("In Stock", "Low Stock").
+- **QR Code Integration:** Generate unique QR codes for quick product lookup and automatic stock adjustments via camera scanning.
 - **Deadstock Identification:** Automatically flags slow-moving items (unsold for 30+ days) to free up tied capital.
 
 
@@ -25,10 +26,10 @@ A comprehensive **Inventory Management, Point of Sale (POS), and AI Demand Forec
 - **Dynamic Pricing:** Apply VAT/Tax, calculate subtotals, and process Cash/GCash.
 - **Official Receipts:** Instant generation of beautifully formatted, printable PDF receipts.
 
-### 🔹 **AI Analytics & Reports**
-- **Smart Predictions:** Utilizes FBProphet / XGBoost logic to identify seasonal trends.
-- **Smart Restock Engine:** Calculates exact order dates based on supplier lead times.
-- **Transaction Ledger:** Monthly searchable sales records exportable as professional PDF reports for accounting.
+### 🔹 **Transaction Reports**
+- **Sales Records:** Monthly searchable transaction history for all clinic sales.
+- **PDF Exports:** Generate professional, printable reports for accounting and auditing purposes.
+- **Receipt Management:** Access all issued receipts with complete transaction details.
 
 ### 🔹 **System Settings**
 - **Clinic Profile:** Dynamic logo and address management for automated receipt branding.
@@ -43,11 +44,37 @@ A comprehensive **Inventory Management, Point of Sale (POS), and AI Demand Forec
 - **Animations:** [Framer Motion](https://www.framer.com/motion/) (Page transitions, micro-interactions)
 - **Icons:** [Lucide React](https://lucide.dev/)
 - **PDF Generation:** `jspdf` & `jspdf-autotable`
+- **QR Code Scanning:** [jsQR](https://github.com/cozmo/jsQR) (Product lookup and inventory management)
 - **Language:** TypeScript
 
 ---
 
-## 📦 Getting Started
+## � Project Structure
+
+```
+OptiSync/
+├── frontend/                    # Next.js frontend application
+│   ├── src/                     # React components and pages
+│   ├── public/                  # Static assets
+│   ├── package.json             # Frontend dependencies
+│   ├── next.config.js           # Next.js configuration
+│   ├── tailwind.config.js       # Tailwind CSS configuration
+│   ├── tsconfig.json            # TypeScript configuration
+│   ├── .env.local               # Local environment variables
+│   └── ...other config files
+├── ml-service/                  # Python ML forecasting service
+│   ├── app.py                   # Flask/FastAPI application
+│   ├── models/                  # Prophet and XGBoost models
+│   ├── requirements.txt         # Python dependencies
+│   ├── Dockerfile               # Container configuration
+│   └── docker-compose.yml       # Multi-container setup
+├── README.md                    # This file
+└── TODO.md                      # Project roadmap
+```
+
+---
+
+## �📦 Getting Started
 
 Follow these steps to set up the project locally.
 
@@ -81,15 +108,17 @@ src/
 │   ├── (app)/              # Protected application routes (Requires Login)
 │   │   ├── dashboard/      # Main analytics & alerts dashboard
 │   │   ├── sales/          # Point of Sale & patient checkout
-│   │   ├── inventory/      # Stock management & deadstock tracking
-│   │   ├── reports/        # AI Forecasting & PDF Ledger exports
+│   │   ├── inventory/      # Stock management with QR code scanning
+│   │   ├── reports/        # Transaction records & PDF exports
 │   │   └── settings/       # User management
 │   ├── (auth)/             # Authentication routes
 │   │   └── login/          # Secure Login page with RA 10173 policy
 │   ├── page.tsx            # Animated Landing page
 │   └── layout.tsx          # Root layout (includes NotificationProvider)
 ├── components/
-│   └── NotificationProvider.tsx  # Global Toast Notification Context
+│   ├── QRScannerModal.tsx         # QR code scanning interface
+│   ├── NotificationProvider.tsx   # Global Toast Notification Context
+│   └── ...other components
 └── public/
     └── logo.png            # Clinic Logo assets
 ```
