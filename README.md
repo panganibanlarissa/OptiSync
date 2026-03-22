@@ -49,7 +49,7 @@ A comprehensive **Inventory Management and Point of Sale (POS) System** designed
 
 ---
 
-## � Project Structure
+## 📂 Project Structure
 
 ```
 OptiSync/
@@ -99,29 +99,6 @@ yarn dev
 ```
 Open http://localhost:3000 with your browser to see the result.
 
----
-
-## 📂 Project Structure
-```
-src/
-├── app/
-│   ├── (app)/              # Protected application routes (Requires Login)
-│   │   ├── dashboard/      # Main analytics & alerts dashboard
-│   │   ├── sales/          # Point of Sale & patient checkout
-│   │   ├── inventory/      # Stock management with QR code scanning
-│   │   ├── reports/        # Transaction records & PDF exports
-│   │   └── settings/       # User management
-│   ├── (auth)/             # Authentication routes
-│   │   └── login/          # Secure Login page with RA 10173 policy
-│   ├── page.tsx            # Animated Landing page
-│   └── layout.tsx          # Root layout (includes NotificationProvider)
-├── components/
-│   ├── QRScannerModal.tsx         # QR code scanning interface
-│   ├── NotificationProvider.tsx   # Global Toast Notification Context
-│   └── ...other components
-└── public/
-    └── logo.png            # Clinic Logo assets
-```
 ---
 
 ### 👤 Authors & Contact
