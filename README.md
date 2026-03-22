@@ -80,8 +80,8 @@ Follow these steps to set up the project locally.
 
 ### 1. Clone the repository
 ```bash
-git clone [https://github.com/panganibanlarissa/mt-olaso-inventory.git](https://github.com/panganibanlarissa/mt-olaso-inventory.git)
-cd mt-olaso-inventory
+git clone https://github.com/panganibanlarissa/mt-olaso-inventory.git
+cd OptiSync
 ```
 
 ### 2. Install Dependencies
@@ -98,6 +98,54 @@ npm run dev
 yarn dev
 ```
 Open http://localhost:3000 with your browser to see the result.
+
+---
+
+### ⚙️ Detailed Environment Setup
+
+#### Frontend Setup
+
+Navigate to the frontend directory and install dependencies:
+```bash
+cd frontend
+npm install
+```
+
+Run development server:
+```bash
+npm run dev
+```
+
+#### ML Service Setup (Optional)
+
+In a separate terminal, set up the Python ML service:
+
+```bash
+cd ml-service
+
+# Create Python virtual environment
+# On Windows:
+python -m venv venv
+venv\Scripts\activate
+
+# On macOS/Linux:
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run ML service
+python app.py
+```
+
+**Access points:**
+- Frontend: http://localhost:3000
+- ML Service: http://localhost:8000
+
+---
+
+For complete setup guides, see [SETUP.md](SETUP.md)
 
 ---
 

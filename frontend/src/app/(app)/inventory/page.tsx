@@ -511,7 +511,6 @@ export default function InventoryPage() {
                 if (qrScanMode === 'search') {
                   // In search mode: populate search query with product name
                   setSearchQuery(product.name);
-                  showNotification(`Found: "${product.name}" (SKU: ${product.sku})`, "success", "Product Found");
                   setIsQRScannerOpen(false);
                 } else if (qrScanMode === 'adjust') {
                   // In adjust mode: add 1 unit to stock via QR scan
