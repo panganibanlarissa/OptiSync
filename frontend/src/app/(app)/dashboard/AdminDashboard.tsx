@@ -461,12 +461,6 @@ export default function AdminDashboard() {
                         Actual Sales
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
-                      <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                        AI Forecast
-                      </span>
-                    </div>
                   </div>
                 </div>
               </div>
