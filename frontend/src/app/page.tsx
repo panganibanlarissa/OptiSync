@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import Image from "next/image"; 
+import Image from "next/image";
+import { useFirebase } from "@/context/FirebaseContext"; 
 import { 
   Package, 
   TrendingUp, 
@@ -16,7 +17,8 @@ import {
   FileText,
   Clock,
   Sparkles,
-  Barcode
+  Barcode,
+  ChevronUp
 } from "lucide-react";
 
 // --- THEME COLORS ---
@@ -36,17 +38,33 @@ const FORECAST_DATA = [
 
 export default function LandingPage() {
   const [isScrolled, setIsScrolled] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"checkout" | "inventory" | "reports">("checkout");
+  const { products: firebaseProducts } = useFirebase();
+  const [displayProducts, setDisplayProducts] = useState<any[]>([]);
 
-  // Handle Scroll Effect for Navbar
+  // Handle Scroll Effect for Navbar and Scroll-to-Top Button
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
+      setShowScrollTop(window.scrollY > 300);
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Scroll to Top Handler
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Load products from Firebase
+  useEffect(() => {
+    if (firebaseProducts && firebaseProducts.length > 0) {
+      setDisplayProducts(firebaseProducts.slice(0, 12));
+    }
+  }, [firebaseProducts]);
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-800 selection:bg-blue-100 overflow-x-hidden">
@@ -74,6 +92,7 @@ export default function LandingPage() {
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
+            <a href="#products" className="hover:text-[#0B3C8A] transition-colors">Products</a>
             <a href="#features" className="hover:text-[#0B3C8A] transition-colors">System Features</a>
             <a href="#workflow" className="hover:text-[#0B3C8A] transition-colors">How it Works</a>
             <a href="#about" className="hover:text-[#0B3C8A] transition-colors">About</a>
@@ -98,6 +117,7 @@ export default function LandingPage() {
         {/* Mobile Dropdown */}
         {mobileMenuOpen && (
           <div className="md:hidden absolute top-full left-0 w-full bg-white border-b border-slate-100 p-5 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-top-5">
+            <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Our Products</a>
             <a href="#features" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>System Features</a>
             <a href="#workflow" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>How it Works</a>
             <a href="#about" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>About</a>
@@ -120,7 +140,7 @@ export default function LandingPage() {
           {/* Text Content */}
           <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 mt-8 sm:mt-0 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-[10px] sm:text-xs font-bold mb-6">
-               <Sparkles size={14} /> Smart Inventory Management
+               <Sparkles size={14} /> Auto Deadstock & Reorder Alerts
             </div>
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-slate-900 leading-[1.1] mb-5 tracking-tight">
               Inventory & Sales <br className="hidden sm:block" />
@@ -220,7 +240,72 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* --- 3. SYSTEM FEATURES TABS --- */}
+      {/* --- 3. PRODUCTS SHOWCASE --- */}
+      <section id="products" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Our Products</h2>
+            <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
+              Quality optical frames, lenses, and contact solutions for your vision needs.
+            </p>
+          </div>
+
+          {displayProducts.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
+              {displayProducts.map((product, idx) => {
+                const renderImage = () => {
+                  if (product.image && !product.image.startsWith('blob:')) {
+                    return (
+                      <div className="relative w-full h-full">
+                        <Image
+                          src={product.image}
+                          alt={product.name}
+                          fill
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                          className="object-cover"
+                        />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className={`w-full h-full ${product.imageColor || 'bg-slate-100'} flex items-center justify-center`}>
+                      <Package className="opacity-20 text-[#0B3C8A] w-1/3 h-1/3" />
+                    </div>
+                  );
+                };
+
+                return (
+                  <div
+                    key={product.id || idx}
+                    className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg hover:border-slate-300 transition-all duration-300 hover:-translate-y-1 flex flex-col"
+                  >
+                    <div className="relative aspect-square w-full overflow-hidden bg-slate-50">
+                      {renderImage()}
+                    </div>
+                    <div className="p-3 sm:p-4 flex flex-col flex-1">
+                      <h3 className="text-xs sm:text-sm font-bold text-slate-800 line-clamp-2 leading-snug">
+                        {product.name}
+                      </h3>
+                      {product.category && (
+                        <p className="text-[10px] sm:text-xs text-slate-400 mt-1">
+                          {product.category}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-16">
+              <Package className="w-12 h-12 mx-auto text-slate-300 mb-4" />
+              <p className="text-slate-500 text-base font-medium">Loading our product catalog...</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* --- 4. SYSTEM FEATURES TABS --- */}
       <section id="features" className="py-16 sm:py-24 bg-slate-50 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           
@@ -519,7 +604,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* --- 4. STATS STRIP --- */}
+      {/* --- 5. STATS STRIP --- */}
       <section className="bg-[#0B3C8A] py-12 sm:py-16 text-white relative overflow-hidden px-4">
         {/* Subtle background pattern */}
         <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
@@ -543,7 +628,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* --- 5. WORKFLOW SECTION --- */}
+      {/* --- 6. WORKFLOW SECTION --- */}
       <section id="workflow" className="py-16 sm:py-24 bg-white px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12 sm:mb-16 px-2">
@@ -573,7 +658,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* --- 6. FOOTER --- */}
+      {/* --- 7. FOOTER --- */}
       <footer id="about" className="bg-slate-50 border-t border-slate-200 pt-16 sm:pt-20 pb-8 sm:pb-10 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-start gap-10 sm:gap-12 mb-12 sm:mb-16">
@@ -589,17 +674,18 @@ export default function LandingPage() {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 sm:gap-16 lg:gap-24 text-sm">
               <div>
-                <h5 className="font-black text-slate-900 mb-3 sm:mb-4 uppercase tracking-wider text-[10px] sm:text-xs">System Contacts</h5>
-                <ul className="space-y-2 sm:space-y-3 text-slate-500 font-medium text-xs sm:text-sm">
-                  <li>202311183@gordoncollege.edu.ph</li>
-                  <li>202310500@gordoncollege.edu.ph</li>
+                <h5 className="font-black text-slate-900 mb-3 sm:mb-4 uppercase tracking-wider text-[10px] sm:text-xs">Address</h5>
+                <ul className="space-y-2 sm:space-y-3 text-slate-500 font-medium text-xs sm:text-sm leading-relaxed">
+                  <li>M.T. Olaso Optical Clinic</li>
+                  <li>43 Magsaysay Dr Olongapo City,</li>
+                  <li>Zambales</li>
                 </ul>
               </div>
               <div>
-                <h5 className="font-black text-slate-900 mb-3 sm:mb-4 uppercase tracking-wider text-[10px] sm:text-xs">Developers</h5>
-                <ul className="space-y-2 sm:space-y-3 text-slate-500 font-medium text-xs sm:text-sm">
-                  <li>Larissa Panganiban</li>
-                  <li>Rejean Zapanta</li>
+                <h5 className="font-black text-slate-900 mb-3 sm:mb-4 uppercase tracking-wider text-[10px] sm:text-xs">Contact</h5>
+                <ul className="space-y-2 sm:space-y-3 text-slate-500 font-medium text-xs sm:text-sm leading-relaxed">
+                  <li>Phone: 0922 825 4918</li>
+                  <li>Hours: Mon-Fri 10AM-6PM</li>
                 </ul>
               </div>
             </div>
@@ -613,6 +699,17 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {/* Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-6 sm:bottom-8 right-6 sm:right-8 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#0B3C8A] text-white shadow-lg hover:bg-[#08306B] transition-all hover:-translate-y-1 active:scale-95 flex items-center justify-center z-40 animate-in fade-in slide-in-from-bottom-4 duration-300"
+          aria-label="Scroll to top"
+        >
+          <ChevronUp size={20} className="sm:w-6 sm:h-6" />
+        </button>
+      )}
 
     </div>
   );

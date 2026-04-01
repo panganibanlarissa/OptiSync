@@ -25,7 +25,9 @@ import {
   RefreshCcw,
   Glasses,
   Calendar,
-  QrCode
+  QrCode,
+  Banknote,
+  CreditCard
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
@@ -73,6 +75,9 @@ interface Transaction {
   staffName?: string;
   staffId?: string;
   createdAt?: Timestamp;
+  paymentMethod?: "cash" | "online";
+  amountGiven?: number;
+  change?: number;
 }
 
 const CATEGORIES = ["All", "Frames", "Lenses", "Contact Lenses", "Solutions", "Accessories"];
@@ -113,13 +118,21 @@ export default function SalesPage() {
   const [voidModalOpen, setVoidModalOpen] = useState(false);
   const [transactionToVoid, setTransactionToVoid] = useState<string | null>(null);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "online">("cash");
+  const [amountGiven, setAmountGiven] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
 
   useEffect(() => {
-    if (firebaseProducts && firebaseProducts.length > 0) {
-      const categories = new Set(firebaseProducts.map(p => p.category?.trim()));
-      console.log('📊 Available categories in products:', Array.from(categories));
-    }
+    // Component mounted - no need to log categories every time
   }, [firebaseProducts]);
+
+  const filteredTransactions = useMemo(() => {
+    return (firebaseTransactions as Transaction[]).filter(transaction => {
+      const transactionDate = new Date(transaction.date);
+      const transactionMonth = transactionDate.toISOString().slice(0, 7);
+      return transactionMonth === selectedMonth;
+    });
+  }, [firebaseTransactions, selectedMonth]);
 
   const productsWithAvailableStock = useMemo(() => {
     return (firebaseProducts as Product[]).map(product => ({
@@ -236,6 +249,20 @@ export default function SalesPage() {
       return;
     }
 
+    // Only validate cash payment amount if cash is selected
+    if (paymentMethod === "cash") {
+      if (!amountGiven.trim()) {
+        showToastOnly("Please enter the amount given", "error");
+        return;
+      }
+
+      const amount = parseFloat(amountGiven);
+      if (isNaN(amount) || amount < total) {
+        showToastOnly("Amount given must be at least ₱" + total.toLocaleString(), "error");
+        return;
+      }
+    }
+
     try {
       const currentUser = { 
         name: userName || "Staff",
@@ -281,7 +308,11 @@ export default function SalesPage() {
         }
       }
 
-      const newTransaction = {
+      // Calculate change only for cash payments
+      const change = paymentMethod === "cash" ? parseFloat(amountGiven) - total : undefined;
+
+      // Build transaction object - only include cash-specific fields if payment is cash
+      const newTransaction: any = {
         patientName: patientName || "Walk-in Patient",
         items: cart,
         total: total,
@@ -289,8 +320,15 @@ export default function SalesPage() {
         status: "completed" as const,
         synced: isOnline,
         staffName: currentUser.name,
-        staffId: currentUser.id
+        staffId: currentUser.id,
+        paymentMethod: paymentMethod
       };
+
+      // Only add cash-specific fields if payment method is cash
+      if (paymentMethod === "cash") {
+        newTransaction.amountGiven = parseFloat(amountGiven);
+        newTransaction.change = change;
+      }
 
       const transactionId = await addTransaction(newTransaction);
       const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -358,6 +396,8 @@ export default function SalesPage() {
       setLastTransaction(tempTransaction);
       setShowCheckoutModal(true);
       clearCart();
+      setPaymentMethod("cash");
+      setAmountGiven("");
       
     } catch (error) {
       console.error("Checkout error:", error);
@@ -378,63 +418,156 @@ export default function SalesPage() {
   };
 
   const generateReceipt = (trx: Transaction) => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    let currentY = 20;
+    // Create a POS-style receipt (80mm thermal receipt format)
+    const itemCount = trx.items.length;
+    const estimatedHeight = 80 + (itemCount * 10);
+    const doc = new jsPDF('p', 'mm', [80, Math.max(150, estimatedHeight)]);
+    const pageWidth = 80;
+    let currentY = 5; // Top margin
+    const leftMargin = 3;
+    const rightMargin = 3;
 
-    doc.setFontSize(16);
-    doc.setTextColor(0, 0, 0);
-    doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, currentY, { align: 'center' });
+    // Helper function for dashed divider
+    const drawDashedDivider = (y: number) => {
+      doc.setDrawColor(150, 150, 150);
+      let x = leftMargin;
+      const dashWidth = 1.5;
+      const gapWidth = 1;
+      while (x < pageWidth - rightMargin) {
+        doc.line(x, y, x + dashWidth, y);
+        x += dashWidth + gapWidth;
+      }
+    };
 
+    // === HEADER ===
     doc.setFontSize(11);
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text("M.T. OLASO OPTICAL", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 5;
+
+    doc.setFontSize(6.5);
+    doc.setFont('Helvetica', 'normal');
     doc.setTextColor(60, 60, 60);
-    doc.text("Official Receipt", pageWidth / 2, currentY + 8, { align: 'center' });
+    doc.text("Address: 43 Magsaysay Drive", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 2.5;
+    doc.text("Olongapo, Philippines, 2200", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 2.5;
+    doc.text("Tel. 0922 825 4918", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 3;
 
+    // Dashed divider
+    drawDashedDivider(currentY);
+    currentY += 3;
+
+    // === RECEIPT TYPE ===
     doc.setFontSize(9);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Receipt No: ${trx.id.slice(-8).toUpperCase()}  |  Date: ${new Date(trx.date).toLocaleString()}`, pageWidth / 2, currentY + 15, { align: 'center' });
-    doc.text(`Patient: ${trx.patientName}`, pageWidth / 2, currentY + 21, { align: 'center' });
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    const paymentType = trx.paymentMethod === 'cash' ? 'CASH RECEIPT' : 'ONLINE RECEIPT';
+    doc.text(paymentType, pageWidth / 2, currentY, { align: 'center' });
+    currentY += 4;
+
+    // Dashed divider
+    drawDashedDivider(currentY);
+    currentY += 3;
+
+    // === RECEIPT DETAILS ===
+    doc.setFontSize(6);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    
+    const receiptDate = new Date(trx.date);
+    const dateStr = receiptDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+    const timeStr = receiptDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    
+    doc.text(`Receipt: ${trx.id.slice(-8).toUpperCase()}  ${dateStr} ${timeStr}`, leftMargin, currentY);
+    currentY += 2.5;
+    
     if (trx.staffName) {
-      doc.text(`User: ${trx.staffName}`, pageWidth / 2, currentY + 27, { align: 'center' });
-      currentY += 6;
+      doc.text(`Cashier: ${trx.staffName}`, leftMargin, currentY);
+      currentY += 2.5;
     }
+    
+    doc.text(`Customer: ${trx.patientName}`, leftMargin, currentY);
+    currentY += 3;
 
-    currentY = 50;
+    // Dashed divider
+    drawDashedDivider(currentY);
+    currentY += 2.5;
 
-    const tableData = trx.items.map(item => [
-      item.name,
-      item.quantity.toString(),
-      `PHP ${item.price.toLocaleString()}`,
-      `PHP ${(item.quantity * item.price).toLocaleString()}`
-    ]);
+    // === ITEMS HEADER ===
+    doc.setFontSize(6);
+    doc.setFont('Helvetica', 'bold');
+    doc.text('Description', leftMargin, currentY);
+    doc.text('Price', pageWidth - rightMargin - 8, currentY, { align: 'right' });
+    currentY += 2;
 
-    autoTable(doc, {
-      startY: currentY,
-      head: [["Item Description", "Qty", "Unit Price", "Amount"]],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [220, 220, 220], textColor: [0, 0, 0], fontStyle: 'bold', lineColor: [100, 100, 100] },
-      bodyStyles: { textColor: [0, 0, 0], lineColor: [200, 200, 200] },
-      styles: { fontSize: 9, cellPadding: 4 }
+    // === ITEMS ===
+    doc.setFontSize(6);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+
+    trx.items.forEach(item => {
+      const lineAmount = item.quantity * item.price;
+      const lineAmountStr = `${lineAmount.toLocaleString()}`;
+      
+      // Item name and quantity on full line
+      const displayName = `${item.name} (x${item.quantity})`;
+      
+      doc.text(displayName, leftMargin, currentY);
+      doc.text(lineAmountStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      currentY += 2.3;
     });
 
-    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || currentY;
+    // Dashed divider
+    drawDashedDivider(currentY);
+    currentY += 2.5;
 
-    doc.setFontSize(12);
+    // === TOTALS ===
+    doc.setFontSize(7);
+    doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total Amount: PHP ${trx.total.toLocaleString()}`, 14, finalY + 10);
+    
+    const totalStr = trx.total.toLocaleString();
+    doc.text('Total', leftMargin, currentY);
+    doc.text(totalStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+    currentY += 2.8;
 
-    doc.setFontSize(8);
-    doc.setTextColor(100, 100, 100);
-    const totalPages = ((doc as unknown) as { internal: { pages: unknown[] } }).internal.pages.length - 1;
-    for (let i = 1; i <= totalPages; i++) {
-      ((doc as unknown) as { setPage: (pageNum: number) => void }).setPage(i);
-      doc.setDrawColor(180, 180, 180);
-      doc.line(14, pageHeight - 15, pageWidth - 14, pageHeight - 15);
-      doc.text("Confidential - For Record Keeping Only", 14, pageHeight - 8);
-      doc.text(`Page ${i} of ${totalPages}`, pageWidth - 30, pageHeight - 8);
+    // Payment details
+    doc.setFontSize(6);
+    doc.setFont('Helvetica', 'normal');
+    
+    if (trx.paymentMethod === 'cash' && trx.amountGiven !== undefined) {
+      const amountStr = trx.amountGiven.toLocaleString();
+      doc.text('Cash', leftMargin, currentY);
+      doc.text(amountStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      currentY += 2.3;
+
+      const changeAmount = trx.change || 0;
+      const changeStr = changeAmount.toLocaleString();
+      doc.text('Change', leftMargin, currentY);
+      doc.text(changeStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+    } else if (trx.paymentMethod === 'online') {
+      doc.text('Payment Method: Online', leftMargin, currentY);
     }
+    currentY += 3;
+
+    // Dashed divider
+    drawDashedDivider(currentY);
+    currentY += 2.5;
+
+    // === FOOTER ===
+    doc.setFontSize(8);
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text("THANK YOU!", pageWidth / 2, currentY, { align: 'center' });
+    currentY += 4;
+
+    doc.setFontSize(5);
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text("Please retain this receipt", pageWidth / 2, currentY, { align: 'center' });
 
     doc.save(`Receipt_${trx.id.slice(-8)}.pdf`);
   };
@@ -558,7 +691,7 @@ export default function SalesPage() {
 
             <div 
               className="flex-1 overflow-y-auto p-2 sm:p-4 bg-gray-50/50 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
-              style={{ maxHeight: 'calc(100vh - 280px)' }}
+              style={{ maxHeight: 'calc(100vh - 180px)' }}
             >
               <motion.div 
                 key={`product-grid-${selectedCategory}-${searchQuery}`}
@@ -606,6 +739,7 @@ export default function SalesPage() {
                                 className={`object-cover transition-all duration-300 ${
                                   product.availableStock <= 0 ? 'opacity-50 grayscale' : ''
                                 }`}
+                                priority={false}
                               />
                             </div>
                           ) : (
@@ -712,7 +846,7 @@ export default function SalesPage() {
 
             <div 
               className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 sm:space-y-2"
-              style={{ maxHeight: 'calc(100vh - 380px)', overflowX: 'hidden' }}
+              style={{ maxHeight: 'calc(100vh - 280px)', overflowX: 'hidden' }}
             >
               {cart.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-1 sm:space-y-2">
@@ -743,6 +877,7 @@ export default function SalesPage() {
                                   fill
                                   sizes="40px"
                                   className="object-cover"
+                                  priority={false}
                                 />
                               </div>
                             ) : (
@@ -793,6 +928,79 @@ export default function SalesPage() {
             </div>
 
             <div className="shrink-0 p-2.5 sm:p-4 border-t border-gray-100 bg-slate-50">
+              <div className="space-y-3 sm:space-y-4 mb-4 sm:mb-5">
+                {/* Payment Method Selection */}
+                <div className="space-y-2">
+                  <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Payment Method</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPaymentMethod("cash")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg font-semibold text-xs transition-all border-2 ${
+                        paymentMethod === "cash"
+                          ? `border-[#0B3C8A] bg-blue-50 text-[#0B3C8A]`
+                          : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      <Banknote size={14} />
+                      <span>Cash</span>
+                    </button>
+                    <button
+                      onClick={() => setPaymentMethod("online")}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg font-semibold text-xs transition-all border-2 ${
+                        paymentMethod === "online"
+                          ? `border-[#0B3C8A] bg-blue-50 text-[#0B3C8A]`
+                          : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                      }`}
+                    >
+                      <CreditCard size={14} />
+                      <span>Online</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Amount Given Input */}
+                {paymentMethod === "cash" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="amountGiven" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Given</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm sm:text-base">₱</span>
+                      <input
+                        id="amountGiven"
+                        type="number"
+                        inputMode="decimal"
+                        placeholder={`${total.toLocaleString()}`}
+                        value={amountGiven}
+                        onChange={(e) => setAmountGiven(e.target.value)}
+                        className="w-full pl-6 sm:pl-8 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border-2 border-gray-300 text-sm sm:text-base font-bold focus:outline-none focus:border-[#0B3C8A] text-gray-800"
+                      />
+                    </div>
+
+                    {/* Change Display */}
+                    {amountGiven && !isNaN(parseFloat(amountGiven)) && parseFloat(amountGiven) >= total && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 sm:p-2.5">
+                        <div className="flex justify-between items-center text-xs sm:text-sm">
+                          <span className="font-semibold text-emerald-800">Change:</span>
+                          <span className="font-bold text-emerald-600">
+                            ₱{(parseFloat(amountGiven) - total).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {amountGiven && !isNaN(parseFloat(amountGiven)) && parseFloat(amountGiven) < total && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-2 sm:p-2.5">
+                        <div className="flex justify-between items-center text-xs sm:text-sm">
+                          <span className="font-semibold text-red-800">Short by:</span>
+                          <span className="font-bold text-red-600">
+                            ₱{(total - parseFloat(amountGiven)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1 sm:space-y-1.5 mb-3 sm:mb-4">
                 <div className="flex justify-between text-sm sm:text-base font-black text-gray-800 pt-1.5 sm:pt-2 border-t border-gray-200">
                   <span>Total</span>
@@ -815,18 +1023,35 @@ export default function SalesPage() {
 
       ) : (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(99vh-180px)]">
-          <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200 flex justify-between items-center">
-            <div>
+          <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200">
+            <div className="mb-3 sm:mb-4">
               <h2 className="text-base sm:text-lg font-bold text-gray-800">Transactions</h2>
               <p className="text-[10px] sm:text-[11px] text-gray-500">View daily sales, generate receipts, and process refunds.</p>
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <div className="flex-1">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1.5">Filter by Month</label>
+                <input 
+                  type="month" 
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex-1">
+                <div className="text-[10px] sm:text-xs font-semibold text-gray-600 mb-1.5">Total Transactions</div>
+                <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">
+                  {filteredTransactions.length}
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto lg:min-h-0 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
-            {(firebaseTransactions as Transaction[]).length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <div className="py-20 text-center text-gray-400 flex flex-col items-center">
                 <History size={36} className="sm:w-12 sm:h-12 mb-3 sm:mb-4 opacity-20"/>
-                <p className="text-xs sm:text-sm">No transactions recorded today.</p>
+                <p className="text-xs sm:text-sm">No transactions found for this month.</p>
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
@@ -840,13 +1065,14 @@ export default function SalesPage() {
                       <th className="p-2 sm:p-3">User</th>
                       <th className="p-2 sm:p-3">Items</th>
                       <th className="p-2 sm:p-3 text-right">Amount</th>
+                      <th className="p-2 sm:p-3 text-center">Payment</th>
                       <th className="p-2 sm:p-3 text-center">Sync</th>
                       <th className="p-2 sm:p-3 text-center">Status</th>
                       <th className="p-2 sm:p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {(firebaseTransactions as Transaction[]).map(trx => (
+                    {filteredTransactions.map(trx => (
                       <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id.slice(-8).toUpperCase()}</td>
                         <td className="p-2 sm:p-3 text-gray-600">
@@ -864,6 +1090,17 @@ export default function SalesPage() {
                           </div>
                         </td>
                         <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+                        <td className="p-2 sm:p-3 text-center">
+                          <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
+                            trx.paymentMethod === 'cash' 
+                              ? 'bg-blue-100 text-blue-700' 
+                              : trx.paymentMethod === 'online'
+                              ? 'bg-purple-100 text-purple-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {trx.paymentMethod || 'N/A'}
+                          </span>
+                        </td>
                         <td className="p-2 sm:p-3 text-center">
                           {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
                         </td>
@@ -904,6 +1141,28 @@ export default function SalesPage() {
               <h2 className="text-lg sm:text-xl font-black text-gray-800 mb-1">Payment Successful</h2>
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4 font-mono">{lastTransaction.id.slice(-8).toUpperCase()}</p>
               <div className="text-2xl sm:text-3xl font-black text-[#0B3C8A] mb-5 sm:mb-6">₱{lastTransaction.total.toLocaleString()}</div>
+              
+              {/* Display Payment Details */}
+              {lastTransaction.paymentMethod && (
+                <div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-gray-200">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Payment Method:</span>
+                    <span className="font-semibold text-gray-800 uppercase">{lastTransaction.paymentMethod}</span>
+                  </div>
+                  {lastTransaction.paymentMethod === 'cash' && lastTransaction.amountGiven !== undefined && (
+                    <>
+                      <div className="border-t border-gray-300 pt-2 flex justify-between">
+                        <span className="text-gray-600">Amount Given:</span>
+                        <span className="font-semibold text-gray-800">₱{lastTransaction.amountGiven.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>Change:</span>
+                        <span>₱{(lastTransaction.change || 0).toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               
               <div className="flex flex-col gap-2">
                 <button onClick={() => generateReceipt(lastTransaction)} className={`w-full py-2 sm:py-2.5 rounded-lg border border-gray-200 text-gray-700 text-xs sm:text-sm font-bold hover:bg-gray-50 flex justify-center items-center gap-2 transition-colors`}>

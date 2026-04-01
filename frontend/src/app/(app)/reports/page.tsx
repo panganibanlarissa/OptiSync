@@ -50,9 +50,25 @@ const getAvailableYears = (transactions: TransactionType[]) => {
   return Array.from(years).sort().reverse();
 };
 
+// Generate available days for filtering
+const getAvailableDays = (transactions: TransactionType[], year: number, month: string) => {
+  const days = new Set<number>();
+  transactions.forEach(trx => {
+    const date = new Date(trx.date);
+    const transactionYear = date.getFullYear();
+    const transactionMonth = `${transactionYear}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    
+    if ((year === 0 || transactionYear === year) && (month === "all" || transactionMonth === month)) {
+      days.add(date.getDate());
+    }
+  });
+  return Array.from(days).sort((a, b) => a - b);
+};
+
 export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedDay, setSelectedDay] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "voided">("all");
   
@@ -76,6 +92,11 @@ export default function ReportsPage() {
     return getAvailableYears(transactions);
   }, [transactions]);
 
+  // Get available days based on selected month and year
+  const availableDays = useMemo(() => {
+    return getAvailableDays(transactions, selectedYear, selectedMonth);
+  }, [transactions, selectedYear, selectedMonth]);
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(trx => {
       const searchLower = searchQuery.toLowerCase();
@@ -87,14 +108,16 @@ export default function ReportsPage() {
       const transactionDate = new Date(trx.date);
       const transactionYear = transactionDate.getFullYear();
       const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
+      const transactionDay = transactionDate.getDate();
       
       const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
       const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
+      const matchesDay = selectedDay === "all" || transactionDay === parseInt(selectedDay);
       const matchesStatus = statusFilter === "all" || trx.status === statusFilter;
       
-      return matchesSearch && matchesYear && matchesMonth && matchesStatus;
+      return matchesSearch && matchesYear && matchesMonth && matchesDay && matchesStatus;
     });
-  }, [transactions, searchQuery, selectedYear, selectedMonth, statusFilter]);
+  }, [transactions, searchQuery, selectedYear, selectedMonth, selectedDay, statusFilter]);
 
   const exportLedgerReport = () => {
     if (filteredTransactions.length === 0) {
@@ -120,7 +143,10 @@ export default function ReportsPage() {
     }
 
     const validTransactions = filteredTransactions.filter(t => t.status === 'completed');
+    const voidedTransactions = filteredTransactions.filter(t => t.status === 'voided');
     const totalRevenue = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
+    const totalSales = filteredTransactions.reduce((sum, trx) => sum + trx.total, 0);
+    const voidedAmount = voidedTransactions.reduce((sum, trx) => sum + trx.total, 0);
 
     // Generate table with footer callback
     autoTable(doc, {
@@ -175,22 +201,78 @@ export default function ReportsPage() {
 
     const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 40;
     
+    // Get initial page count (before adding summary page if needed)
+    const initialPages = doc.getNumberOfPages();
+    
+    // Calculate safe area (top of footer area starts around pageHeight - 30)
+    const footerAreaStart = pageHeight - 30;
+    let summaryStartY = Math.max(finalY + 10, 40); // Ensure minimum spacing from table
+    
+    // If summary would overlap with footer, add a new page
+    if (summaryStartY + 60 > footerAreaStart) {
+      doc.addPage();
+      summaryStartY = 40;
+    }
+    
     // Summary section
     doc.setFontSize(10);
     doc.setTextColor(60, 60, 60);
-    doc.text(`Total Transactions: ${validTransactions.length}`, 14, finalY + 10);
+    doc.text(`Total Transactions: ${filteredTransactions.length}`, 14, summaryStartY);
+    doc.text(`Completed: ${validTransactions.length}`, 14, summaryStartY + 7);
+    doc.text(`Voided: ${voidedTransactions.length}`, 14, summaryStartY + 14);
     
-    doc.setFontSize(12);
+    // Sales breakdown
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, summaryStartY + 20, pageWidth - 14, summaryStartY + 20);
+    
+    doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, finalY + 20);
+    doc.text(`Total Sales: PHP ${totalSales.toLocaleString()}`, 14, summaryStartY + 27);
+    
+    if (validTransactions.length > 0) {
+      doc.setFontSize(10);
+      doc.setTextColor(34, 139, 34);
+      doc.text(`Completed Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, summaryStartY + 34);
+    }
+    
+    if (voidedTransactions.length > 0) {
+      doc.setFontSize(10);
+      doc.setTextColor(220, 20, 20);
+      doc.text(`Voided Amount: PHP ${voidedAmount.toLocaleString()}`, 14, summaryStartY + 41);
+    }
 
     // Update page numbers on all pages with correct total
     const totalPages = doc.getNumberOfPages();
     const lineY = pageHeight - 15;
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
+      
+      // Add header/footer only to new pages (beyond initial count)
+      if (i > initialPages) {
+        doc.setFontSize(16);
+        doc.setTextColor(0, 0, 0);
+        doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
+        
+        doc.setFontSize(11);
+        doc.setTextColor(60, 60, 60);
+        doc.text("Sales Transaction Ledger", pageWidth / 2, 23, { align: 'center' });
+        
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Period: ${periodText} | Generated: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
+        
+        doc.setDrawColor(200, 200, 200);
+        doc.line(14, 32, pageWidth - 14, 32);
+      }
+      
+      // Add footer to all pages
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, lineY, pageWidth - 14, lineY);
+      
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
+      const footerText = "Confidential - For Record Keeping Only";
+      doc.text(footerText, 14, lineY + 5);
       doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, lineY + 5, { align: 'right' });
     }
 
@@ -202,10 +284,11 @@ export default function ReportsPage() {
     setSearchQuery("");
     setSelectedMonth("all");
     setSelectedYear(new Date().getFullYear());
+    setSelectedDay("all");
     setStatusFilter("all");
   };
 
-  const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear();
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear() || selectedDay !== 'all';
 
   return (
     <div className="min-h-screen w-full font-sans sm:mt-2 p-2 sm:p-4 box-border pb-20 space-y-4 sm:space-y-6">
@@ -278,7 +361,10 @@ export default function ReportsPage() {
             {/* Month */}
             <select
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
+              onChange={(e) => {
+                setSelectedMonth(e.target.value);
+                setSelectedDay("all");
+              }}
               disabled={selectedYear === 0}
               className="px-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700 disabled:bg-gray-100 disabled:cursor-not-allowed w-full lg:w-36"
             >
@@ -292,6 +378,21 @@ export default function ReportsPage() {
                   </option>
                 );
               })}
+            </select>
+
+            {/* Day */}
+            <select
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(e.target.value)}
+              disabled={selectedYear === 0 || selectedMonth === "all"}
+              className="px-3 py-2 rounded-lg border border-gray-200 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700 disabled:bg-gray-100 disabled:cursor-not-allowed w-full lg:w-28"
+            >
+              <option value="all">All Days</option>
+              {availableDays.map(day => (
+                <option key={day} value={day}>
+                  Day {day}
+                </option>
+              ))}
             </select>
 
             {/* Clear Button */}

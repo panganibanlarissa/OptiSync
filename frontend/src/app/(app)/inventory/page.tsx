@@ -76,6 +76,7 @@ interface ProductModalProps {
   onClose: () => void;
   onSave: (data: ProductFormData) => void;
   onDelete: (id: string) => void;
+  userRole?: string | null;
 }
 
 const modalVariants: Variants = { 
@@ -106,7 +107,8 @@ export default function InventoryPage() {
     adjustStock, 
     loading,
     getLowStockProducts,
-    getDeadstockProducts
+    getDeadstockProducts,
+    userRole
   } = useFirebase();
   
   const [products, setProducts] = useState<InventoryData[]>([]);
@@ -196,7 +198,6 @@ export default function InventoryPage() {
         const newProductId: string = await addProduct(newProduct);
         showNotification(`New product "${formData.name}" added to catalog`, "success", "Product Added");
         setIsModalOpen(false);
-        // Show QR code modal for new product
         if (newProductId) {
           setCreatedProductId(newProductId);
         }
@@ -259,13 +260,15 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
-      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
+    <div className="flex flex-col w-full h-screen font-sans p-2 sm:p-4 box-border overflow-hidden">
+      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full h-full min-h-0">
+        {/* LEFT COLUMN - PRODUCT CATALOG with FIXED HEIGHT */}
         <motion.div 
           initial={{ opacity: 0, y: 15 }} 
           animate={{ opacity: 1, y: 0 }} 
-          className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col order-first lg:order-0"
+          className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden lg:min-h-0"
         >
+          {/* Header - fixed, doesn't scroll */}
           <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-slate-50 flex flex-col gap-3">
             <div className="flex flex-row justify-between items-center gap-2">
               <div className="flex items-center gap-2 sm:gap-3">
@@ -320,8 +323,17 @@ export default function InventoryPage() {
                   placeholder="Search SKU or Item..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="w-full pl-8 sm:pl-9 pr-10 sm:pr-11 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400" 
+                  className="w-full pl-8 sm:pl-9 pr-20 sm:pr-24 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400" 
                 />
+                {searchQuery && (
+                  <button 
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-12 sm:right-14 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
                 <button 
                   onClick={() => {
                     setQRScanMode('search');
@@ -365,9 +377,9 @@ export default function InventoryPage() {
             </div>
           </div>
 
+          {/* PRODUCT GRID - FIXED HEIGHT with internal scroll */}
           <div 
             className="flex-1 overflow-y-auto p-2 sm:p-5 bg-gray-50/50 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
-            style={{ maxHeight: 'calc(100vh - 250px)' }}
           >
             <div 
               key={viewMode}
@@ -387,6 +399,7 @@ export default function InventoryPage() {
                     onQR={() => {
                       setCreatedProductId(product.id);
                     }}
+                    userRole={userRole}
                   />
                 ))
               ) : (
@@ -398,14 +411,16 @@ export default function InventoryPage() {
           </div>
         </motion.div>
 
-        <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0 order-last lg:order-0">
+        {/* RIGHT COLUMN - SIDEBAR ALERTS with FIXED HEIGHTS */}
+        <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0 lg:h-full lg:min-h-0">
+          {/* LOW STOCK SECTION - Fixed height with scroll */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.1 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 lg:flex lg:flex-col lg:flex-1"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden max-h-64 sm:max-h-80 lg:max-h-none"
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 shrink-0">
               <div className="p-1 sm:p-1.5 bg-red-100 rounded-md">
                 <AlertTriangle size={14} className="text-red-600 sm:w-4 sm:h-4"/>
               </div>
@@ -414,46 +429,50 @@ export default function InventoryPage() {
               </h3>
             </div>
             
-            {displayLowStock.length > 0 ? (
-              <div className="space-y-2 sm:space-y-3 max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400 pr-1">
-                {displayLowStock.map((item) => {
-                  const predictedDemand = item.reorderPoint * 2;
-                  return (
-                    <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-red-100 shadow-sm flex flex-col">
-                      <div className="flex justify-between items-start mb-1 gap-2">
-                        <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight truncate">
-                          {item.name}
-                        </span>
-                        <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">
-                          {item.stock} left
-                        </span>
+            {/* Scrollable content area */}
+            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+              {displayLowStock.length > 0 ? (
+                <div className="space-y-2 sm:space-y-3 pr-1">
+                  {displayLowStock.map((item) => {
+                    const predictedDemand = item.reorderPoint * 2;
+                    return (
+                      <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-red-100 shadow-sm">
+                        <div className="flex justify-between items-start mb-1 gap-2">
+                          <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight truncate">
+                            {item.name}
+                          </span>
+                          <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">
+                            {item.stock} left
+                          </span>
+                        </div>
+                        <div className="mt-1 sm:mt-1.5 bg-red-50 border border-red-200 rounded px-2 py-1.5 flex items-center justify-between">
+                          <span className="text-[9px] text-red-600 font-bold flex items-center gap-1">
+                            <AlertTriangle size={10}/> Restock Needed
+                          </span>
+                          <span className="text-[10px] font-black text-red-700">
+                            {predictedDemand} units
+                          </span>
+                        </div>
                       </div>
-                      <div className="mt-1 sm:mt-1.5 bg-red-50 border border-red-200 rounded px-2 py-1.5 flex items-center justify-between">
-                        <span className="text-[9px] text-red-600 font-bold flex items-center gap-1">
-                          <AlertTriangle size={10}/> Restock Needed
-                        </span>
-                        <span className="text-[10px] font-black text-red-700">
-                          {predictedDemand} units
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-[10px] sm:text-xs text-gray-500">
-                All stock levels are healthy.
-              </p>
-            )}
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[10px] sm:text-xs text-gray-500">
+                  All stock levels are healthy.
+                </p>
+              )}
+            </div>
           </motion.div>
 
+          {/* DEADSTOCK SECTION - Fixed height with scroll */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.2 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 lg:flex lg:flex-col lg:flex-1"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden max-h-64 sm:max-h-80 lg:max-h-none"
           >
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1 shrink-0">
               <div className="p-1 sm:p-1.5 bg-slate-100 rounded-md">
                 <Clock size={14} className="text-slate-600 sm:w-4 sm:h-4"/>
               </div>
@@ -463,42 +482,46 @@ export default function InventoryPage() {
                 </h3>
               </div>
             </div>
-            <p className="text-[9px] sm:text-[11px] text-gray-500 mb-3 sm:mb-4 leading-relaxed">
+            <p className="text-[9px] sm:text-[11px] text-gray-500 mb-3 shrink-0">
               AI-flagged items with no sales in 30+ days.
             </p>
             
-            {displayDeadstock.length > 0 ? (
-              <div className="space-y-2 sm:space-y-3 max-h-[250px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400 pr-1">
-                {displayDeadstock.map((item) => (
-                  <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm flex flex-col">
-                    <div className="flex justify-between items-start mb-1 gap-2">
-                      <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate">
-                        {item.name}
-                      </span>
-                      <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 whitespace-nowrap shrink-0">
-                        {item.lastMovedDaysAgo}d
-                      </span>
+            {/* Scrollable content area */}
+            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+              {displayDeadstock.length > 0 ? (
+                <div className="space-y-2 sm:space-y-3 pr-1">
+                  {displayDeadstock.map((item) => (
+                    <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm">
+                      <div className="flex justify-between items-start mb-1 gap-2">
+                        <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate">
+                          {item.name}
+                        </span>
+                        <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 whitespace-nowrap shrink-0">
+                          {item.lastMovedDaysAgo}d
+                        </span>
+                      </div>
+                      <div className="mt-1 sm:mt-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 flex items-center justify-between">
+                        <span className="text-[9px] text-slate-600 font-medium flex items-center gap-1">
+                          <Clock size={10}/> {item.lastMovedDaysAgo}d Unsold
+                        </span>
+                        <span className="text-[9px] font-bold text-blue-600 cursor-pointer hover:text-blue-800">
+                          Mark Down
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1 sm:mt-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 flex items-center justify-between">
-                      <span className="text-[9px] text-slate-600 font-medium flex items-center gap-1">
-                        <Clock size={10}/> {item.lastMovedDaysAgo}d Unsold
-                      </span>
-                      <span className="text-[9px] font-bold text-blue-600 cursor-pointer hover:text-blue-800">
-                        Mark Down
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[10px] sm:text-xs text-gray-500">
-                No deadstock items identified.
-              </p>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[10px] sm:text-xs text-gray-500">
+                  No deadstock items identified.
+                </p>
+              )}
+            </div>
           </motion.div>
         </aside>
       </div>
 
+      {/* MODALS remain unchanged */}
       <AnimatePresence>
         {isQRScannerOpen && (
           <QRScannerModal
@@ -509,11 +532,9 @@ export default function InventoryPage() {
               const product = products.find(p => p.id === productId);
               if (product) {
                 if (qrScanMode === 'search') {
-                  // In search mode: populate search query with product name
                   setSearchQuery(product.name);
                   setIsQRScannerOpen(false);
                 } else if (qrScanMode === 'adjust') {
-                  // In adjust mode: add 1 unit to stock via QR scan
                   const newStock = product.stock + 1;
                   adjustStock(product.id, newStock, "Received via QR Scan").then(() => {
                     showNotification(`+1 unit added to "${product.name}" via QR scan`, "success", "Stock Updated");
@@ -546,7 +567,8 @@ export default function InventoryPage() {
             product={currentProduct} 
             onClose={() => setIsModalOpen(false)} 
             onSave={handleSaveProduct} 
-            onDelete={initiateDelete} 
+            onDelete={initiateDelete}
+            userRole={userRole}
           />
         )}
       </AnimatePresence>
@@ -567,12 +589,14 @@ export default function InventoryPage() {
   );
 }
 
-function ProductCard({ data, viewMode, onEdit, onAdjust, onQR }: { 
+
+function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole }: { 
   data: InventoryData, 
   viewMode: 'grid' | 'list', 
   onEdit: () => void, 
   onAdjust: () => void,
-  onQR: () => void 
+  onQR: () => void,
+  userRole?: string | null
 }) {
   const renderImage = () => {
     const isOutOfStock = data.stock <= 0;
@@ -739,7 +763,7 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR }: {
   );
 }
 
-function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModalProps) {
+function ProductModal({ mode, product, onClose, onSave, onDelete, userRole }: ProductModalProps) {
   const [formData, setFormData] = useState<ProductFormData>(product);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -823,7 +847,7 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
 
   if (mode === 'adjust') {
     return (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
         <motion.div 
           variants={modalVariants} 
           initial="hidden" 
@@ -899,7 +923,7 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div 
         variants={modalVariants} 
         initial="hidden" 
@@ -1067,7 +1091,7 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
-                  Price (₱)
+                  Price (₱) {mode === 'edit' && userRole !== 'admin' && <span className="text-red-500 ml-1">*Admin Only</span>}
                 </label>
                 <input 
                   required 
@@ -1077,8 +1101,9 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
                   type="number" 
                   min="0" 
                   step="0.01"
-                  placeholder="0" 
-                  className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-gray-200 hover:border-gray-300 text-[11px] sm:text-sm focus:border-transparent focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700 placeholder-gray-400 bg-white transition-all`} 
+                  placeholder="0"
+                  disabled={mode === 'edit' && userRole !== 'admin'}
+                  className={`w-full px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-gray-200 hover:border-gray-300 text-[11px] sm:text-sm focus:border-transparent focus:ring-2 ${THEME_RING} focus:outline-none transition-all ${mode === 'edit' && userRole !== 'admin' ? 'bg-gray-50 text-gray-400 cursor-not-allowed border-gray-100' : 'text-gray-700 placeholder-gray-400 bg-white'}`} 
                 />
               </div>
               <div>
@@ -1120,12 +1145,12 @@ function ProductModal({ mode, product, onClose, onSave, onDelete }: ProductModal
         </div>
         
         <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
-          {mode === 'edit' && formData.id && (
+          {mode === 'edit' && formData.id && userRole === 'admin' && (
             <button 
               type="button" 
               onClick={() => onDelete(formData.id!)} 
               className="p-1.5 sm:p-2.5 rounded-md sm:rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors" 
-              title="Delete Product"
+              title="Delete Product (Admin Only)"
             >
               <Trash2 size={16} className="sm:w-4.5 sm:h-4.5"/>
             </button>
@@ -1167,7 +1192,7 @@ function DeleteConfirmationModal({ productName, onCancel, onConfirm }: {
   onConfirm: () => void 
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div 
         variants={modalVariants} 
         initial="hidden" 
@@ -1239,7 +1264,7 @@ function QRCodeModal({ productId, productName, onClose }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div
         variants={modalVariants}
         initial="hidden"
