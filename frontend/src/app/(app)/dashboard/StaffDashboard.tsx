@@ -568,11 +568,11 @@ export default function StaffDashboard() {
             )}
           </div>
 
-          <div className="relative min-h-87.5">
+          <div className="relative min-h-57.5">
             {hasEnoughDataForML && chartData && chartData.length > 0 ? (
               <div>
-                <div className="flex gap-2 sm:gap-4">
-                  <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4">
+                <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
+                  <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                     <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
                     <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
                     <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
@@ -580,7 +580,7 @@ export default function StaffDashboard() {
                     <span>0</span>
                   </div>
 
-                  <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2">
+                  <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[300px] sm:min-w-0">
                     {chartData.slice(0, activeTab === "weekly" ? 7 : 12).map((data, idx) => (
                       <ChartBarGroup
                         key={`${activeTab}-${idx}`}
