@@ -308,7 +308,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   // Fetch products – using fixed CLINIC_ID
   const fetchProducts = useCallback(async () => {
-    if (!user) return;
     try {
       const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
       const q = query(productsRef, orderBy('createdAt', 'desc'));
@@ -321,7 +320,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Error fetching products:", error);
     }
-  }, [user]);
+  }, []);
 
   // Fetch transactions – using fixed CLINIC_ID
   const fetchTransactions = useCallback(async () => {
@@ -344,20 +343,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // Load data when user changes
+  // Load data when user changes or initially for public view
   useEffect(() => {
-    const loadData = async () => {
+    const loadPublicData = async () => {
+      await fetchProducts();
+    };
+    
+    const loadPrivateData = async () => {
       if (user) {
-        await Promise.all([
-          fetchProducts(),
-          fetchTransactions()
-        ]);
+        await fetchTransactions();
       } else {
-        setProducts([]);
         setTransactions([]);
       }
     };
-    loadData();
+
+    loadPublicData();
+    loadPrivateData();
   }, [user, fetchProducts, fetchTransactions]);
 
   // Auth functions

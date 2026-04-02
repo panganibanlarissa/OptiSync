@@ -25,6 +25,74 @@ import {
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_TEXT = "text-[#0B3C8A]";
 
+// --- STATIC PRODUCTS DATA ---
+const STATIC_PRODUCTS = [
+  {
+    id: "p1",
+    name: "Classic Aviator Frames",
+    category: "Frames",
+    image: null,
+    imageColor: "bg-blue-100",
+    markupPrice: 2500,
+  },
+  {
+    id: "p2",
+    name: "Blue Light Blocking Lenses",
+    category: "Lenses",
+    image: null,
+    imageColor: "bg-indigo-100",
+    markupPrice: 1500,
+  },
+  {
+    id: "p3",
+    name: "Biotrue Contact Solution 300ml",
+    category: "Solutions",
+    image: null,
+    imageColor: "bg-emerald-100",
+    markupPrice: 450,
+  },
+  {
+    id: "p4",
+    name: "Acuvue Oasys Monthly (6-Pack)",
+    category: "Contact Lenses",
+    image: null,
+    imageColor: "bg-purple-100",
+    markupPrice: 1850,
+  },
+  {
+    id: "p5",
+    name: "Retro Tortoise Shell Frames",
+    category: "Frames",
+    image: null,
+    imageColor: "bg-orange-100",
+    markupPrice: 3200,
+  },
+  {
+    id: "p6",
+    name: "Microfiber Cleaning Kit",
+    category: "Accessories",
+    image: null,
+    imageColor: "bg-slate-100",
+    markupPrice: 250,
+  },
+  {
+    id: "p7",
+    name: "Polarized Sun Lenses",
+    category: "Lenses",
+    image: null,
+    imageColor: "bg-blue-200",
+    markupPrice: 2200,
+  },
+  {
+    id: "p8",
+    name: "Anti-Fog Spray (Premium)",
+    category: "Accessories",
+    image: null,
+    imageColor: "bg-cyan-100",
+    markupPrice: 350,
+  }
+];
+
 // --- STATIC FORECAST DATA ---
 const FORECAST_DATA = [
   { month: "Jan", value: 35, type: "history" },
@@ -59,10 +127,12 @@ export default function LandingPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Load products from Firebase
+  // Load products from Firebase or Static Fallback
   useEffect(() => {
     if (firebaseProducts && firebaseProducts.length > 0) {
       setDisplayProducts(firebaseProducts.slice(0, 12));
+    } else {
+      setDisplayProducts(STATIC_PRODUCTS);
     }
   }, [firebaseProducts]);
 
@@ -83,6 +153,7 @@ export default function LandingPage() {
                alt="MT Olaso Logo" 
                width={42} 
                height={42} 
+               style={{ width: 'auto', height: 'auto' }}
                className="drop-shadow-sm w-8 h-8 lg:w-9 lg:h-9" 
             />
             <div className="flex flex-col leading-none">
