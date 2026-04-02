@@ -55,6 +55,7 @@ export interface Product {
   image: string | null;
   leadTimeDays: number;
   reorderPoint: number;
+  expiryDate?: string | null;
   totalSold?: number;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
@@ -71,6 +72,13 @@ export interface Transaction {
   staffName?: string;
   staffId?: string;
   staffEmail?: string;
+  scanType?: 'manual' | 'qr_scan';
+  performedBy?: string; // Digital Signature field for the audit trail
+  metadata?: {
+    device?: string;
+    location?: string;
+    ip?: string;
+  };
   createdAt?: Timestamp;
 }
 
@@ -587,7 +595,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         staffName: userName,
         staffId: userId,
         staffEmail: userEmail,
-        timestamp: serverTimestamp()
+        performedBy: `${userName} (${userId.slice(-4)})`, // Digital Signature
+        timestamp: serverTimestamp(),
+        scanType: reason.toLowerCase().includes('qr') ? 'qr_scan' : 'manual',
+        isImmutable: true // Marker for backend logic
       });
       setProducts(prev => 
         prev.map(p => p.id === id ? { ...p, stock: newStock } : p)

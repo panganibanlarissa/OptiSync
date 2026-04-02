@@ -9,7 +9,7 @@ interface QRScannerModalProps {
   onClose: () => void;
   products: Array<{ id: string; sku: string }>;
   onProductFound: (productId: string) => void;
-  mode?: 'search' | 'adjust' | 'cart';
+  mode?: 'search' | 'adjust' | 'cart' | 'in' | 'out';
 }
 
 const modalVariants = {
@@ -25,7 +25,7 @@ const THEME_RING = "focus:ring-[#0B3C8A]";
 export default function QRScannerModal({ onClose, products, onProductFound, mode = 'cart' }: QRScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const [isScanning, setIsScanning] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [manualInput, setManualInput] = useState("");
   const [foundProduct, setFoundProduct] = useState<string | null>(null);
@@ -38,6 +38,10 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
         return 'Point your camera at a product QR code to search for it';
       case 'adjust':
         return 'Point your camera at a product QR code to add it to inventory';
+      case 'in':
+        return 'Point your camera at a product QR code to receive stock';
+      case 'out':
+        return 'Point your camera at a product QR code to dispatch stock';
       case 'cart':
       default:
         return 'Point your camera at a product QR code to add it to cart';
@@ -50,6 +54,10 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
         return '✓ Product found! Searching...';
       case 'adjust':
         return '✓ Product found! Adding to inventory...';
+      case 'in':
+        return '✓ Stock received! Processing...';
+      case 'out':
+        return '✓ Stock dispatched! Processing...';
       case 'cart':
       default:
         return '✓ Product found! Adding to cart...';
@@ -65,10 +73,11 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
     scanningRef.current = true;
     setError(null);
     let animationFrameId: number;
+    let stream: MediaStream | null = null;
 
     const startScanning = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'environment',
             width: { ideal: 1280 },
@@ -138,8 +147,8 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
     return () => {
       cancelAnimationFrame(animationFrameId);
       scanningRef.current = false;
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
     };
   }, [isScanning, products, onProductFound]);

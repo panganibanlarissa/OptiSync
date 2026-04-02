@@ -13,13 +13,69 @@ const inter = Inter({ subsets: ["latin"] });
 
 // Inner component to access hooks
 function AppContent({ children }: { children: React.ReactNode }) {
-  const { products } = useFirebase();
+  const { products, transactions } = useFirebase();
   const { showNotification } = useNotification();
   const notifiedItemsRef = useRef<Set<string>>(new Set());
 
-  // Check for low stock and out of stock items when products change
+  // Check for specialized inventory alerts
   useEffect(() => {
     if (products && products.length > 0) {
+      const today = new Date();
+      
+      // 1. LIQUIDATION ALERTS (Aging products - no sales in 30+ days)
+      const liquidationItems = products.filter(p => {
+        if (p.stock <= 0) return false;
+        
+        const lastSale = transactions
+          .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+
+        const lastSaleDate = lastSale ? new Date(lastSale.date) : new Date(0);
+        const daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        return daysSinceSale >= 30;
+      });
+
+      liquidationItems.forEach(item => {
+        const key = `liquid-${item.id}`;
+        if (!notifiedItemsRef.current.has(key)) {
+          showNotification(
+            `📦 ${item.name} hasn't moved in 30+ days. Consider discounting to clear warehouse space.`,
+            "info",
+            "Liquidation Alert",
+            "/reports"
+          );
+          notifiedItemsRef.current.add(key);
+        }
+      });
+
+      // 2. EXPIRY ALERTS (Simulated for this workspace - using specific categories/tags)
+      // Note: In a real system, you'd have an 'expiryDate' field.
+      // Here we simulate by highlighting Solutions/Contact Lenses that are older than 6 months.
+      const expiryItems = products.filter(p => {
+        if (p.stock <= 0) return false;
+        const perishableCategories = ['Solutions', 'Contact Lenses'];
+        if (!perishableCategories.includes(p.category)) return false;
+        
+        const creationDate = (p.createdAt as any)?.toDate ? (p.createdAt as any).toDate() : new Date(typeof p.createdAt === 'number' ? p.createdAt : 0);
+        const monthsInStock = (today.getTime() - creationDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
+        
+        return monthsInStock >= 6;
+      });
+
+      expiryItems.forEach(item => {
+        const key = `expiry-${item.id}`;
+        if (!notifiedItemsRef.current.has(key)) {
+          showNotification(
+            `⏰ ${item.name} is nearing simulated shelf-life limits. Check physical expiry date.`,
+            "warning",
+            "Expiry Alert",
+            "/inventory"
+          );
+          notifiedItemsRef.current.add(key);
+        }
+      });
+
       const lowStockItems = products.filter(p => p.stock <= p.reorderPoint && p.stock > 0);
       const outOfStockItems = products.filter(p => p.stock <= 0);
       

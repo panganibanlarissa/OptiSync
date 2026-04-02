@@ -1,11 +1,14 @@
 // src/app/(app)/dashboard/StaffDashboard.tsx
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import Link from "next/link";
-import { motion, Variants } from "framer-motion";
+import { motion, Variants, AnimatePresence } from "framer-motion";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
+import { useNotification } from "@/components/NotificationProvider";
+import QRScannerModal from "@/components/QRScannerModal";
+import ProductModal, { ProductFormData } from "@/components/ProductModal";
 import {
   AlertTriangle,
   Package,
@@ -17,8 +20,27 @@ import {
   BarChart3,
   Database,
   ShoppingBag,
-  Clock
+  Clock,
+  QrCode,
+  ArrowUp,
+  ArrowDown,
+  Plus,
+  X,
+  Download
 } from "lucide-react";
+
+const IMAGE_COLORS = [
+  'bg-blue-100',
+  'bg-slate-100',
+  'bg-cyan-100',
+  'bg-gray-100',
+  'bg-emerald-100',
+  'bg-amber-100',
+  'bg-indigo-100',
+  'bg-purple-100',
+  'bg-pink-100',
+  'bg-orange-100'
+];
 
 interface StatData {
   id: string;
@@ -120,10 +142,71 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Unknown': 'bg-gray-500'
 };
 
+const modalVariants: Variants = { 
+  hidden: { opacity: 0, scale: 0.95 }, 
+  visible: { opacity: 1, scale: 1 }, 
+  exit: { opacity: 0, scale: 0.95 } 
+};
+
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<"weekly" | "monthly">("weekly");
-  const { products, transactions } = useFirebase();
+  const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
+  const [scanMode, setScanMode] = useState<'in' | 'out'>('in');
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [newProduct, setNewProduct] = useState<ProductFormData | null>(null);
+  const [createdProductId, setCreatedProductId] = useState<string | null>(null);
+  const { products, transactions, addProduct, adjustStock, userRole } = useFirebase();
   const { loading, recommendations, usingML, dataLoaded } = useMLForecasting();
+  const { showNotification } = useNotification();
+
+  const handleOpenAddProduct = () => {
+    setNewProduct({
+      sku: "",
+      name: "",
+      category: "Frames",
+      specifications: "",
+      baseCost: 0,
+      markupPrice: 0,
+      supplierInfo: "",
+      stock: 0,
+      lastMovedDaysAgo: 0,
+      imageColor: IMAGE_COLORS[Math.floor(Math.random() * IMAGE_COLORS.length)],
+      image: null,
+      leadTimeDays: 7,
+      reorderPoint: 10
+    });
+    setIsProductModalOpen(true);
+  };
+
+  const handleSaveNewProduct = async (formData: ProductFormData) => {
+    try {
+      const productToSave = {
+        sku: formData.sku,
+        name: formData.name,
+        category: formData.category,
+        specifications: formData.specifications,
+        baseCost: Number(formData.baseCost),
+        markupPrice: Number(formData.markupPrice),
+        supplierInfo: formData.supplierInfo,
+        stock: Number(formData.stock),
+        lastMovedDaysAgo: 0,
+        imageColor: formData.imageColor || IMAGE_COLORS[Math.floor(Math.random() * IMAGE_COLORS.length)],
+        image: formData.image || null,
+        leadTimeDays: Number(formData.leadTimeDays) || 7,
+        reorderPoint: Number(formData.reorderPoint) || 10,
+        expiryDate: formData.expiryDate || null
+      };
+      const newProductId = await addProduct(productToSave);
+      showNotification(`New product "${formData.name}" added to catalog`, "success", "Product Added");
+      setIsProductModalOpen(false);
+      if (newProductId) {
+        setCreatedProductId(newProductId);
+      }
+    } catch (error) {
+      console.error("Error adding product:", error);
+      showNotification("Failed to add new product", "error", "Error");
+    }
+  };
 
   const completedTransactions = useMemo(() => {
     return transactions.filter(t => t.status === 'completed');
@@ -331,6 +414,32 @@ export default function StaffDashboard() {
     );
   }
 
+  const handleProductFound = async (productId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      try {
+        const newStock = scanMode === 'in' 
+          ? product.stock + 1 
+          : Math.max(0, product.stock - 1);
+        
+        const reason = scanMode === 'in' 
+          ? 'Stock received via QR Scan' 
+          : 'Stock dispatched via QR Scan';
+        
+        await adjustStock(productId, newStock, reason);
+        
+        const action = scanMode === 'in' ? '+1' : '-1';
+        const message = `${action} unit${Math.abs(newStock - product.stock) === 1 ? '' : 's'} - ${product.name}`;
+        
+        showNotification(message, 'success', `Stock ${scanMode === 'in' ? 'In' : 'Out'} ✓`);
+        setIsQRScannerOpen(false);
+      } catch (error) {
+        console.error("Error adjusting stock:", error);
+        showNotification(`Failed to adjust stock for "${product.name}"`, 'error', 'Error');
+      }
+    }
+  };
+
   return (
     <motion.div
       initial="hidden"
@@ -345,6 +454,66 @@ export default function StaffDashboard() {
         {STATS_DATA.map((stat) => (
           <StatCard key={stat.id} data={stat} />
         ))}
+      </motion.div>
+
+      {/* SCANNER BUTTONS - Quick Warehouse Operations */}
+      <motion.div
+        variants={itemVariants}
+        className="grid grid-cols-3 gap-1.5 sm:gap-4"
+      >
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => {
+            setScanMode('in');
+            setIsQRScannerOpen(true);
+          }}
+          className="bg-gradient-to-br from-emerald-50 to-green-50 border-2 border-emerald-300 hover:border-emerald-400 rounded-lg sm:rounded-xl p-2 sm:p-6 flex flex-col items-center justify-center gap-1.5 sm:gap-3 transition-all shadow-sm hover:shadow-md relative"
+        >
+          <div className="p-1.5 sm:p-4 bg-emerald-100 rounded-full">
+            <ArrowUp className="text-emerald-600 w-4 h-4 sm:w-8 sm:h-8" strokeWidth={2.5} />
+          </div>
+          <div className="text-center">
+            <p className="font-bold text-[10px] sm:text-lg text-gray-800 leading-tight">Scan In</p>
+            <p className="hidden sm:block text-xs text-gray-500 mt-0.5">Receive Stock</p>
+          </div>
+          <QrCode className="w-3 h-3 sm:w-5 sm:h-5 text-emerald-400 absolute top-1 sm:top-2 right-1 sm:right-2 opacity-60" />
+        </motion.button>
+
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => {
+            setScanMode('out');
+            setIsQRScannerOpen(true);
+          }}
+          className="bg-gradient-to-br from-red-50 to-rose-50 border-2 border-red-300 hover:border-red-400 rounded-lg sm:rounded-xl p-2 sm:p-6 flex flex-col items-center justify-center gap-1.5 sm:gap-3 transition-all shadow-sm hover:shadow-md relative"
+        >
+          <div className="p-1.5 sm:p-4 bg-red-100 rounded-full">
+            <ArrowDown className="text-red-600 w-4 h-4 sm:w-8 sm:h-8" strokeWidth={2.5} />
+          </div>
+          <div className="text-center">
+            <p className="font-bold text-[10px] sm:text-lg text-gray-800 leading-tight">Scan Out</p>
+            <p className="hidden sm:block text-xs text-gray-500 mt-0.5">Dispatch Stock</p>
+          </div>
+          <QrCode className="w-3 h-3 sm:w-5 sm:h-5 text-red-400 absolute top-1 sm:top-2 right-1 sm:right-2 opacity-60" />
+        </motion.button>
+
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={handleOpenAddProduct}
+          className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 hover:border-blue-400 rounded-lg sm:rounded-xl p-2 sm:p-6 flex flex-col items-center justify-center gap-1.5 sm:gap-3 transition-all shadow-sm hover:shadow-md relative"
+        >
+          <div className="p-1.5 sm:p-4 bg-blue-100 rounded-full">
+            <Plus className="text-blue-600 w-4 h-4 sm:w-8 sm:h-8" strokeWidth={2.5} />
+          </div>
+          <div className="text-center">
+            <p className="font-bold text-[10px] sm:text-lg text-gray-800 leading-tight">New Item</p>
+            <p className="hidden sm:block text-xs text-gray-500 mt-0.5">Add to Catalog</p>
+          </div>
+          <Package className="w-3 h-3 sm:w-5 sm:h-5 text-blue-400 absolute top-1 sm:top-2 right-1 sm:right-2 opacity-60" />
+        </motion.button>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -433,7 +602,7 @@ export default function StaffDashboard() {
                     <div className="flex items-center gap-1.5 sm:gap-2">
                       <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-[#0B3C8A]"></span>
                       <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                        Actual Sales
+                        Clinic Sales
                       </span>
                     </div>
                   </div>
@@ -594,7 +763,135 @@ export default function StaffDashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* QR Scanner Modal */}
+      <AnimatePresence>
+        {isQRScannerOpen && (
+          <QRScannerModal
+            onClose={() => setIsQRScannerOpen(false)}
+            products={products}
+            onProductFound={handleProductFound}
+            mode={scanMode}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Register New Item Modal */}
+      <AnimatePresence>
+        {isProductModalOpen && newProduct && (
+          <ProductModal
+            mode="add"
+            product={newProduct}
+            onClose={() => setIsProductModalOpen(false)}
+            onSave={handleSaveNewProduct}
+            userRole={userRole}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {createdProductId && (
+          <QRCodeModal
+            productId={createdProductId}
+            productName={newProduct?.name || "Product"}
+            onClose={() => setCreatedProductId(null)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
+  );
+}
+
+function QRCodeModal({ productId, productName, onClose }: {
+  productId: string;
+  productName: string;
+  onClose: () => void;
+}) {
+  const THEME_BG = "bg-[#0B3C8A]";
+  const THEME_HOVER = "hover:bg-[#082F6E]";
+  const qrRef = useRef<HTMLDivElement>(null);
+
+  const qrValue = `${window.location.origin}/inventory?product=${productId}&name=${encodeURIComponent(productName)}`;
+
+  const downloadQRCode = async () => {
+    try {
+      const qrImage = await fetch(
+        `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrValue)}`
+      );
+      
+      if (!qrImage.ok) throw new Error('Failed to generate QR code');
+      
+      const blob = await qrImage.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${productName.replace(/\s+/g, '_')}_QR.png`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading QR code:', error);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col"
+      >
+        <div className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-100 bg-slate-50">
+          <h2 className="text-sm sm:text-lg font-bold text-gray-800 truncate pr-2">
+            {productName} - QR Code
+          </h2>
+          <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors flex-shrink-0">
+            <X size={16} className="text-gray-500 sm:w-5 sm:h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 sm:p-8 flex flex-col items-center gap-4">
+          <div ref={qrRef} className="bg-gray-50 p-4 rounded-lg border-2 border-gray-200">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrValue)}`}
+              alt={`QR Code for ${productName}`}
+              className="w-64 h-64"
+            />
+          </div>
+
+          <p className="text-xs sm:text-sm font-semibold text-gray-700 text-center">
+            {productName}
+          </p>
+
+          <p className="text-[10px] sm:text-xs text-gray-500 text-center px-2">
+            Scan this QR code to quickly add stock or edit this product
+          </p>
+
+          <div className="text-[9px] sm:text-[10px] text-gray-400 bg-gray-50 p-2 sm:p-3 rounded text-center font-mono break-all w-full">
+            ID: {productId}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-5 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors"
+          >
+            Close
+          </button>
+          <button
+            onClick={downloadQRCode}
+            className={`flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg ${THEME_BG} ${THEME_HOVER} text-white text-[11px] sm:text-sm font-medium transition-colors flex items-center justify-center gap-1.5 sm:gap-2`}
+          >
+            <Download size={14} className="sm:w-4 sm:h-4" />
+            Download QR
+          </button>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
