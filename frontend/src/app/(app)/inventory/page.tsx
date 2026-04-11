@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNotification } from "@/components/NotificationProvider"; 
 import { useFirebase } from "@/context/FirebaseContext";
 import { motion, AnimatePresence, Variants } from "framer-motion";
@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 import { uploadImage } from "@/services/cloudinary";
-import jsQR from "jsqr";
 import QRScannerModal from "@/components/QRScannerModal";
 import ProductModal, { ProductFormData } from "@/components/ProductModal";
 
@@ -51,6 +50,27 @@ interface InventoryData {
   totalSold?: number;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+}
+
+interface LowStockItem {
+  id: string;
+  name: string;
+  stock: number;
+  reorderPoint: number;
+  category: string;
+  lastMovedDaysAgo: number;
+  markupPrice: number;
+  baseCost: number;
+}
+
+interface DeadstockItem {
+  id: string;
+  name: string;
+  stock: number;
+  lastMovedDaysAgo: number;
+  category: string;
+  markupPrice: number;
+  baseCost: number;
 }
 
 const modalVariants: Variants = { 
@@ -104,13 +124,21 @@ export default function InventoryPage() {
     setProducts(firebaseProducts);
   }, [firebaseProducts]);
 
-  const lowStockAlerts = getLowStockProducts?.() ?? [];
-  const deadstockAlerts = getDeadstockProducts?.() ?? [];
+  // Get low stock alerts (products below reorder point)
+  const lowStockAlerts = (getLowStockProducts?.() ?? []) as LowStockItem[];
   
-  const displayLowStock = lowStockAlerts.slice(0, 3);
-  const displayDeadstock = deadstockAlerts.slice(0, 2);
+  // Products that need reordering
+  const reorderNeededProducts = useMemo(() => {
+    return lowStockAlerts;
+  }, [lowStockAlerts]);
+  
+  const deadstockAlerts = (getDeadstockProducts?.() ?? []) as DeadstockItem[];
+  
+  // Display all items
+  const displayActionRequired = reorderNeededProducts;
+  const displayDeadstock = deadstockAlerts;
 
-  const filteredProducts = products.filter((product) => {
+  const filteredProducts = products.filter((product: InventoryData) => {
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch = product.name?.toLowerCase().includes(searchLower) || 
                          product.sku?.toLowerCase().includes(searchLower);
@@ -205,7 +233,7 @@ export default function InventoryPage() {
   };
 
   const initiateDelete = (id: string) => {
-    const product = products.find(p => p.id === id);
+    const product = products.find((p: InventoryData) => p.id === id);
     if (product) {
       setProductToDelete(product);
       setIsModalOpen(false);
@@ -365,7 +393,7 @@ export default function InventoryPage() {
               }
             >
               {filteredProducts.length > 0 ? (
-                filteredProducts.map((product) => (
+                filteredProducts.map((product: InventoryData) => (
                   <ProductCard 
                     key={product.id} 
                     data={product} 
@@ -387,14 +415,15 @@ export default function InventoryPage() {
           </div>
         </motion.div>
 
-        {/* RIGHT COLUMN - SIDEBAR ALERTS with FIXED HEIGHTS */}
+        {/* RIGHT COLUMN - SIDEBAR ALERTS with SCROLLBARS */}
         <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0 lg:h-full lg:min-h-0">
-          {/* LOW STOCK SECTION - Fixed height with scroll */}
+          
+          {/* ACTION REQUIRED SECTION - Scrollable - Shows products needing restock */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.1 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden max-h-64 sm:max-h-80 lg:max-h-none"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[320px] sm:h-[380px]"
           >
             <div className="flex items-center gap-2 mb-2 shrink-0">
               <div className="p-1 sm:p-1.5 bg-red-100 rounded-md">
@@ -403,73 +432,99 @@ export default function InventoryPage() {
               <h3 className="font-bold text-gray-800 text-[11px] sm:text-sm">
                 Action Required
               </h3>
+              {displayActionRequired.length > 0 && (
+                <span className="ml-auto text-[10px] font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                  {displayActionRequired.length}
+                </span>
+              )}
             </div>
+            <p className="text-[9px] sm:text-[11px] text-gray-500 mb-2 shrink-0">
+              Products below reorder point.
+            </p>
             
-            {/* Scrollable content area */}
-            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
-              {displayLowStock.length > 0 ? (
-                <div className="space-y-2 sm:space-y-3 pr-1">
-                  {displayLowStock.map((item) => {
-                    const predictedDemand = item.reorderPoint * 2;
+            {/* Scrollable content area with custom scrollbar */}
+            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+              {displayActionRequired.length > 0 ? (
+                <div className="space-y-2 sm:space-y-3">
+                  {displayActionRequired.map((item: LowStockItem) => {
+                    // Calculate how many units needed to reach reorder point
+                    const neededToRestock = Math.max(0, item.reorderPoint - item.stock);
                     return (
-                      <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-red-100 shadow-sm">
+                      <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-red-100 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex justify-between items-start mb-1 gap-2">
-                          <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight truncate">
+                          <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight truncate flex-1">
                             {item.name}
                           </span>
                           <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">
                             {item.stock} left
                           </span>
                         </div>
-                        <div className="mt-1 sm:mt-1.5 bg-red-50 border border-red-200 rounded px-2 py-1.5 flex items-center justify-between">
-                          <span className="text-[9px] text-red-600 font-bold flex items-center gap-1">
-                            <AlertTriangle size={10}/> Restock Needed
-                          </span>
-                          <span className="text-[10px] font-black text-red-700">
-                            {predictedDemand} units
-                          </span>
+                        <div className="mt-1 sm:mt-1.5 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[9px] text-red-600 font-bold flex items-center gap-1">
+                              <AlertTriangle size={10}/> Reorder Point: {item.reorderPoint}
+                            </span>
+                            <span className="text-[9px] font-semibold text-red-700">
+                              {item.stock <= item.reorderPoint ? 'BELOW THRESHOLD' : 'OK'}
+                            </span>
+                          </div>
+                          {neededToRestock > 0 && (
+                            <div className="flex items-center justify-between pt-1 border-t border-red-100">
+                              <span className="text-[8px] text-gray-500">Needed to restock:</span>
+                              <span className="text-[9px] font-bold text-blue-600">
+                                {neededToRestock} units
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <p className="text-[10px] sm:text-xs text-gray-500">
-                  All stock levels are healthy.
-                </p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-[10px] sm:text-xs text-gray-500 text-center">
+                    All stock levels are healthy.
+                  </p>
+                </div>
               )}
             </div>
           </motion.div>
 
-          {/* DEADSTOCK SECTION - Fixed height with scroll */}
+          {/* DEADSTOCK SECTION - Scrollable */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.2 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden max-h-64 sm:max-h-80 lg:max-h-none"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[280px] sm:h-[320px]"
           >
             <div className="flex items-center gap-2 mb-1 shrink-0">
               <div className="p-1 sm:p-1.5 bg-slate-100 rounded-md">
                 <Clock size={14} className="text-slate-600 sm:w-4 sm:h-4"/>
               </div>
-              <div>
+              <div className="flex-1">
                 <h3 className="font-bold text-gray-800 text-[11px] sm:text-sm leading-none">
                   Deadstock Identifier
                 </h3>
               </div>
+              {displayDeadstock.length > 0 && (
+                <span className="text-[10px] font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                  {displayDeadstock.length}
+                </span>
+              )}
             </div>
             <p className="text-[9px] sm:text-[11px] text-gray-500 mb-3 shrink-0">
               AI-flagged items with no sales in 30+ days.
             </p>
             
-            {/* Scrollable content area */}
-            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+            {/* Scrollable content area with custom scrollbar */}
+            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
               {displayDeadstock.length > 0 ? (
-                <div className="space-y-2 sm:space-y-3 pr-1">
-                  {displayDeadstock.map((item) => (
-                    <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm">
+                <div className="space-y-2 sm:space-y-3">
+                  {displayDeadstock.map((item: DeadstockItem) => (
+                    <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-1 gap-2">
-                        <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate">
+                        <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate flex-1">
                           {item.name}
                         </span>
                         <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 whitespace-nowrap shrink-0">
@@ -488,9 +543,11 @@ export default function InventoryPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] sm:text-xs text-gray-500">
-                  No deadstock items identified.
-                </p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-[10px] sm:text-xs text-gray-500 text-center">
+                    No deadstock items identified.
+                  </p>
+                </div>
               )}
             </div>
           </motion.div>
@@ -504,8 +561,8 @@ export default function InventoryPage() {
             mode={qrScanMode}
             onClose={() => setIsQRScannerOpen(false)}
             products={products}
-            onProductFound={(productId) => {
-              const product = products.find(p => p.id === productId);
+            onProductFound={(productId: string) => {
+              const product = products.find((p: InventoryData) => p.id === productId);
               if (product) {
                 if (qrScanMode === 'search') {
                   setSearchQuery(product.name);
@@ -515,7 +572,7 @@ export default function InventoryPage() {
                   adjustStock(product.id, newStock, "Received via QR Scan").then(() => {
                     showNotification(`+1 unit added to "${product.name}" via QR scan`, "success", "Stock Updated");
                     setIsQRScannerOpen(false);
-                  }).catch((error) => {
+                  }).catch((error: Error) => {
                     console.error("Error adjusting stock:", error);
                     showNotification(`Failed to add stock for "${product.name}"`, "error", "Error");
                   });

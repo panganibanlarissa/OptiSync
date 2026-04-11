@@ -3,7 +3,7 @@
 
 import React, { useState, useRef } from "react";
 import { motion, Variants } from "framer-motion";
-import { X, UploadCloud, Save, Trash2, Glasses } from "lucide-react";
+import { X, UploadCloud, Save, Trash2, Glasses, Calendar, Package as PackageIcon } from "lucide-react";
 import Image from "next/image";
 import { uploadImage } from "@/services/cloudinary";
 import { useNotification } from "@/components/NotificationProvider";
@@ -28,6 +28,7 @@ export interface ProductFormData {
   leadTimeDays: number;
   reorderPoint: number;
   expiryDate?: string;
+  batchNumber?: string;
   adjustmentReason?: string;
 }
 
@@ -83,7 +84,13 @@ export default function ProductModal({ mode, product, onClose, onSave, onDelete,
       let imageUrl = formData.image;
       
       if (selectedFile) {
-        imageUrl = await uploadImage(selectedFile, 'products');
+        try {
+          imageUrl = await uploadImage(selectedFile, 'products');
+        } catch (uploadError) {
+          console.error('Image upload failed:', uploadError);
+          showNotification("Image upload failed, product will be saved without image", "warning");
+          imageUrl = null;
+        }
       }
       
       const dataToSave = {
@@ -131,6 +138,11 @@ export default function ProductModal({ mode, product, onClose, onSave, onDelete,
           <div className="p-4 sm:p-5">
             <p className="text-xs sm:text-sm font-semibold text-gray-800 mb-0.5 sm:mb-1">{formData.name}</p>
             <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 font-mono">SKU: {formData.sku}</p>
+            {formData.batchNumber && (
+              <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 flex items-center gap-1">
+                <PackageIcon size={10} /> Batch: {formData.batchNumber}
+              </p>
+            )}
             <form id="stock-form" onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
@@ -267,33 +279,60 @@ export default function ProductModal({ mode, product, onClose, onSave, onDelete,
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Reorder Point</label>
                 <input name="reorderPoint" value={formData.reorderPoint || 10} onChange={handleChange} type="number" min="1" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
               </div>
-              {isPerishable && (
-                <div>
-                  <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Expiry Date</label>
-                  <input 
-                    required 
-                    name="expiryDate" 
-                    value={formData.expiryDate || ""} 
-                    onChange={handleChange} 
-                    type="date" 
-                    className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} 
-                  />
-                </div>
-              )}
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Lead Time (Days)</label>
+                <input name="leadTimeDays" value={formData.leadTimeDays || 7} onChange={handleChange} type="number" min="1" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+              </div>
             </div>
+
+            {/* Batch Number Field */}
+            <div>
+              <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
+                <PackageIcon size={12} className="inline mr-1" /> Batch Number
+              </label>
+              <input 
+                name="batchNumber" 
+                value={formData.batchNumber || ''} 
+                onChange={handleChange} 
+                type="text" 
+                placeholder="e.g., BATCH-2024-001"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none"
+              />
+            </div>
+
+            {/* Expiry Date - Only for perishable items */}
+            {isPerishable && (
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
+                  <Calendar size={12} className="inline mr-1" /> Expiry Date <span className="text-red-500">*</span>
+                </label>
+                <input 
+                  required 
+                  name="expiryDate" 
+                  value={formData.expiryDate || ""} 
+                  onChange={handleChange} 
+                  type="date" 
+                  min={new Date().toISOString().split('T')[0]}
+                  className={`w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 ${THEME_RING} focus:outline-none`} 
+                />
+                <p className="text-[9px] text-gray-400 mt-1">
+                  Products will appear in expiry alerts {isPerishable ? '30 days before expiry' : ''}
+                </p>
+              </div>
+            )}
           </form>
         </div>
         
         <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
           {mode === 'edit' && formData.id && userRole === 'admin' && onDelete && (
-            <button type="button" onClick={() => onDelete(formData.id!)} className="p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+            <button type="button" onClick={() => onDelete(formData.id!)} className="p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
               <Trash2 size={16}/>
             </button>
           )}
-          <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100">
+          <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors">
             Cancel
           </button>
-          <button type="submit" form="product-form" disabled={uploading} className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400' : THEME_BG + ' ' + THEME_HOVER} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2`}>
+          <button type="submit" form="product-form" disabled={uploading} className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400' : THEME_BG + ' ' + THEME_HOVER} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2 transition-colors`}>
             {uploading ? 'Uploading...' : <><Save size={14}/> {mode === 'add' ? 'Save' : 'Update'}</>}
           </button>
         </div>

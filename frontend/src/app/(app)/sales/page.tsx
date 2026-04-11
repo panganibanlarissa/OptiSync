@@ -1,8 +1,8 @@
+// src/app/(app)/sales/page.tsx
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { motion, AnimatePresence, Variants } from "framer-motion"; 
 import { useNotification } from "@/components/NotificationProvider"; 
 import { useFirebase } from "@/context/FirebaseContext";
@@ -122,10 +122,6 @@ export default function SalesPage() {
   const [amountGiven, setAmountGiven] = useState<string>("");
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
 
-  useEffect(() => {
-    // Component mounted - no need to log categories every time
-  }, [firebaseProducts]);
-
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
       const transactionDate = new Date(transaction.date);
@@ -134,10 +130,11 @@ export default function SalesPage() {
     });
   }, [firebaseTransactions, selectedMonth]);
 
+  // Calculate available stock based on actual stock minus reserved items in cart
   const productsWithAvailableStock = useMemo(() => {
     return (firebaseProducts as Product[]).map(product => ({
       ...product,
-      availableStock: product.stock - (tempReservedStock.get(product.id) || 0)
+      availableStock: Math.max(0, product.stock - (tempReservedStock.get(product.id) || 0))
     }));
   }, [firebaseProducts, tempReservedStock]);
 
@@ -157,16 +154,21 @@ export default function SalesPage() {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const total = subtotal;
 
-  const addToCart = (product: Product & { availableStock: number }) => {
-    if (product.availableStock <= 0) {
+  // FIXED: Add to cart function
+  const addToCart = (product: Product) => {
+    const currentReserved = tempReservedStock.get(product.id) || 0;
+    const actualStock = product.stock;
+    const availableForThis = actualStock - currentReserved;
+    
+    if (availableForThis <= 0) {
       showToastOnly(
         `❌ ${product.name} is out of stock`,
-        "error",
-        "Out of Stock"
+        "error"
       );
       return;
     }
 
+    // Update reserved stock
     setTempReservedStock(prev => {
       const newMap = new Map(prev);
       newMap.set(product.id, (prev.get(product.id) || 0) + 1);
@@ -193,41 +195,55 @@ export default function SalesPage() {
     });
   };
 
+  // FIXED: Update quantity function
   const updateQuantity = (id: string, delta: number) => {
-    const product = productsWithAvailableStock.find(p => p.id === id);
-    if (!product) return;
-
-    setCart(prev => {
-      const item = prev.find(i => i.id === id);
-      if (!item) return prev;
+    setCart(prevCart => {
+      const item = prevCart.find(i => i.id === id);
+      if (!item) return prevCart;
 
       const newQty = item.quantity + delta;
       
-      if (delta > 0 && newQty > product.availableStock + item.quantity) {
+      // Don't allow quantity less than 1
+      if (newQty < 1) return prevCart;
+      
+      // Find the actual product
+      const product = (firebaseProducts as Product[]).find(p => p.id === id);
+      if (!product) return prevCart;
+      
+      // Calculate current reserved stock from cart (excluding current item)
+      const currentReservedForOthers = prevCart
+        .filter(i => i.id !== id)
+        .reduce((sum, i) => sum + i.quantity, 0);
+      
+      // Check if new total reserved exceeds actual stock
+      if (delta > 0 && (currentReservedForOthers + newQty) > product.stock) {
         showToastOnly(
-          "Cannot exceed available stock!",
+          `Cannot exceed available stock! Only ${product.stock - currentReservedForOthers} left`,
           "error"
         );
-        return prev;
+        return prevCart;
       }
-
+      
+      // Update tempReservedStock
       setTempReservedStock(prevMap => {
         const newMap = new Map(prevMap);
-        const currentReserved = prevMap.get(id) || 0;
-        newMap.set(id, currentReserved + delta);
+        if (newQty === 0) {
+          newMap.delete(id);
+        } else {
+          newMap.set(id, newQty);
+        }
         return newMap;
       });
-
-      return prev.map(item => 
-        item.id === id ? { ...item, quantity: Math.max(1, newQty) } : item
+      
+      // Update cart
+      return prevCart.map(cartItem =>
+        cartItem.id === id ? { ...cartItem, quantity: newQty } : cartItem
       );
     });
   };
 
+  // FIXED: Remove from cart function
   const removeFromCart = (id: string) => {
-    const item = cart.find(i => i.id === id);
-    if (!item) return;
-
     setTempReservedStock(prev => {
       const newMap = new Map(prev);
       newMap.delete(id);
@@ -237,6 +253,7 @@ export default function SalesPage() {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
+  // FIXED: Clear cart function
   const clearCart = () => {
     setCart([]);
     setTempReservedStock(new Map());
@@ -249,7 +266,6 @@ export default function SalesPage() {
       return;
     }
 
-    // Only validate cash payment amount if cash is selected
     if (paymentMethod === "cash") {
       if (!amountGiven.trim()) {
         showToastOnly("Please enter the amount given", "error");
@@ -308,10 +324,8 @@ export default function SalesPage() {
         }
       }
 
-      // Calculate change only for cash payments
       const change = paymentMethod === "cash" ? parseFloat(amountGiven) - total : undefined;
 
-      // Build transaction object - only include cash-specific fields if payment is cash
       const newTransaction: any = {
         patientName: patientName || "Walk-in Patient",
         items: cart,
@@ -324,7 +338,6 @@ export default function SalesPage() {
         paymentMethod: paymentMethod
       };
 
-      // Only add cash-specific fields if payment method is cash
       if (paymentMethod === "cash") {
         newTransaction.amountGiven = parseFloat(amountGiven);
         newTransaction.change = change;
@@ -418,16 +431,14 @@ export default function SalesPage() {
   };
 
   const generateReceipt = (trx: Transaction) => {
-    // Create a POS-style receipt (80mm thermal receipt format)
     const itemCount = trx.items.length;
     const estimatedHeight = 80 + (itemCount * 10);
     const doc = new jsPDF('p', 'mm', [80, Math.max(150, estimatedHeight)]);
     const pageWidth = 80;
-    let currentY = 5; // Top margin
+    let currentY = 5;
     const leftMargin = 3;
     const rightMargin = 3;
 
-    // Helper function for dashed divider
     const drawDashedDivider = (y: number) => {
       doc.setDrawColor(150, 150, 150);
       let x = leftMargin;
@@ -439,7 +450,6 @@ export default function SalesPage() {
       }
     };
 
-    // === HEADER ===
     doc.setFontSize(11);
     doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -456,11 +466,9 @@ export default function SalesPage() {
     doc.text("Tel. 0922 825 4918", pageWidth / 2, currentY, { align: 'center' });
     currentY += 3;
 
-    // Dashed divider
     drawDashedDivider(currentY);
     currentY += 3;
 
-    // === RECEIPT TYPE ===
     doc.setFontSize(9);
     doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -468,11 +476,9 @@ export default function SalesPage() {
     doc.text(paymentType, pageWidth / 2, currentY, { align: 'center' });
     currentY += 4;
 
-    // Dashed divider
     drawDashedDivider(currentY);
     currentY += 3;
 
-    // === RECEIPT DETAILS ===
     doc.setFontSize(6);
     doc.setFont('Helvetica', 'normal');
     doc.setTextColor(0, 0, 0);
@@ -492,18 +498,15 @@ export default function SalesPage() {
     doc.text(`Customer: ${trx.patientName}`, leftMargin, currentY);
     currentY += 3;
 
-    // Dashed divider
     drawDashedDivider(currentY);
     currentY += 2.5;
 
-    // === ITEMS HEADER ===
     doc.setFontSize(6);
     doc.setFont('Helvetica', 'bold');
     doc.text('Description', leftMargin, currentY);
     doc.text('Price', pageWidth - rightMargin - 8, currentY, { align: 'right' });
     currentY += 2;
 
-    // === ITEMS ===
     doc.setFontSize(6);
     doc.setFont('Helvetica', 'normal');
     doc.setTextColor(0, 0, 0);
@@ -511,8 +514,6 @@ export default function SalesPage() {
     trx.items.forEach(item => {
       const lineAmount = item.quantity * item.price;
       const lineAmountStr = `${lineAmount.toLocaleString()}`;
-      
-      // Item name and quantity on full line
       const displayName = `${item.name} (x${item.quantity})`;
       
       doc.text(displayName, leftMargin, currentY);
@@ -520,11 +521,9 @@ export default function SalesPage() {
       currentY += 2.3;
     });
 
-    // Dashed divider
     drawDashedDivider(currentY);
     currentY += 2.5;
 
-    // === TOTALS ===
     doc.setFontSize(7);
     doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -534,7 +533,6 @@ export default function SalesPage() {
     doc.text(totalStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
     currentY += 2.8;
 
-    // Payment details
     doc.setFontSize(6);
     doc.setFont('Helvetica', 'normal');
     
@@ -553,11 +551,9 @@ export default function SalesPage() {
     }
     currentY += 3;
 
-    // Dashed divider
     drawDashedDivider(currentY);
     currentY += 2.5;
 
-    // === FOOTER ===
     doc.setFontSize(8);
     doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -717,8 +713,7 @@ export default function SalesPage() {
                           } else {
                             showToastOnly(
                               `❌ ${product.name} is out of stock`,
-                              "error",
-                              "Out of Stock"
+                              "error"
                             );
                           }
                         }}
@@ -858,6 +853,13 @@ export default function SalesPage() {
                 <AnimatePresence>
                   {cart.map(item => {
                     const product = productsWithAvailableStock.find(p => p.id === item.id);
+                    // Calculate the actual available stock including current cart quantity
+                    const actualStock = product?.stock || 0;
+                    const reservedForOthers = cart
+                      .filter(i => i.id !== item.id)
+                      .reduce((sum, i) => sum + i.quantity, 0);
+                    const maxPossible = actualStock - reservedForOthers;
+                    
                     return (
                       <motion.div 
                         key={item.id} 
@@ -908,7 +910,7 @@ export default function SalesPage() {
                             <button 
                               onClick={() => updateQuantity(item.id, 1)} 
                               className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"
-                              disabled={item.quantity >= (product?.availableStock || 0) + item.quantity}
+                              disabled={item.quantity >= maxPossible}
                             >
                               <Plus size={12}/>
                             </button>
@@ -929,7 +931,6 @@ export default function SalesPage() {
 
             <div className="shrink-0 p-2.5 sm:p-4 border-t border-gray-100 bg-slate-50">
               <div className="space-y-3 sm:space-y-4 mb-4 sm:mb-5">
-                {/* Payment Method Selection */}
                 <div className="space-y-2">
                   <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Payment Method</label>
                   <div className="flex gap-2">
@@ -958,7 +959,6 @@ export default function SalesPage() {
                   </div>
                 </div>
 
-                {/* Amount Given Input */}
                 {paymentMethod === "cash" && (
                   <div className="space-y-1.5">
                     <label htmlFor="amountGiven" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Given</label>
@@ -975,7 +975,6 @@ export default function SalesPage() {
                       />
                     </div>
 
-                    {/* Change Display */}
                     {amountGiven && !isNaN(parseFloat(amountGiven)) && parseFloat(amountGiven) >= total && (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 sm:p-2.5">
                         <div className="flex justify-between items-center text-xs sm:text-sm">
@@ -1030,16 +1029,16 @@ export default function SalesPage() {
             </div>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="flex-1">
-                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1.5">Filter by Month</label>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Filter by Month</label>
                 <input 
                   type="month" 
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
                 />
               </div>
               <div className="flex-1">
-                <div className="text-[10px] sm:text-xs font-semibold text-gray-600 mb-1.5">Total Transactions</div>
+                <div className="text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Total Transactions</div>
                 <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">
                   {filteredTransactions.length}
                 </div>
@@ -1142,7 +1141,6 @@ export default function SalesPage() {
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4 font-mono">{lastTransaction.id.slice(-8).toUpperCase()}</p>
               <div className="text-2xl sm:text-3xl font-black text-[#0B3C8A] mb-5 sm:mb-6">₱{lastTransaction.total.toLocaleString()}</div>
               
-              {/* Display Payment Details */}
               {lastTransaction.paymentMethod && (
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-gray-200">
                   <div className="flex justify-between">

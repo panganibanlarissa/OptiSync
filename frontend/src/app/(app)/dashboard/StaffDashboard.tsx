@@ -26,7 +26,10 @@ import {
   ArrowDown,
   Plus,
   X,
-  Download
+  Download,
+  TrendingUp,
+  TrendingDown,
+  Minus
 } from "lucide-react";
 
 const IMAGE_COLORS = [
@@ -58,15 +61,6 @@ interface ForecastDisplayData {
   priority: 'high' | 'medium' | 'low';
 }
 
-interface InventoryDisplayData {
-  id: string;
-  name: string;
-  category: string;
-  stock: number;
-  price: number;
-  status: 'in_stock' | 'low_stock' | 'critical';
-}
-
 interface ChartDataPoint {
   label: string;
   actual: number;
@@ -74,17 +68,6 @@ interface ChartDataPoint {
   lower?: number;
   upper?: number;
   date: Date;
-}
-
-interface ChartBarGroupProps {
-  label: string;
-  actual: number;
-  forecast: number;
-  lower?: number;
-  upper?: number;
-  maxVal: number;
-  delay: number;
-  isWide?: boolean;
 }
 
 interface HeatmapData {
@@ -155,7 +138,9 @@ export default function StaffDashboard() {
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [newProduct, setNewProduct] = useState<ProductFormData | null>(null);
   const [createdProductId, setCreatedProductId] = useState<string | null>(null);
-  const { products, transactions, addProduct, adjustStock, userRole } = useFirebase();
+  const [hoveredBar, setHoveredBar] = useState<{ label: string; actual: number } | null>(null);
+  
+  const { products, transactions, addProduct, adjustStock, userRole, userName, userId } = useFirebase();
   const { loading, recommendations, usingML, dataLoaded } = useMLForecasting();
   const { showNotification } = useNotification();
 
@@ -240,9 +225,10 @@ export default function StaffDashboard() {
     }).length;
   }, [completedTransactions]);
 
+  // Calculate weekly sales data from real transactions
   const weeklySalesData = useMemo(() => {
     const today = new Date();
-    const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const result: ChartDataPoint[] = [];
     
     for (let i = 6; i >= 0; i--) {
@@ -261,7 +247,7 @@ export default function StaffDashboard() {
         .reduce((sum, t) => sum + t.total, 0);
       
       result.push({
-        label: weekDays[date.getDay() === 0 ? 6 : date.getDay() - 1],
+        label: weekDays[date.getDay()],
         actual: daySales,
         forecast: 0,
         date: date
@@ -271,6 +257,7 @@ export default function StaffDashboard() {
     return result;
   }, [completedTransactions]);
 
+  // Calculate monthly sales data from real transactions
   const monthlySalesData = useMemo(() => {
     const year = new Date().getFullYear();
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -301,17 +288,42 @@ export default function StaffDashboard() {
   const chartData = activeTab === "weekly" ? weeklySalesData : monthlySalesData;
   const chartMaxValue = useMemo(() => {
     if (!chartData || chartData.length === 0) return 10000;
-    const max = Math.max(...chartData.map(d => Math.max(d.actual, d.forecast)));
+    const max = Math.max(...chartData.map(d => d.actual));
     return Math.ceil(max / 10000) * 10000 || 10000;
   }, [chartData]);
 
+  // Calculate low stock count from real data
   const lowStockCount = useMemo(() => {
-    return products.filter(p => p.stock <= p.reorderPoint).length;
+    return products.filter(p => p.stock <= p.reorderPoint && p.stock > 0).length;
   }, [products]);
 
+  // Calculate total inventory count from real data
   const totalInventoryCount = useMemo(() => {
     return products.reduce((sum, p) => sum + p.stock, 0);
   }, [products]);
+
+  // Calculate previous period sales for trend comparison
+  const previousPeriodSales = useMemo(() => {
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
+    
+    return completedTransactions
+      .filter(t => {
+        const transDate = new Date(t.date);
+        transDate.setHours(0, 0, 0, 0);
+        return transDate.getTime() === yesterday.getTime();
+      })
+      .reduce((sum, t) => sum + t.total, 0);
+  }, [completedTransactions]);
+
+  const salesTrend = useMemo(() => {
+    if (previousPeriodSales === 0 && todaySales === 0) return "0%";
+    if (previousPeriodSales === 0) return "+100%";
+    const percentChange = ((todaySales - previousPeriodSales) / previousPeriodSales) * 100;
+    return `${percentChange >= 0 ? '+' : ''}${Math.round(percentChange)}%`;
+  }, [todaySales, previousPeriodSales]);
 
   const STATS_DATA: StatData[] = useMemo(() => {
     return [
@@ -319,22 +331,22 @@ export default function StaffDashboard() {
         id: "sales_today",
         label: "Today's Sales",
         value: `₱${todaySales.toLocaleString()}`,
-        trend: "+15%",
-        trendType: "positive",
+        trend: salesTrend,
+        trendType: parseFloat(salesTrend) >= 0 ? "positive" : "negative",
       },
       {
         id: "transactions_today",
         label: "Today's Transaction",
         value: todayTransactionCount,
-        trend: "• Live",
-        trendType: "positive",
+        trend: todayTransactionCount > 0 ? "• Live" : "No sales",
+        trendType: todayTransactionCount > 0 ? "positive" : "neutral",
       },
       {
         id: "low_stock",
         label: "Low Stock Items",
         value: lowStockCount,
-        trend: "Action Needed",
-        trendType: "negative",
+        trend: lowStockCount > 0 ? "Action Needed" : "All Good",
+        trendType: lowStockCount > 0 ? "negative" : "positive",
       },
       {
         id: "total_inventory",
@@ -344,8 +356,9 @@ export default function StaffDashboard() {
         trendType: "neutral",
       },
     ];
-  }, [todaySales, todayTransactionCount, lowStockCount, totalInventoryCount]);
+  }, [todaySales, todayTransactionCount, lowStockCount, totalInventoryCount, salesTrend]);
 
+  // Format recommendations for display
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (hasEnoughDataForML && recommendations.length > 0) {
       return recommendations.slice(0, 3).map(r => ({
@@ -359,6 +372,7 @@ export default function StaffDashboard() {
     return [];
   }, [hasEnoughDataForML, recommendations]);
 
+  // Calculate heatmap data from real products
   const HEATMAP_DATA: HeatmapData[] = useMemo(() => {
     const categoryStats = products.reduce((acc, product) => {
       if (!acc[product.category]) {
@@ -386,7 +400,7 @@ export default function StaffDashboard() {
     }));
   }, [products]);
 
-  // Get recently added stock (products sorted by most recent)
+  // Get recently added stock from real data (products sorted by most recent)
   const RECENTLY_ADDED: RecentlyAddedItem[] = useMemo(() => {
     return products
       .sort((a, b) => {
@@ -405,6 +419,14 @@ export default function StaffDashboard() {
         status: p.stock <= 0 ? 'low_stock' : p.stock <= p.reorderPoint ? 'low_stock' : 'in_stock'
       }));
   }, [products]);
+
+  const handleBarHover = (label: string, actual: number) => {
+    setHoveredBar({ label, actual });
+  };
+
+  const handleBarLeave = () => {
+    setHoveredBar(null);
+  };
 
   if (loading && !dataLoaded) {
     return (
@@ -429,7 +451,7 @@ export default function StaffDashboard() {
         await adjustStock(productId, newStock, reason);
         
         const action = scanMode === 'in' ? '+1' : '-1';
-        const message = `${action} unit${Math.abs(newStock - product.stock) === 1 ? '' : 's'} - ${product.name}`;
+        const message = `${action} unit - ${product.name}`;
         
         showNotification(message, 'success', `Stock ${scanMode === 'in' ? 'In' : 'Out'} ✓`);
         setIsQRScannerOpen(false);
@@ -447,6 +469,16 @@ export default function StaffDashboard() {
       variants={containerVariants}
       className="min-h-screen mt-2 sm:mt-2 p-2 sm:p-4 space-y-3 sm:space-y-4"
     >
+      {usingML && hasEnoughDataForML && dataLoaded && (
+        <motion.div 
+          variants={itemVariants}
+          className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700 flex items-center gap-2"
+        >
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          AI-Powered Forecasts Active (Time Series Analysis)
+        </motion.div>
+      )}
+
       <motion.div
         variants={containerVariants}
         className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4"
@@ -537,39 +569,32 @@ export default function StaffDashboard() {
               </div>
             </div>
 
-            {hasEnoughDataForML ? (
-              <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
-                <button
-                  onClick={() => setActiveTab("weekly")}
-                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                    activeTab === "weekly"
-                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  Weekly Sales
-                </button>
-                <button
-                  onClick={() => setActiveTab("monthly")}
-                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                    activeTab === "monthly"
-                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  Monthly Sales
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-xs text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg">
-                <Database size={14} />
-                <span>Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more transactions for forecasts</span>
-              </div>
-            )}
+            <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
+              <button
+                onClick={() => setActiveTab("weekly")}
+                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                  activeTab === "weekly"
+                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Weekly Sales
+              </button>
+              <button
+                onClick={() => setActiveTab("monthly")}
+                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                  activeTab === "monthly"
+                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Monthly Sales
+              </button>
+            </div>
           </div>
 
           <div className="relative min-h-57.5">
-            {hasEnoughDataForML && chartData && chartData.length > 0 ? (
+            {chartData && chartData.length > 0 ? (
               <div>
                 <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
                   <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
@@ -582,20 +607,30 @@ export default function StaffDashboard() {
 
                   <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[300px] sm:min-w-0">
                     {chartData.slice(0, activeTab === "weekly" ? 7 : 12).map((data, idx) => (
-                      <ChartBarGroup
+                      <StaffChartBarGroup
                         key={`${activeTab}-${idx}`}
                         label={data.label}
                         actual={data.actual}
-                        forecast={data.forecast}
-                        lower={data.lower}
-                        upper={data.upper}
                         maxVal={chartMaxValue}
                         delay={idx * 0.1}
                         isWide={activeTab === "monthly"}
+                        onHover={() => handleBarHover(data.label, data.actual)}
+                        onLeave={handleBarLeave}
                       />
                     ))}
                   </div>
                 </div>
+
+                {/* Hover Tooltip Display */}
+                {hoveredBar && (
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
+                    <div className="font-bold mb-1 text-center">{hoveredBar.label}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400">Sales:</span>
+                      <span className="font-bold text-emerald-400">₱{hoveredBar.actual.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex flex-col items-center mt-3 sm:mt-6">
                   <div className="flex justify-center items-center gap-3 sm:gap-6 text-xs sm:text-sm bg-gray-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-100">
@@ -611,9 +646,9 @@ export default function StaffDashboard() {
             ) : (
               <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                 <Database size={48} className="mb-3 opacity-20" />
-                <p className="text-sm font-medium">Not enough transaction data</p>
+                <p className="text-sm font-medium">No transaction data available</p>
                 <p className="text-xs mt-1 text-center max-w-xs">
-                  Complete at least {MIN_TRANSACTIONS_FOR_ML} sales to see sales velocity.
+                  Complete sales transactions to see sales velocity.
                   Current: {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
                 </p>
               </div>
@@ -650,6 +685,11 @@ export default function StaffDashboard() {
                     ? "No reorder recommendations at this time."
                     : "Insufficient data for AI recommendations"}
                 </p>
+                {!hasEnoughDataForML && (
+                  <p className="text-[10px] text-gray-400 mt-2">
+                    Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -952,6 +992,25 @@ function StatCard({ data }: { data: StatData }) {
 }
 
 function ForecastItem({ data }: { data: ForecastDisplayData }) {
+  const getTrendIcon = () => {
+    if (data.trend === 'up') {
+      return <TrendingUp size={14} className="text-emerald-500" />;
+    } else if (data.trend === 'down') {
+      return <TrendingDown size={14} className="text-red-500" />;
+    }
+    return <Minus size={14} className="text-gray-400" />;
+  };
+
+  const getActionText = () => {
+    if (data.trend === 'up') {
+      const needed = data.predictedDemand - data.currentStock;
+      return needed > 0 ? `Order ${needed} Units` : "Stock sufficient";
+    } else if (data.trend === 'down') {
+      return "Reduce orders";
+    }
+    return "Monitor stock";
+  };
+
   return (
     <motion.div
       initial={{ x: -20, opacity: 0 }}
@@ -960,16 +1019,19 @@ function ForecastItem({ data }: { data: ForecastDisplayData }) {
       className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-100"
     >
       <div className="flex justify-between items-start mb-2">
-        <h3 className="font-semibold text-gray-800 text-xs sm:text-sm truncate pr-2">
-          {data.name}
-        </h3>
-        {data.trend === "up" ? (
-          <ArrowUpRight size={14} className="text-[#0B3C8A] sm:w-4 sm:h-4" />
-        ) : data.trend === "down" ? (
-          <ArrowDownRight size={14} className="text-orange-500 sm:w-4 sm:h-4" />
-        ) : (
-          <div className="w-4 h-4 rounded-full bg-gray-400" />
-        )}
+        <div className="flex items-center gap-1.5">
+          {getTrendIcon()}
+          <h3 className="font-semibold text-gray-800 text-xs sm:text-sm truncate pr-2">
+            {data.name}
+          </h3>
+        </div>
+        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded ${
+          data.priority === 'high' ? 'bg-red-100 text-red-700' :
+          data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+          'bg-blue-100 text-blue-700'
+        }`}>
+          {data.priority.toUpperCase()}
+        </span>
       </div>
       <div className="flex justify-between text-xs sm:text-sm mb-2 sm:mb-3">
         <div>
@@ -982,12 +1044,18 @@ function ForecastItem({ data }: { data: ForecastDisplayData }) {
           <p className="text-gray-500 text-[9px] sm:text-xs">Projected Demand</p>
           <p
             className={`font-bold text-sm sm:text-base ${
-              data.trend === "up" ? "text-[#0B3C8A]" : 
-              data.trend === "down" ? "text-orange-500" : "text-gray-600"
+              data.trend === "up" ? "text-emerald-600" : 
+              data.trend === "down" ? "text-red-500" : "text-gray-600"
             }`}
           >
             {data.predictedDemand} units
           </p>
+        </div>
+      </div>
+      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+        <div className="flex items-center gap-1 text-[9px] sm:text-xs text-gray-600 font-medium">
+          <Package size={12} />
+          {getActionText()}
         </div>
       </div>
     </motion.div>
@@ -1034,21 +1102,32 @@ function RecentlyAddedRow({ data }: { data: RecentlyAddedItem }) {
   );
 }
 
-function ChartBarGroup({
+function StaffChartBarGroup({
   label,
   actual,
-  forecast,
-  lower,
-  upper,
   maxVal,
   delay,
   isWide = false,
-}: ChartBarGroupProps) {
+  onHover,
+  onLeave,
+}: {
+  label: string;
+  actual: number;
+  maxVal: number;
+  delay: number;
+  isWide?: boolean;
+  onHover: () => void;
+  onLeave: () => void;
+}) {
   const actualHeight = `${Math.min((actual / maxVal) * 100, 100)}%`;
   const barWidthClass = isWide ? "w-3 sm:w-10" : "w-2 sm:w-6";
 
   return (
-    <div className="flex flex-col items-center gap-1 sm:gap-2 flex-1 group relative cursor-pointer h-full justify-end">
+    <div 
+      className="flex flex-col items-center gap-1 sm:gap-2 flex-1 group relative cursor-pointer h-full justify-end"
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+    >
       <div className="flex items-end gap-0.5 sm:gap-1 w-full justify-center h-full">
         <motion.div
           initial={{ height: 0 }}

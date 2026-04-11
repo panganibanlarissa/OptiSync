@@ -56,6 +56,8 @@ export interface Product {
   leadTimeDays: number;
   reorderPoint: number;
   expiryDate?: string | null;
+  batchNumber?: string;
+  manufacturingDate?: Date;
   totalSold?: number;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
@@ -73,7 +75,7 @@ export interface Transaction {
   staffId?: string;
   staffEmail?: string;
   scanType?: 'manual' | 'qr_scan';
-  performedBy?: string; // Digital Signature field for the audit trail
+  performedBy?: string;
   metadata?: {
     device?: string;
     location?: string;
@@ -145,6 +147,7 @@ interface FirebaseContextType {
   getThisMonthSales: () => number;
   getLowStockProducts: () => Product[];
   getDeadstockProducts: () => Product[];
+  getExpiringProducts: (daysThreshold?: number) => Product[];
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -398,17 +401,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
     
     try {
-      // Check if email already exists in Firebase Auth
       const signInMethods = await fetchSignInMethodsForEmail(auth, email);
       if (signInMethods.length > 0) {
         throw new Error("Email already in use. Please use a different email address.");
       }
       
-      // Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const newUid = userCredential.user.uid;
       
-      // Create user document in Firestore
       const userDocRef = doc(db, "users", newUid);
       await setDoc(userDocRef, {
         email,
@@ -421,14 +421,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         updatedAt: serverTimestamp()
       });
       
-      // Refresh staff list
       await fetchStaffUsers();
       
       return newUid;
     } catch (error) {
       console.error("Error creating staff user:", error);
       
-      // Handle specific Firebase errors with type checking
       if (error && typeof error === 'object' && 'code' in error) {
         const firebaseError = error as { code: string; message: string };
         
@@ -441,7 +439,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       }
       
-      // Re-throw the original error if it's not a Firebase error we handled
       throw error;
     }
   };
@@ -458,7 +455,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         updatedAt: serverTimestamp()
       });
       
-      // Refresh staff list
       await fetchStaffUsers();
     } catch (error) {
       console.error("Error updating staff user:", error);
@@ -476,14 +472,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
     
     try {
-      // Instead of hard delete, set status to Inactive
       const userDocRef = doc(db, "users", uid);
       await updateDoc(userDocRef, {
         status: "Inactive",
         updatedAt: serverTimestamp()
       });
       
-      // Refresh staff list
       await fetchStaffUsers();
     } catch (error) {
       console.error("Error deleting staff user:", error);
@@ -492,39 +486,35 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   };
 
   const resetStaffPassword = async (email: string) => {
-  try {
-    // Send password reset email directly - Firebase will validate the email
-    await sendPasswordResetEmail(auth, email);
-  } catch (error: unknown) {
-    console.error("Error sending password reset:", error);
-    
-    // Type guard to check if error is an object with code property
-    if (error && typeof error === 'object' && 'code' in error) {
-      const firebaseError = error as { code: string; message: string };
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (error: unknown) {
+      console.error("Error sending password reset:", error);
       
-      // Handle specific Firebase error codes
-      switch (firebaseError.code) {
-        case 'auth/user-not-found':
-          throw new Error("No account found with this email address.");
-        case 'auth/invalid-email':
-          throw new Error("Invalid email format. Please check your email address.");
-        case 'auth/too-many-requests':
-          throw new Error("Too many reset attempts. Please try again later.");
-        case 'auth/network-request-failed':
-          throw new Error("Network error. Please check your internet connection.");
-        case 'auth/internal-error':
-          throw new Error("Internal error. Please try again later.");
-        default:
-          throw new Error(`Failed to send reset email: ${firebaseError.message || 'Unknown error'}`);
+      if (error && typeof error === 'object' && 'code' in error) {
+        const firebaseError = error as { code: string; message: string };
+        
+        switch (firebaseError.code) {
+          case 'auth/user-not-found':
+            throw new Error("No account found with this email address.");
+          case 'auth/invalid-email':
+            throw new Error("Invalid email format. Please check your email address.");
+          case 'auth/too-many-requests':
+            throw new Error("Too many reset attempts. Please try again later.");
+          case 'auth/network-request-failed':
+            throw new Error("Network error. Please check your internet connection.");
+          case 'auth/internal-error':
+            throw new Error("Internal error. Please try again later.");
+          default:
+            throw new Error(`Failed to send reset email: ${firebaseError.message || 'Unknown error'}`);
+        }
       }
+      
+      throw new Error("Failed to send reset email. Please try again.");
     }
-    
-    // Generic error for other cases
-    throw new Error("Failed to send reset email. Please try again.");
-  }
-};
+  };
 
-  // Products functions – use fixed CLINIC_ID
+  // Products functions
   const addProduct = async (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'totalSold'>): Promise<string> => {
     if (!user) throw new Error("User not authenticated");
     try {
@@ -587,7 +577,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         stock: newStock,
         updatedAt: serverTimestamp()
       });
-      // Log adjustment with staff info
+      
       const adjustmentsRef = collection(db, `clinics/${CLINIC_ID}/stockAdjustments`);
       await addDoc(adjustmentsRef, {
         productId: id,
@@ -596,11 +586,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         staffName: userName,
         staffId: userId,
         staffEmail: userEmail,
-        performedBy: `${userName} (${userId.slice(-4)})`, // Digital Signature
+        performedBy: `${userName} (${userId.slice(-4)})`,
         timestamp: serverTimestamp(),
         scanType: reason.toLowerCase().includes('qr') ? 'qr_scan' : 'manual',
-        isImmutable: true // Marker for backend logic
+        isImmutable: true
       });
+      
       setProducts(prev => 
         prev.map(p => p.id === id ? { ...p, stock: newStock } : p)
       );
@@ -610,7 +601,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Transactions functions – use fixed CLINIC_ID
+  // Transactions functions
   const addTransaction = async (transaction: Omit<Transaction, 'id' | 'createdAt'>) => {
     if (!user) throw new Error("User not authenticated");
     try {
@@ -754,6 +745,19 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return products.filter(p => p.lastMovedDaysAgo >= 30 && p.stock > 0);
   }, [products]);
 
+  const getExpiringProducts = useCallback((daysThreshold: number = 30) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return products.filter(p => {
+      if (!p.expiryDate || p.stock <= 0) return false;
+      const expiryDate = new Date(p.expiryDate);
+      expiryDate.setHours(0, 0, 0, 0);
+      const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      return daysUntilExpiry <= daysThreshold && daysUntilExpiry > 0;
+    });
+  }, [products]);
+
   const value: FirebaseContextType = {
     user,
     appUser,
@@ -783,7 +787,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     getTodaySales,
     getThisMonthSales,
     getLowStockProducts,
-    getDeadstockProducts
+    getDeadstockProducts,
+    getExpiringProducts,
   };
 
   return (
