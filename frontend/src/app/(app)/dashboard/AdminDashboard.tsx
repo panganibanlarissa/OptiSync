@@ -29,7 +29,9 @@ interface StatData {
 interface ForecastDisplayData {
   name: string;
   currentStock: number;
-  predictedDemand: number;
+  predictedDemand30d: number;
+  predictedDemand60d: number;
+  predictedDemand90d: number;
   trend: 'up' | 'down' | 'stable';
   priority: 'high' | 'medium' | 'low';
 }
@@ -400,22 +402,33 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
-  // FIXED: Show ALL recommendations, not just 3
+  // FIXED: Calculate cumulative demand for 30, 60, and 90 days
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations.length > 0) {
-      const multiplier = forecastPeriod === 60 ? 1.8 : forecastPeriod === 90 ? 2.5 : 1;
-      
-      // Show ALL recommendations - removed .slice(0, 3)
-      return recommendations.map((r: Recommendation) => ({
-        name: r.productName,
-        currentStock: r.currentStock,
-        predictedDemand: Math.round(r.predictedDemand * multiplier),
-        trend: r.trend,
-        priority: r.confidence
-      }));
+      // Calculate daily demand rate from the base prediction
+      // Assuming the base recommendation's predictedDemand is for 30 days
+      return recommendations.map((r: Recommendation) => {
+        // Base daily demand rate (units per day)
+        const dailyDemandRate = r.predictedDemand / 30;
+        
+        // Calculate cumulative demand for different periods
+        const predictedDemand30d = Math.round(dailyDemandRate * 30);
+        const predictedDemand60d = Math.round(dailyDemandRate * 60);
+        const predictedDemand90d = Math.round(dailyDemandRate * 90);
+        
+        return {
+          name: r.productName,
+          currentStock: r.currentStock,
+          predictedDemand30d: predictedDemand30d,
+          predictedDemand60d: predictedDemand60d,
+          predictedDemand90d: predictedDemand90d,
+          trend: r.trend,
+          priority: r.confidence
+        };
+      });
     }
     return [];
-  }, [usingML, hasEnoughDataForML, recommendations, forecastPeriod]);
+  }, [usingML, hasEnoughDataForML, recommendations]);
 
   const HEATMAP_DATA = useMemo(() => {
     const categoryStats = products.reduce((acc: any, product: any) => {
@@ -550,6 +563,18 @@ export default function AdminDashboard() {
       </div>
     );
   }
+
+  // Get the current displayed demand based on selected period
+  const getCurrentDisplayDemand = (item: ForecastDisplayData) => {
+    switch (forecastPeriod) {
+      case 60:
+        return item.predictedDemand60d;
+      case 90:
+        return item.predictedDemand90d;
+      default:
+        return item.predictedDemand30d;
+    }
+  };
 
   const handleBarHover = (label: string, fullLabel: string, actual: number, forecast: number) => {
     setHoveredBar({ label, fullLabel, actual, forecast });
@@ -707,7 +732,7 @@ export default function AdminDashboard() {
           </div>
         </motion.div>
 
-        {/* DEMAND FORECASTING SECTION WITH SCROLLBAR - SHOWING ALL PRODUCTS */}
+        {/* DEMAND FORECASTING SECTION WITH SCROLLBAR - SHOWING ALL PRODUCTS WITH CUMULATIVE DEMAND */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-[550px]"
@@ -751,7 +776,12 @@ export default function AdminDashboard() {
             {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
               <div className="space-y-3 sm:space-y-4">
                 {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
-                  <ForecastItem key={i} data={item} />
+                  <ForecastItem 
+                    key={i} 
+                    data={item} 
+                    currentDemand={getCurrentDisplayDemand(item)}
+                    forecastPeriod={forecastPeriod}
+                  />
                 ))}
               </div>
             ) : (
@@ -995,13 +1025,9 @@ function StatCard({ data }: { data: StatData }) {
   );
 }
 
-function ForecastItem({ data }: { data: ForecastDisplayData }) {
-  const actionText =
-    data.trend === "up"
-      ? `Order ${data.predictedDemand - data.currentStock} Units`
-      : data.trend === "down"
-      ? "Reduce orders"
-      : "Monitor stock";
+function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastDisplayData; currentDemand: number; forecastPeriod: number }) {
+  const orderQuantity = Math.max(0, currentDemand - data.currentStock);
+  const needsReorder = orderQuantity > 0;
 
   return (
     <motion.div
@@ -1022,29 +1048,32 @@ function ForecastItem({ data }: { data: ForecastDisplayData }) {
           <div className="w-4 h-4 rounded-full bg-gray-400" />
         )}
       </div>
-      <div className="flex justify-between text-xs sm:text-sm mb-2 sm:mb-3">
+      
+      <div className="grid grid-cols-3 gap-2 mb-3">
         <div>
-          <p className="text-gray-500 text-[9px] sm:text-xs">Current</p>
+          <p className="text-gray-500 text-[8px] sm:text-[9px]">Current</p>
           <p className="font-bold text-gray-900 text-sm sm:text-base">
             {data.currentStock} units
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-gray-500 text-[9px] sm:text-xs">Projected Demand</p>
-          <p
-            className={`font-bold text-sm sm:text-base ${
-              data.trend === "up" ? "text-[#0B3C8A]" : 
-              data.trend === "down" ? "text-orange-500" : "text-gray-600"
-            }`}
-          >
-            {data.predictedDemand} units
+        <div>
+          <p className="text-gray-500 text-[8px] sm:text-[9px]">{forecastPeriod}d Demand</p>
+          <p className="font-bold text-[#0B3C8A] text-sm sm:text-base">
+            {currentDemand} units
+          </p>
+        </div>
+        <div>
+          <p className="text-gray-500 text-[8px] sm:text-[9px]">Order</p>
+          <p className="font-bold text-emerald-600 text-sm sm:text-base">
+            {orderQuantity} units
           </p>
         </div>
       </div>
+      
       <div className="flex justify-between items-center pt-2 border-t border-gray-200">
         <div className="flex items-center gap-1 text-[9px] sm:text-xs text-gray-600 font-medium">
           <Package size={12} />
-          {actionText}
+          {needsReorder ? `Order ${orderQuantity} Units` : "Stock Sufficient"}
         </div>
         <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded ${
           data.priority === 'high' ? 'bg-red-100 text-red-700' :

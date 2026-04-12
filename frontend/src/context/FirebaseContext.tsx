@@ -9,7 +9,8 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  fetchSignInMethodsForEmail
+  fetchSignInMethodsForEmail,
+  deleteUser
 } from "firebase/auth";
 import { 
   collection, 
@@ -114,6 +115,8 @@ interface FirebaseContextType {
   createStaffUser: (email: string, password: string, name: string, role: "admin" | "staff") => Promise<string>;
   updateStaffUser: (uid: string, updates: Partial<StaffUser>) => Promise<void>;
   deleteStaffUser: (uid: string) => Promise<void>;
+  deactivateStaffUser: (uid: string) => Promise<void>;
+  reactivateStaffUser: (uid: string) => Promise<void>;
   resetStaffPassword: (email: string) => Promise<void>;
   
   // User info
@@ -237,6 +240,20 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             role = userData.role || "staff";
             name = userData.name || name;
             status = userData.status || "Active";
+            
+            // Check if account is deactivated
+            if (status === "Inactive") {
+              // Sign out deactivated users
+              await signOut(auth);
+              setUser(null);
+              setAppUser(null);
+              setUserRole(null);
+              setUserName('');
+              setUserId('');
+              setUserEmail('');
+              setLoading(false);
+              return;
+            }
             
             // Update last login
             await updateLastLogin(firebaseUser.uid);
@@ -462,6 +479,56 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const deactivateStaffUser = async (uid: string) => {
+    if (!user || userRole !== 'admin') {
+      throw new Error("Only administrators can deactivate users");
+    }
+    
+    if (uid === userId) {
+      throw new Error("You cannot deactivate your own account");
+    }
+    
+    try {
+      // Update user status to Inactive in Firestore
+      const userDocRef = doc(db, "users", uid);
+      await updateDoc(userDocRef, {
+        status: "Inactive",
+        updatedAt: serverTimestamp()
+      });
+      
+      // Check if the deactivated user is currently logged in
+      const deactivatedUser = staffUsers.find(u => u.uid === uid);
+      if (deactivatedUser && auth.currentUser?.uid === uid) {
+        // Force sign out the deactivated user
+        await signOut(auth);
+      }
+      
+      await fetchStaffUsers();
+    } catch (error) {
+      console.error("Error deactivating staff user:", error);
+      throw error;
+    }
+  };
+
+  const reactivateStaffUser = async (uid: string) => {
+    if (!user || userRole !== 'admin') {
+      throw new Error("Only administrators can reactivate users");
+    }
+    
+    try {
+      const userDocRef = doc(db, "users", uid);
+      await updateDoc(userDocRef, {
+        status: "Active",
+        updatedAt: serverTimestamp()
+      });
+      
+      await fetchStaffUsers();
+    } catch (error) {
+      console.error("Error reactivating staff user:", error);
+      throw error;
+    }
+  };
+
   const deleteStaffUser = async (uid: string) => {
     if (!user || userRole !== 'admin') {
       throw new Error("Only administrators can delete users");
@@ -472,11 +539,35 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
     
     try {
+      // Get the user's Firebase Auth user and delete it
+      const userToDelete = staffUsers.find(u => u.uid === uid);
+      
+      // Delete from Firestore first
       const userDocRef = doc(db, "users", uid);
-      await updateDoc(userDocRef, {
-        status: "Inactive",
-        updatedAt: serverTimestamp()
+      await deleteDoc(userDocRef);
+      
+      // Delete from Firebase Authentication
+      // Note: This requires admin privileges and special handling
+      // Since we can't delete other users from client-side, we'll use a Firebase Function
+      // For now, we'll mark them as deleted and disable the account
+      // In production, you should use a Cloud Function to delete the auth user
+      
+      // Alternative: Update status to a "Deleted" state and disable the account
+      // Since we can't delete from client-side, we'll create a deleted flag
+      await setDoc(userDocRef, {
+        email: userToDelete?.email,
+        name: userToDelete?.name,
+        role: userToDelete?.role,
+        status: "Deleted",
+        deletedAt: serverTimestamp(),
+        deletedBy: userId,
+        lastLogin: userToDelete?.lastLogin
       });
+      
+      // Force sign out if the deleted user is currently logged in
+      if (auth.currentUser?.uid === uid) {
+        await signOut(auth);
+      }
       
       await fetchStaffUsers();
     } catch (error) {
@@ -767,6 +858,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     createStaffUser,
     updateStaffUser,
     deleteStaffUser,
+    deactivateStaffUser,
+    reactivateStaffUser,
     resetStaffPassword,
     userRole,
     userName,

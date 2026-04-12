@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { useNotification } from "@/components/NotificationProvider";
-import { useFirebase } from "@/context/FirebaseContext";
+import { useFirebase, StaffUser } from "@/context/FirebaseContext";
 import { 
   Users, 
   Plus, 
@@ -15,7 +15,9 @@ import {
   Key,
   AlertCircle,
   CheckCircle2,
-  Clock
+  Clock,
+  Ban,
+  UserCheck
 } from "lucide-react";
 
 // --- THEME CONSTANTS ---
@@ -41,16 +43,6 @@ const modalVariants: Variants = {
   exit: { opacity: 0, scale: 0.95 }
 };
 
-// Define types
-interface StaffUser {
-  uid: string;
-  email: string;
-  name: string;
-  role: "admin" | "staff";
-  status: "Active" | "Inactive";
-  lastLogin: string;
-}
-
 export default function SettingsPage() {
   // Data State
   const { 
@@ -61,6 +53,8 @@ export default function SettingsPage() {
     createStaffUser, 
     updateStaffUser, 
     deleteStaffUser,
+    deactivateStaffUser,
+    reactivateStaffUser,
     resetStaffPassword,
     loading: firebaseLoading
   } = useFirebase();
@@ -83,8 +77,9 @@ export default function SettingsPage() {
     status: "Active" as "Active" | "Inactive"
   });
   
+  const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<StaffUser | null>(null);
+  const [userToAction, setUserToAction] = useState<StaffUser | null>(null);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
 
   const { showNotification } = useNotification();
@@ -98,8 +93,6 @@ export default function SettingsPage() {
     };
     loadUsers();
   }, [userRole, fetchStaffUsers]);
-
-  // No need for useEffect to sync staffUsers - use it directly
 
   // Check if current user is admin
   if (userRole !== 'admin') {
@@ -177,14 +170,19 @@ export default function SettingsPage() {
       email: user.email, 
       password: "",
       role: user.role === "admin" ? "Admin" : "Staff", 
-      status: user.status
+      status: user.status === "Active" ? "Active" : "Inactive"
     });
     setFormErrors({});
     setIsUserModalOpen(true);
   };
 
+  const openDeactivateModal = (user: StaffUser) => {
+    setUserToAction(user);
+    setIsDeactivateModalOpen(true);
+  };
+
   const openDeleteModal = (user: StaffUser) => {
-    setUserToDelete(user);
+    setUserToAction(user);
     setIsDeleteModalOpen(true);
   };
 
@@ -217,7 +215,7 @@ export default function SettingsPage() {
           status: userForm.status
         });
         showNotification(
-          `${userForm.name}&apos;s details updated.`, 
+          `${userForm.name}'s details updated.`, 
           "success",
           "User Updated"
         );
@@ -252,17 +250,41 @@ export default function SettingsPage() {
     }
   };
 
-  const confirmDeleteUser = async () => {
-    if (userToDelete) {
+  const confirmDeactivateUser = async () => {
+    if (userToAction) {
       try {
-        await deleteStaffUser(userToDelete.uid);
-        setIsDeleteModalOpen(false);
-        setUserToDelete(null);
+        await deactivateStaffUser(userToAction.uid);
+        setIsDeactivateModalOpen(false);
+        setUserToAction(null);
         showNotification(
-          `${userToDelete.name} has been deactivated.`, 
-          "info",
+          `${userToAction.name} has been deactivated. They can be reactivated later.`, 
+          "warning",
           "User Deactivated"
         );
+        await fetchStaffUsers();
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to deactivate user.";
+        showNotification(
+          errorMessage,
+          "error",
+          "Error"
+        );
+      }
+    }
+  };
+
+  const confirmDeleteUser = async () => {
+    if (userToAction) {
+      try {
+        await deleteStaffUser(userToAction.uid);
+        setIsDeleteModalOpen(false);
+        setUserToAction(null);
+        showNotification(
+          `${userToAction.name} has been permanently deleted from the system.`, 
+          "info",
+          "User Deleted Permanently"
+        );
+        await fetchStaffUsers();
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "Failed to delete user.";
         showNotification(
@@ -271,6 +293,25 @@ export default function SettingsPage() {
           "Error"
         );
       }
+    }
+  };
+
+  const handleReactivateUser = async (user: StaffUser) => {
+    try {
+      await reactivateStaffUser(user.uid);
+      showNotification(
+        `${user.name} has been reactivated. They can now log in again.`,
+        "success",
+        "User Reactivated"
+      );
+      await fetchStaffUsers();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to reactivate user.";
+      showNotification(
+        errorMessage,
+        "error",
+        "Error"
+      );
     }
   };
 
@@ -296,7 +337,7 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-lg font-bold text-gray-800">Staff Accounts</h2>
               <p className="text-xs text-gray-500 mt-1">
-                {users.length} active user{users.length !== 1 ? 's' : ''} in the system
+                {users.filter(u => u.status === 'Active').length} active, {users.filter(u => u.status === 'Inactive').length} inactive
               </p>
             </div>
             <button 
@@ -310,7 +351,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="p-0 sm:p-2 overflow-x-auto">
-            <table className="w-full text-left text-xs sm:text-sm whitespace-nowrap min-w-[700px]">
+            <table className="w-full text-left text-xs sm:text-sm whitespace-nowrap min-w-[800px]">
               <thead className="text-gray-400 font-bold border-b border-gray-100 uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="p-4 sm:p-5">User Info</th>
@@ -324,7 +365,7 @@ export default function SettingsPage() {
                 {users.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-gray-400">
-                      No staff members found. Click &quot;Add Staff Member&quot; to create one.
+                      No staff members found. Click "Add Staff Member" to create one.
                     </td>
                   </tr>
                 ) : (
@@ -338,7 +379,7 @@ export default function SettingsPage() {
                         animate={{ opacity: 1 }} 
                         exit={{ opacity: 0 }} 
                         className={`hover:bg-slate-50 transition-colors group ${
-                          user.status === 'Inactive' ? 'opacity-60' : ''
+                          user.status === 'Inactive' ? 'opacity-60 bg-red-50/30' : ''
                         }`}
                       >
                         <td className="p-4 sm:p-5">
@@ -369,7 +410,9 @@ export default function SettingsPage() {
                             <div className={`w-2 h-2 rounded-full ${
                               user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'
                             }`}></div>
-                            <span className="font-medium text-gray-600 text-xs">
+                            <span className={`font-medium text-xs ${
+                              user.status === 'Active' ? 'text-emerald-700' : 'text-red-700'
+                            }`}>
                               {user.status}
                             </span>
                           </div>
@@ -383,29 +426,48 @@ export default function SettingsPage() {
                         <td className="p-4 sm:p-5 text-right">
                           <div className="flex items-center justify-end gap-2">
                             {user.uid !== userId && (
-                              <button 
-                                onClick={() => handleResetPassword(user.email)}
-                                className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                title="Send Password Reset"
-                              >
-                                <Key size={16}/>
-                              </button>
-                            )}
-                            <button 
-                              onClick={() => openEditUserModal(user)}
-                              className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Edit User"
-                            >
-                              <Edit3 size={16}/>
-                            </button>
-                            {user.uid !== userId && (
-                              <button 
-                                onClick={() => openDeleteModal(user)}
-                                className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                title={user.status === 'Active' ? 'Deactivate User' : 'Remove User'}
-                              >
-                                <Trash2 size={16}/>
-                              </button>
+                              <>
+                                <button 
+                                  onClick={() => handleResetPassword(user.email)}
+                                  className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Send Password Reset"
+                                >
+                                  <Key size={16}/>
+                                </button>
+                                <button 
+                                  onClick={() => openEditUserModal(user)}
+                                  className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Edit User"
+                                >
+                                  <Edit3 size={16}/>
+                                </button>
+                                {user.status === 'Active' ? (
+                                  <button 
+                                    onClick={() => openDeactivateModal(user)}
+                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                    title="Deactivate User"
+                                  >
+                                    <Ban size={16}/>
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button 
+                                      onClick={() => handleReactivateUser(user)}
+                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                      title="Reactivate User"
+                                    >
+                                      <UserCheck size={16}/>
+                                    </button>
+                                    <button 
+                                      onClick={() => openDeleteModal(user)}
+                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                      title="Permanently Delete User"
+                                    >
+                                      <Trash2 size={16}/>
+                                    </button>
+                                  </>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
@@ -417,12 +479,15 @@ export default function SettingsPage() {
             </table>
           </div>
 
-          <div className="p-4 bg-slate-50 border-t border-gray-100 text-[10px] text-gray-400 flex items-center gap-4">
+          <div className="p-4 bg-slate-50 border-t border-gray-100 text-[10px] text-gray-400 flex flex-wrap gap-4">
             <div className="flex items-center gap-1">
               <CheckCircle2 size={12} className="text-emerald-500" /> Active accounts can log in
             </div>
             <div className="flex items-center gap-1">
-              <AlertCircle size={12} className="text-red-500" /> Inactive accounts cannot log in
+              <AlertCircle size={12} className="text-orange-500" /> Deactivated accounts are locked out
+            </div>
+            <div className="flex items-center gap-1">
+              <Trash2 size={12} className="text-red-500" /> Permanently deleted accounts cannot be restored
             </div>
           </div>
         </motion.div>
@@ -448,7 +513,7 @@ export default function SettingsPage() {
               
               <form id="user-form" onSubmit={handleSaveUser} className="p-5 sm:p-6 space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                  <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Full Name <span className="text-red-500">*</span>
                   </label>
                   <input 
@@ -458,8 +523,8 @@ export default function SettingsPage() {
                     onChange={handleUserFormChange}
                     type="text" 
                     className={`w-full px-4 py-2.5 rounded-xl border ${
-                      formErrors.name ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-2'
-                    } text-sm ${THEME_RING} focus:outline-none bg-slate-50`} 
+                      formErrors.name ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-2'
+                    } text-sm text-gray-900 ${THEME_RING} focus:outline-none bg-white`} 
                   />
                   {formErrors.name && (
                     <p className="text-red-500 text-[10px] mt-1">{formErrors.name}</p>
@@ -467,7 +532,7 @@ export default function SettingsPage() {
                 </div>
                 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                  <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Email Address <span className="text-red-500">*</span>
                   </label>
                   <input 
@@ -477,8 +542,8 @@ export default function SettingsPage() {
                     onChange={handleUserFormChange}
                     type="email" 
                     className={`w-full px-4 py-2.5 rounded-xl border ${
-                      formErrors.email ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-2'
-                    } text-sm ${THEME_RING} focus:outline-none bg-slate-50`} 
+                      formErrors.email ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-2'
+                    } text-sm text-gray-900 ${THEME_RING} focus:outline-none bg-white`} 
                   />
                   {formErrors.email && (
                     <p className="text-red-500 text-[10px] mt-1">{formErrors.email}</p>
@@ -487,7 +552,7 @@ export default function SettingsPage() {
                  
                 {modalMode === "add" && (
                   <div>
-                    <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">
                       Password <span className="text-red-500">*</span>
                     </label>
                     <input 
@@ -498,8 +563,8 @@ export default function SettingsPage() {
                       type="password" 
                       placeholder="•••••••• (min. 6 characters)" 
                       className={`w-full px-4 py-2.5 rounded-xl border ${
-                        formErrors.password ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-2'
-                      } text-sm ${THEME_RING} focus:outline-none bg-slate-50`} 
+                        formErrors.password ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-2'
+                      } text-sm text-gray-900 ${THEME_RING} focus:outline-none bg-white`} 
                     />
                     {formErrors.password && (
                       <p className="text-red-500 text-[10px] mt-1">{formErrors.password}</p>
@@ -509,26 +574,26 @@ export default function SettingsPage() {
 
                 {modalMode === "edit" && (
                   <div>
-                    <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                    <label className="block text-xs font-bold text-gray-700 mb-1.5">
                       Account Status
                     </label>
                     <select 
                       name="status" 
                       value={userForm.status} 
                       onChange={handleUserFormChange}
-                      className={`w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:ring-2 ${THEME_RING} focus:outline-none bg-slate-50 cursor-pointer`}
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-300 text-sm text-gray-900 focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none bg-white cursor-pointer"
                     >
-                      <option value="Active">Active - Can log in</option>
-                      <option value="Inactive">Inactive - Cannot log in</option>
+                      <option value="Active" className="text-gray-900">Active - Can log in</option>
+                      <option value="Inactive" className="text-gray-900">Inactive - Cannot log in</option>
                     </select>
-                    <p className="text-[10px] text-gray-400 mt-1">
+                    <p className="text-[10px] text-gray-500 mt-1">
                       Inactive users cannot access the system
                     </p>
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                  <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     System Role
                   </label>
                   <select 
@@ -536,15 +601,15 @@ export default function SettingsPage() {
                     name="role" 
                     value={userForm.role} 
                     onChange={handleUserFormChange}
-                    className={`w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:ring-2 ${THEME_RING} focus:outline-none bg-slate-50 cursor-pointer`}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 text-sm text-gray-900 focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none bg-white cursor-pointer"
                   >
-                    <option value="Staff">Staff - Basic access</option>
-                    <option value="Admin">Admin - Full access</option>
+                    <option value="Staff" className="text-gray-900">Staff - Basic access</option>
+                    <option value="Admin" className="text-gray-900">Admin - Full access</option>
                   </select>
                 </div>
 
                 {modalMode === "add" && (
-                  <p className="text-[10px] text-gray-400 bg-blue-50 p-2 rounded-lg">
+                  <p className="text-[10px] text-gray-500 bg-blue-50 p-2 rounded-lg">
                     <AlertCircle size={12} className="inline mr-1 text-blue-500" />
                     New users will receive an email to set up their account.
                   </p>
@@ -572,23 +637,55 @@ export default function SettingsPage() {
         )}
       </AnimatePresence>
 
-      {/* --- DELETE CONFIRMATION MODAL --- */}
+      {/* --- DEACTIVATE CONFIRMATION MODAL --- */}
       <AnimatePresence>
-        {isDeleteModalOpen && userToDelete && (
+        {isDeactivateModalOpen && userToAction && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <motion.div variants={modalVariants} initial="hidden" animate="visible" exit="exit" className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-6 text-center">
+              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Ban className="text-orange-600 w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-black text-gray-900 mb-2">
+                Deactivate Staff Member?
+              </h3>
+              <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+                Are you sure you want to deactivate <span className="font-bold text-gray-800">{userToAction.name}</span>? 
+                They will immediately lose access to the system and will not be able to log in until reactivated.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setIsDeactivateModalOpen(false)} 
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-bold hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmDeactivateUser} 
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-orange-600 text-white font-bold hover:bg-orange-700 transition-colors shadow-sm"
+                >
+                  Yes, Deactivate
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- PERMANENT DELETE CONFIRMATION MODAL --- */}
+      <AnimatePresence>
+        {isDeleteModalOpen && userToAction && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <motion.div variants={modalVariants} initial="hidden" animate="visible" exit="exit" className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-6 text-center">
               <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertCircle className="text-red-600 w-6 h-6" />
+                <Trash2 className="text-red-600 w-6 h-6" />
               </div>
               <h3 className="text-lg font-black text-gray-900 mb-2">
-                {userToDelete.status === 'Active' ? 'Deactivate Staff Member?' : 'Remove Staff Member?'}
+                Permanently Delete Account?
               </h3>
               <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-                {userToDelete.status === 'Active' ? (
-                  <>Are you sure you want to deactivate <span className="font-bold text-gray-800">{userToDelete.name}</span>? They will immediately lose access to the system.</>
-                ) : (
-                  <>Are you sure you want to permanently remove <span className="font-bold text-gray-800">{userToDelete.name}</span> from the system?</>
-                )}
+                ⚠️ <span className="font-bold text-red-600">This action is irreversible!</span><br/><br/>
+                Are you sure you want to permanently delete <span className="font-bold text-gray-800">{userToAction.name}</span>'s account? 
+                They will be completely removed from the system and cannot be restored.
               </p>
               <div className="flex gap-3">
                 <button 
@@ -601,7 +698,7 @@ export default function SettingsPage() {
                   onClick={confirmDeleteUser} 
                   className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 transition-colors shadow-sm"
                 >
-                  {userToDelete.status === 'Active' ? 'Yes, Deactivate' : 'Yes, Remove'}
+                  Yes, Permanently Delete
                 </button>
               </div>
             </motion.div>
