@@ -1,6 +1,6 @@
-/*!********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************!*\
-  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[2].use[1]!./node_modules/next/dist/build/webpack/loaders/next-font-loader/index.js??ruleSet[1].rules[14].oneOf[2].use[2]!./node_modules/next/font/google/target.css?{"path":"src/app/layout.tsx","import":"Inter","arguments":[{"subsets":["latin"]}],"variableName":"inter"} ***!
-  \********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************/
+/*!**********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[2].use[1]!./node_modules/next/dist/build/webpack/loaders/next-font-loader/index.js??ruleSet[1].rules[14].oneOf[2].use[2]!./node_modules/next/font/google/target.css?{"path":"src\\app\\layout.tsx","import":"Inter","arguments":[{"subsets":["latin"]}],"variableName":"inter"} ***!
+  \**********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************/
 /* cyrillic-ext */
 @font-face {
   font-family: '__Inter_f367f3';
@@ -1157,9 +1157,6 @@ video {
 .min-w-\[50px\] {
   min-width: 50px;
 }
-.min-w-\[700px\] {
-  min-width: 700px;
-}
 .min-w-\[800px\] {
   min-width: 800px;
 }
@@ -1776,6 +1773,10 @@ video {
   --tw-bg-opacity: 1;
   background-color: rgb(249 115 22 / var(--tw-bg-opacity));
 }
+.bg-orange-600 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(234 88 12 / var(--tw-bg-opacity));
+}
 .bg-pink-100 {
   --tw-bg-opacity: 1;
   background-color: rgb(252 231 243 / var(--tw-bg-opacity));
@@ -1810,6 +1811,9 @@ video {
 .bg-red-50 {
   --tw-bg-opacity: 1;
   background-color: rgb(254 242 242 / var(--tw-bg-opacity));
+}
+.bg-red-50\/30 {
+  background-color: rgb(254 242 242 / 0.3);
 }
 .bg-red-50\/50 {
   background-color: rgb(254 242 242 / 0.5);
@@ -2483,6 +2487,9 @@ video {
 .opacity-90 {
   opacity: 0.9;
 }
+.opacity-30 {
+  opacity: 0.3;
+}
 .shadow-2xl {
   --tw-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   --tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);
@@ -2951,6 +2958,18 @@ input:focus, select:focus, textarea:focus {
   --tw-bg-opacity: 1;
   background-color: rgb(17 24 39 / var(--tw-bg-opacity));
 }
+.hover\:bg-green-50:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(240 253 244 / var(--tw-bg-opacity));
+}
+.hover\:bg-orange-50:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(255 247 237 / var(--tw-bg-opacity));
+}
+.hover\:bg-orange-700:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(194 65 12 / var(--tw-bg-opacity));
+}
 .hover\:bg-red-200:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(254 202 202 / var(--tw-bg-opacity));
@@ -2981,6 +3000,10 @@ input:focus, select:focus, textarea:focus {
 .hover\:bg-white\/20:hover {
   background-color: rgb(255 255 255 / 0.2);
 }
+.hover\:bg-slate-200:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(226 232 240 / var(--tw-bg-opacity));
+}
 .hover\:text-\[\#092e6b\]:hover {
   --tw-text-opacity: 1;
   color: rgb(9 46 107 / var(--tw-text-opacity));
@@ -3008,6 +3031,14 @@ input:focus, select:focus, textarea:focus {
 .hover\:text-gray-900:hover {
   --tw-text-opacity: 1;
   color: rgb(17 24 39 / var(--tw-text-opacity));
+}
+.hover\:text-green-600:hover {
+  --tw-text-opacity: 1;
+  color: rgb(22 163 74 / var(--tw-text-opacity));
+}
+.hover\:text-orange-600:hover {
+  --tw-text-opacity: 1;
+  color: rgb(234 88 12 / var(--tw-text-opacity));
 }
 .hover\:text-red-600:hover {
   --tw-text-opacity: 1;
@@ -3086,6 +3117,13 @@ input:focus, select:focus, textarea:focus {
 .disabled\:bg-gray-100:disabled {
   --tw-bg-opacity: 1;
   background-color: rgb(243 244 246 / var(--tw-bg-opacity));
+}
+.disabled\:bg-slate-100:disabled {
+  --tw-bg-opacity: 1;
+  background-color: rgb(241 245 249 / var(--tw-bg-opacity));
+}
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
 }
 @media (min-width: 640px) {
 
@@ -3415,6 +3453,10 @@ input:focus, select:focus, textarea:focus {
 
   .sm\:flex-none {
     flex: none;
+  }
+
+  .sm\:flex-initial {
+    flex: 0 1 auto;
   }
 
   .sm\:grid-cols-2 {
@@ -3977,6 +4019,10 @@ input:focus, select:focus, textarea:focus {
     width: auto;
   }
 
+  .lg\:w-80 {
+    width: 20rem;
+  }
+
   .lg\:max-w-lg {
     max-width: 32rem;
   }
@@ -4045,6 +4091,10 @@ input:focus, select:focus, textarea:focus {
 
   .xl\:w-75 {
     width: 18.75rem;
+  }
+
+  .xl\:w-96 {
+    width: 24rem;
   }
 
   .xl\:grid-cols-4 {

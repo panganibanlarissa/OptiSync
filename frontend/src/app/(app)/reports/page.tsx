@@ -305,27 +305,47 @@ export default function ReportsPage() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     // 1. Stock Accuracy Logic (Comparing registered stock vs actual movements)
-    // For this prototype, we'll measure 'accuracy' as the ratio of items with recent movements vs static items
     const movingItems = products.filter(p => transactions.some(t => t.items.some(i => i.name === p.name)));
     const stockAccuracyRate = products.length > 0 ? (movingItems.length / products.length) * 100 : 100;
 
-    // 2. Predicted Needs (Using ML recommendations)
+    // 2. Predicted Inventory Needs (30-day forecast - aligned with Demand Forecasting dashboard)
     const priorityNeeds = recommendations
-      .filter(r => r.confidence === 'high' || r.daysUntilOut <= 7)
+      .filter(r => r.daysUntilOut <= 30)
       .sort((a, b) => a.daysUntilOut - b.daysUntilOut);
 
-    // 3. Liquidation List (Aging items > 30 days)
+    // 3. Space Optimization: Deadstock (30+ days without sales - aligned with Deadstock Impact dashboard)
     const liquidationItems = products
       .filter(p => p.stock > 0)
       .map(p => {
-        const lastSale = transactions
+        const salesForProduct = transactions
           .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-        const lastSaleDate = lastSale ? new Date(lastSale.date) : new Date(0);
-        const daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
-        return { ...p, daysSinceSale };
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        const lastSale = salesForProduct[0];
+        let daysSinceSale = 0;
+        let lastSaleDate: Date | null = null;
+        
+        if (lastSale) {
+          lastSaleDate = new Date(lastSale.date);
+          lastSaleDate.setHours(0, 0, 0, 0);
+          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
+          const createdAt = (p as any).createdAt;
+          if (createdAt) {
+            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+            createdDate.setHours(0, 0, 0, 0);
+            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          } else {
+            daysSinceSale = 30;
+          }
+          lastSaleDate = null;
+        }
+
+        return { ...p, daysSinceSale, lastSaleDate };
       })
       .filter(p => p.daysSinceSale >= 30)
       .sort((a, b) => b.daysSinceSale - a.daysSinceSale);
@@ -347,7 +367,7 @@ export default function ReportsPage() {
 
     addHeader(1);
 
-    // Section 1: Predicted Needs Table
+    // Section 1: Predicted Needs Table (30-day forecast)
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
     doc.text("1. Predicted Inventory Needs (Next 30 Days)", 14, 38);
@@ -369,7 +389,7 @@ export default function ReportsPage() {
 
     const secondTableY = (doc as any).lastAutoTable.finalY + 15;
     
-    // Section 2: Space Optimization (Liquidation List)
+    // Section 2: Space Optimization (Deadstock - 30+ days)
     doc.setFontSize(11);
     doc.text("2. Space Optimization: Recommended for Liquidation", 14, secondTableY);
     
@@ -384,7 +404,7 @@ export default function ReportsPage() {
         p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
         (p.stock * p.markupPrice).toLocaleString()
       ]),
-      headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] }, // Gray
+      headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
       styles: { fontSize: 8, textColor: [0, 0, 0] }
     });
 
@@ -396,8 +416,8 @@ export default function ReportsPage() {
       doc.text("Executive Summary:", 14, summaryY);
       doc.setFontSize(9);
       doc.setTextColor(40, 40, 40);
-      doc.text(`• Identified ${priorityNeeds.length} items requiring urgent restock to prevent stockouts.`, 14, summaryY + 7);
-      doc.text(`• Identified ${liquidationItems.length} stagnant items consuming warehouse space.`, 14, summaryY + 12);
+      doc.text(`• Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
+      doc.text(`• Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
       doc.text(`• Potential capital recovery from liquidation: PHP ${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
     }
 
@@ -425,17 +445,37 @@ export default function ReportsPage() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    // Identify deadstock: not sold in 30+ days
+    // Identify deadstock using the same Deadstock Impact logic (30+ days without sales)
     const agingData = products
       .filter(p => p.stock > 0)
       .map(p => {
-        const lastSale = transactions
+        const salesForProduct = transactions
           .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        const lastSale = salesForProduct[0];
+        let daysSinceSale = 0;
+        let lastSaleDate: Date | null = null;
+        
+        if (lastSale) {
+          lastSaleDate = new Date(lastSale.date);
+          lastSaleDate.setHours(0, 0, 0, 0);
+          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
+          const createdAt = (p as any).createdAt;
+          if (createdAt) {
+            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+            createdDate.setHours(0, 0, 0, 0);
+            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          } else {
+            daysSinceSale = 30; // Default minimum threshold
+          }
+          lastSaleDate = null;
+        }
 
-        const lastSaleDate = lastSale ? new Date(lastSale.date) : new Date(0);
-        const daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         const deadCapital = p.stock * p.markupPrice;
 
         return {
@@ -444,7 +484,8 @@ export default function ReportsPage() {
           stock: p.stock,
           unitPrice: p.markupPrice,
           daysSinceSale,
-          deadCapital
+          deadCapital,
+          lastSaleDate
         };
       })
       .filter(item => item.daysSinceSale >= 30)

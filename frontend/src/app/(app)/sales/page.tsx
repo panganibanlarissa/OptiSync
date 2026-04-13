@@ -120,15 +120,23 @@ export default function SalesPage() {
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "online">("cash");
   const [amountGiven, setAmountGiven] = useState<string>("");
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [viewByMonth, setViewByMonth] = useState<boolean>(false);
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
       const transactionDate = new Date(transaction.date);
-      const transactionMonth = transactionDate.toISOString().slice(0, 7);
-      return transactionMonth === selectedMonth;
+      
+      if (viewByMonth) {
+        const transactionMonth = transactionDate.toISOString().slice(0, 7);
+        const filterMonth = filterDate.slice(0, 7);
+        return transactionMonth === filterMonth;
+      } else {
+        const transactionDay = transactionDate.toISOString().slice(0, 10);
+        return transactionDay === filterDate;
+      }
     });
-  }, [firebaseTransactions, selectedMonth]);
+  }, [firebaseTransactions, filterDate, viewByMonth]);
 
   // Calculate available stock based on actual stock minus reserved items in cart
   const productsWithAvailableStock = useMemo(() => {
@@ -687,7 +695,7 @@ export default function SalesPage() {
 
             <div 
               className="flex-1 overflow-y-auto p-2 sm:p-4 bg-gray-50/50 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
-              style={{ maxHeight: 'calc(100vh - 180px)' }}
+              style={{ maxHeight: 'calc(100vh - 100px)' }}
             >
               <motion.div 
                 key={`product-grid-${selectedCategory}-${searchQuery}`}
@@ -1027,20 +1035,55 @@ export default function SalesPage() {
               <h2 className="text-base sm:text-lg font-bold text-gray-800">Transactions</h2>
               <p className="text-[10px] sm:text-[11px] text-gray-500">View daily sales, generate receipts, and process refunds.</p>
             </div>
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <div className="flex-1">
-                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Filter by Month</label>
-                <input 
-                  type="month" 
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
-                />
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setViewByMonth(false)}
+                  className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-semibold transition-all ${
+                    !viewByMonth
+                      ? "bg-[#0B3C8A] text-white shadow-md"
+                      : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  By Day
+                </button>
+                <button
+                  onClick={() => setViewByMonth(true)}
+                  className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-semibold transition-all ${
+                    viewByMonth
+                      ? "bg-[#0B3C8A] text-white shadow-md"
+                      : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  By Month
+                </button>
               </div>
-              <div className="flex-1">
-                <div className="text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Total Transactions</div>
-                <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">
-                  {filteredTransactions.length}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
+                <div className="flex-1">
+                  <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">
+                    {viewByMonth ? "Filter by Month" : "Filter by Date"}
+                  </label>
+                  {viewByMonth ? (
+                    <input 
+                      type="month" 
+                      value={filterDate.slice(0, 7)}
+                      onChange={(e) => setFilterDate(e.target.value + "-01")}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                    />
+                  ) : (
+                    <input 
+                      type="date" 
+                      value={filterDate}
+                      onChange={(e) => setFilterDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                    />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className="text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Total Transactions</div>
+                  <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">
+                    {filteredTransactions.length}
+                  </div>
                 </div>
               </div>
             </div>

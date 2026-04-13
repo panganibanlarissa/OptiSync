@@ -732,80 +732,7 @@ export default function AdminDashboard() {
           </div>
         </motion.div>
 
-        {/* DEMAND FORECASTING SECTION WITH SCROLLBAR - SHOWING ALL PRODUCTS WITH CUMULATIVE DEMAND */}
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-[550px]"
-        >
-          <div className="flex items-center justify-between mb-4 shrink-0">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
-                <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <div>
-                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Demand Forecasting
-                </h2>
-                <p className="text-[9px] sm:text-xs font-medium text-blue-600">
-                  {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'Waiting for sufficient data'}
-                </p>
-              </div>
-            </div>
-            
-            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
-              <div className="flex items-center bg-gray-50 p-0.5 rounded-lg">
-                {[30, 60, 90].map((period: number) => (
-                  <button
-                    key={period}
-                    onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
-                    className={`px-2 py-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
-                      forecastPeriod === period 
-                        ? "bg-white text-[#0B3C8A] shadow-sm" 
-                        : "text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    {period}d
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          {/* Scrollable content area for ALL recommendations */}
-          <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
-            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
-              <div className="space-y-3 sm:space-y-4">
-                {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
-                  <ForecastItem 
-                    key={i} 
-                    data={item} 
-                    currentDemand={getCurrentDisplayDemand(item)}
-                    forecastPeriod={forecastPeriod}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                  <Database size={20} className="text-gray-400" />
-                </div>
-                <p className="text-sm text-gray-500">
-                  {!usingML || !hasEnoughDataForML 
-                    ? "Insufficient data for AI recommendations"
-                    : "No reorder recommendations at this time"}
-                </p>
-                {!hasEnoughDataForML && (
-                  <p className="text-[10px] text-gray-400 mt-2">
-                    Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* PERFORMANCE HEATMAP SECTION */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
@@ -860,6 +787,80 @@ export default function AdminDashboard() {
               <p className="text-sm text-gray-500 text-center py-4">
                 No product data available.
               </p>
+            )}
+          </div>
+        </motion.div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* DEMAND FORECASTING SECTION WITH SCROLLBAR - SHOWING ALL PRODUCTS WITH CUMULATIVE DEMAND */}
+        <motion.div
+          variants={itemVariants}
+          className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
+        >
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
+                <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
+                  Demand Forecasting
+                </h2>
+                <p className="text-[9px] sm:text-xs font-medium text-blue-600">
+                  {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'Waiting for sufficient data'}
+                </p>
+              </div>
+            </div>
+            
+            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
+              <div className="flex items-center bg-gray-50 p-0.5 rounded-lg">
+                {[30, 60, 90].map((period: number) => (
+                  <button
+                    key={period}
+                    onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
+                    className={`px-2 py-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
+                      forecastPeriod === period 
+                        ? "bg-white text-[#0B3C8A] shadow-sm" 
+                        : "text-gray-400 hover:text-gray-600"
+                    }`}
+                  >
+                    {period}d
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          
+          {/* Scrollable content area for ALL recommendations */}
+          <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '500px' }}>
+            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
+              <div className="space-y-3 sm:space-y-4">
+                {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
+                  <ForecastItem 
+                    key={i} 
+                    data={item} 
+                    currentDemand={getCurrentDisplayDemand(item)}
+                    forecastPeriod={forecastPeriod}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Database size={20} className="text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">
+                  {!usingML || !hasEnoughDataForML 
+                    ? "Insufficient data for AI recommendations"
+                    : "No reorder recommendations at this time"}
+                </p>
+                {!hasEnoughDataForML && (
+                  <p className="text-[10px] text-gray-400 mt-2">
+                    Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </motion.div>

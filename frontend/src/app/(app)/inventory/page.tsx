@@ -264,13 +264,13 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="flex flex-col w-full h-screen font-sans p-2 sm:p-4 box-border overflow-hidden">
-      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full h-full min-h-0">
-        {/* LEFT COLUMN - PRODUCT CATALOG with FIXED HEIGHT */}
+    <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
+      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
+        {/* LEFT COLUMN - PRODUCT CATALOG with INTERNAL SCROLL */}
         <motion.div 
           initial={{ opacity: 0, y: 15 }} 
           animate={{ opacity: 1, y: 0 }} 
-          className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden lg:min-h-0"
+          className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
         >
           {/* Header - fixed, doesn't scroll */}
           <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-slate-50 flex flex-col gap-3">
@@ -381,7 +381,7 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          {/* PRODUCT GRID - FIXED HEIGHT with internal scroll */}
+          {/* PRODUCT GRID - with internal scroll */}
           <div 
             className="flex-1 overflow-y-auto p-2 sm:p-5 bg-gray-50/50 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
           >
@@ -415,15 +415,15 @@ export default function InventoryPage() {
           </div>
         </motion.div>
 
-        {/* RIGHT COLUMN - SIDEBAR ALERTS with SCROLLBARS */}
-        <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0 lg:h-full lg:min-h-0">
+        {/* RIGHT COLUMN - SIDEBAR ALERTS (no scroll) */}
+        <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0">
           
           {/* ACTION REQUIRED SECTION - Scrollable - Shows products needing restock */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.1 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[320px] sm:h-[380px]"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col shrink-0"
           >
             <div className="flex items-center gap-2 mb-2 shrink-0">
               <div className="p-1 sm:p-1.5 bg-red-100 rounded-md">
@@ -442,8 +442,8 @@ export default function InventoryPage() {
               Products below reorder point.
             </p>
             
-            {/* Scrollable content area with custom scrollbar */}
-            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+            {/* Content area - expands to fit items */}
+            <div className="space-y-2 sm:space-y-3">
               {displayActionRequired.length > 0 ? (
                 <div className="space-y-2 sm:space-y-3">
                   {displayActionRequired.map((item: LowStockItem) => {
@@ -482,8 +482,8 @@ export default function InventoryPage() {
                   })}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-[10px] sm:text-xs text-gray-500 text-center">
+                <div className="py-10 text-center">
+                  <p className="text-[10px] sm:text-xs text-gray-500">
                     All stock levels are healthy.
                   </p>
                 </div>
@@ -496,7 +496,7 @@ export default function InventoryPage() {
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
             transition={{ delay: 0.2 }} 
-            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[280px] sm:h-[320px]"
+            className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col shrink-0"
           >
             <div className="flex items-center gap-2 mb-1 shrink-0">
               <div className="p-1 sm:p-1.5 bg-slate-100 rounded-md">
@@ -517,8 +517,8 @@ export default function InventoryPage() {
               AI-flagged items with no sales in 30+ days.
             </p>
             
-            {/* Scrollable content area with custom scrollbar */}
-            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+            {/* Content area - expands to fit items */}
+            <div className="space-y-2 sm:space-y-3">
               {displayDeadstock.length > 0 ? (
                 <div className="space-y-2 sm:space-y-3">
                   {displayDeadstock.map((item: DeadstockItem) => (
@@ -543,8 +543,8 @@ export default function InventoryPage() {
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-[10px] sm:text-xs text-gray-500 text-center">
+                <div className="py-10 text-center">
+                  <p className="text-[10px] sm:text-xs text-gray-500">
                     No deadstock items identified.
                   </p>
                 </div>

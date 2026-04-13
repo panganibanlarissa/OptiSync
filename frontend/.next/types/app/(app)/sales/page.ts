@@ -1,4 +1,4 @@
-// File: /Users/rejeanzapanta/Downloads/ver 2/OptiSync/frontend/src/app/(app)/sales/page.tsx
+// File: C:\Users\jpiiy\OptiSync-main\frontend\src\app\(app)\sales\page.tsx
 import * as entry from '../../../../../src/app/(app)/sales/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

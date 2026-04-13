@@ -129,7 +129,10 @@ export default function LandingPage() {
 
   // Load products from Firebase or Static Fallback
   useEffect(() => {
+    console.log("Landing Page - Firebase Products:", firebaseProducts);
+    
     if (firebaseProducts && firebaseProducts.length > 0) {
+      // Don't filter, just display what's in the database
       setDisplayProducts(firebaseProducts.slice(0, 12));
     } else {
       setDisplayProducts(STATIC_PRODUCTS);
@@ -357,11 +360,18 @@ export default function LandingPage() {
                       <h3 className="text-xs sm:text-sm font-bold text-slate-800 line-clamp-2 leading-snug">
                         {product.name}
                       </h3>
-                      {product.category && (
-                        <p className="text-[10px] sm:text-xs text-slate-400 mt-1">
-                          {product.category}
-                        </p>
-                      )}
+                      <div className="mt-auto pt-2 flex items-center justify-between">
+                        {product.category && (
+                          <p className="text-[10px] sm:text-xs text-slate-400">
+                            {product.category}
+                          </p>
+                        )}
+                        {(product.markupPrice || product.price) && (
+                          <p className="text-xs sm:text-sm font-bold text-slate-900">
+                            ₱{(product.markupPrice || product.price).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
