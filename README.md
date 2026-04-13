@@ -1,51 +1,52 @@
-# M.T. Olaso Optical Clinic - Inventory & POS Management System
+# OptiSync - M.T. Olaso Optical Clinic Management System
 
-A comprehensive **Inventory Management and Point of Sale (POS) System** designed specifically for the **M.T. Olaso Optical Clinic**. This web application modernizes clinic operations by tracking eyewear and supplies with QR code integration, processing patient sales efficiently, and maintaining real-time inventory records.
+OptiSync is a sophisticated **Inventory Management and Point of Sale (POS) System** tailored for **M.T. Olaso Optical Clinic**. It integrates modern web technologies with machine learning to streamline clinic operations, from stock tracking via QR codes to advanced sales forecasting.
 
 ## 🚀 Key Features
 
 ### 🔹 **Landing Page & Authentication**
-- **Modern UI:** Responsive, animated landing page showcasing system capabilities.
-- **Secure Access:** Role-based authentication (Admin vs. Staff).
-- **RA 10173 Compliant:** Built-in Data Privacy Act of 2012 agreements, Terms & Conditions, and Privacy Policy modals.
+- **Modern UI:** Responsive, animated landing page built with Next.js and Framer Motion.
+- **Secure Access:** Role-based authentication (Admin vs. Staff) managed via Firebase.
+- **Data Privacy:** Integrated RA 10173 compliance with explicit terms and privacy policy agreements.
 
-### 🔹 **Main Dashboard**
-- **Clinic Analytics:** Real-time KPI cards for Revenue, Gross Profit, and Sales Trends.
-- **At-a-glance Alerts:** Immediate warnings for low-stock and deadstock items.
-- **Sales Insights:** Track daily transactions and performance metrics.
+### 🔹 **Intelligent Dashboard**
+- **Clinic Analytics:** Real-time KPI tracking for Revenue, Gross Profit, and Sales Trends.
+- **ML-Powered Forecasting:** Advanced sales and inventory forecasting using Prophet and XGBoost.
+- **Automated Alerts:** Low-stock, deadstock (unsold for 30+ days), and item expiry notifications.
 
 ### 🔹 **Inventory Management**
-- **Live Catalog:** Add, Edit, and Delete frames, lenses, and clinic supplies.
-- **Smart Triggers:** Color-coded status indicators ("In Stock", "Low Stock").
-- **QR Code Integration:** Generate unique QR codes for quick product lookup and automatic stock adjustments via camera scanning.
-- **Deadstock Identification:** Automatically flags slow-moving items (unsold for 30+ days) to free up tied capital.
-
+- **Live Catalog:** Full CRUD operations for frames, lenses, and clinic supplies.
+- **QR Code System:** Built-in QR code generation and mobile-ready scanning for rapid stock lookups.
+- **Cloud Integration:** Image management for products powered by Cloudinary.
+- **Stock Intelligence:** Color-coded inventory status and automated deadstock identification.
 
 ### 🔹 **Point of Sale (POS)**
-- **Patient Checkout:** Fast, intuitive cart system for walk-in patients.
-- **Dynamic Pricing:** Apply VAT/Tax, calculate subtotals, and process Cash/GCash.
-- **Official Receipts:** Instant generation of beautifully formatted, printable PDF receipts.
+- **Patient Checkout:** Streamlined cart system supporting multiple payment methods (Cash, GCash).
+- **Taxation & Discounts:** Dynamic VAT/Tax calculations and subtotaling.
+- **Official Receipts:** Instant generation of professional, printable PDF receipts via `jspdf`.
 
-### 🔹 **Transaction Reports**
-- **Sales Records:** Monthly searchable transaction history for all clinic sales.
-- **PDF Exports:** Generate professional, printable reports for accounting and auditing purposes.
-- **Receipt Management:** Access all issued receipts with complete transaction details.
-
-### 🔹 **System Settings**
-- **Clinic Profile:** Dynamic logo and address management for automated receipt branding.
-- **User Management:** Create, edit, and revoke access for clinic staff and administrators.
+### 🔹 **Security & Reliability**
+- **Data Encryption:** Sensitive information is protected using AES encryption (`crypto-js`).
+- **Automated Backups:** Integrated backup services to ensure data persistence and recovery.
+- **Secure Persistence:** Encrypted local storage hooks for maintaining session integrity.
 
 ---
 
 ## 🛠️ Tech Stack
 
+### **Frontend**
 - **Framework:** [Next.js 14](https://nextjs.org/) (App Router)
-- **Styling:** [Tailwind CSS](https://tailwindcss.com/)
-- **Animations:** [Framer Motion](https://www.framer.com/motion/) (Page transitions, micro-interactions)
-- **Icons:** [Lucide React](https://lucide.dev/)
-- **PDF Generation:** `jspdf` & `jspdf-autotable`
-- **QR Code Scanning:** [jsQR](https://github.com/cozmo/jsQR) (Product lookup and inventory management)
 - **Language:** TypeScript
+- **Styling:** [Tailwind CSS](https://tailwindcss.com/)
+- **Animations:** [Framer Motion](https://www.framer.com/motion/)
+- **State/Auth:** Firebase Authentication & Firestore
+- **Utilities:** Lucide React (Icons), jsQR (Scanning), Cloudinary (Images)
+
+### **Backend (ML Service)**
+- **Language:** Python
+- **API Framework:** Flask / FastAPI
+- **ML Libraries:** Prophet, XGBoost, Scikit-learn
+- **Environment:** Dockerized multi-container setup
 
 ---
 
@@ -53,111 +54,55 @@ A comprehensive **Inventory Management and Point of Sale (POS) System** designed
 
 ```
 OptiSync/
-├── frontend/                    # Next.js frontend application
-│   ├── src/                     # React components and pages
-│   ├── public/                  # Static assets
-│   ├── package.json             # Frontend dependencies
-│   ├── next.config.js           # Next.js configuration
-│   ├── tailwind.config.js       # Tailwind CSS configuration
-│   ├── tsconfig.json            # TypeScript configuration
-│   ├── .env.local               # Local environment variables
-│   └── ...other config files
-├── ml-service/                  # Python ML forecasting service
-│   ├── app.py                   # Flask/FastAPI application
-│   ├── models/                  # Prophet and XGBoost models
-│   ├── requirements.txt         # Python dependencies
-│   ├── Dockerfile               # Container configuration
-│   └── docker-compose.yml       # Multi-container setup
-├── README.md                    # This file
-└── TODO.md                      # Project roadmap
+├── frontend/                   # Next.js Application
+│   ├── src/
+│   │   ├── app/                # App Router (Pages, Layouts, API)
+│   │   ├── components/         # Reusable UI Components (Modals, Sidebar)
+│   │   ├── context/            # Global State (Auth, Firebase)
+│   │   ├── hooks/              # Custom React Hooks (ML, Encryption)
+│   │   ├── services/           # External API Clients (ML, Backup, Cloudinary)
+│   │   └── lib/                # Core configurations (Firebase)
+│   ├── public/                 # Static Assets
+│   └── ...config files         # Tailwind, TS, ESLint
+├── backend/                    # Python ML Service
+│   ├── app.py                  # API Entry Point
+│   ├── requirements.txt        # Python Dependencies
+│   └── setup.sh                # Environment Setup Script
+├── docker-compose.yml          # Container Orchestration
+├── README.md                   # Project Documentation
+└── TODO.md                     # Development Roadmap
 ```
 
 ---
 
-## �📦 Getting Started
+## ⚙️ Getting Started
 
-Follow these steps to set up the project locally.
-
-### 1. Clone the repository
+### 1. Repository Setup
 ```bash
 git clone https://github.com/panganibanlarissa/mt-olaso-inventory.git
 cd OptiSync
 ```
 
-### 2. Install Dependencies
-```
-npm install
- or
-yarn install
-```
-
-### 3. Run the Development Server
-```
-npm run dev
- or
-yarn dev
-```
-Open http://localhost:3000 with your browser to see the result.
-
----
-
-### ⚙️ Detailed Environment Setup
-
-#### Frontend Setup
-
-Navigate to the frontend directory and install dependencies:
+### 2. Frontend Configuration
 ```bash
 cd frontend
 npm install
-```
-
-Run development server:
-```bash
 npm run dev
 ```
 
-#### ML Service Setup (Optional)
-
-In a separate terminal, set up the Python ML service:
-
+### 3. Backend (ML Service) Setup
 ```bash
-cd ml-service
-
-# Create Python virtual environment
-# On Windows:
+cd frontend/backend
 python -m venv venv
-venv\Scripts\activate
-
-# On macOS/Linux:
-python3 -m venv venv
+# Windows:
+.\venv\Scripts\activate
+# Unix/macOS:
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Run ML service
 python app.py
 ```
 
-**Access points:**
-- Frontend: http://localhost:3000
-- ML Service: http://localhost:8000
-
 ---
 
-For complete setup guides, see [SETUP.md](SETUP.md)
-
----
-
-### 👤 Authors & Contact
-```
-Developers:
-Larissa Panganiban (📧 202311183@gordoncollege.edu.ph)
-Rejean Zapanta (📧 202310500@gordoncollege.edu.ph)
-
-Organization:
-M.T. Olaso Optical Clinic
-
-Olongapo City, Zambales, Philippines
-
-© 2026 M.T. Olaso Optical Clinic System. All Rights Reserved.
+## 📄 License
+This project is developed for **M.T. Olaso Optical Clinic**. All rights reserved.
