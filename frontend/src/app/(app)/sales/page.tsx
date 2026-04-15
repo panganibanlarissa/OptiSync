@@ -355,7 +355,9 @@ export default function SalesPage() {
         synced: isOnline,
         staffName: currentUser.name,
         staffId: currentUser.id,
-        paymentMethod: paymentMethod
+        paymentMethod: paymentMethod,
+        amountGiven: paymentMethod === "cash" ? parseFloat(amountGiven) : undefined,
+        change: change
       };
 
       // Add transaction and get the returned ID
@@ -575,9 +577,11 @@ export default function SalesPage() {
       currentY += 2.3;
 
       const changeAmount = trx.change || 0;
-      const changeStr = changeAmount.toLocaleString();
-      doc.text('Change', leftMargin, currentY);
-      doc.text(changeStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      if (changeAmount > 0) {
+        const changeStr = changeAmount.toLocaleString();
+        doc.text('Change', leftMargin, currentY);
+        doc.text(changeStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      }
     } else if (trx.paymentMethod === 'online') {
       doc.text('Payment Method: Online', leftMargin, currentY);
     }
@@ -1217,13 +1221,15 @@ export default function SalesPage() {
                   {lastTransaction.paymentMethod === 'cash' && lastTransaction.amountGiven !== undefined && (
                     <>
                       <div className="border-t border-gray-300 pt-2 flex justify-between">
-                        <span className="text-gray-600">Amount Given:</span>
+                        <span className="text-gray-600">Cash:</span>
                         <span className="font-semibold text-gray-800">₱{lastTransaction.amountGiven.toLocaleString()}</span>
                       </div>
-                      <div className="flex justify-between text-emerald-700 font-bold">
-                        <span>Change:</span>
-                        <span>₱{(lastTransaction.change || 0).toLocaleString()}</span>
-                      </div>
+                      {lastTransaction.change !== undefined && lastTransaction.change > 0 && (
+                        <div className="flex justify-between text-emerald-700 font-bold">
+                          <span>Change:</span>
+                          <span>₱{lastTransaction.change.toLocaleString()}</span>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>

@@ -1,3 +1,4 @@
+// src/app/(app)/layout.tsx
 "use client";
 
 import { Inter } from "next/font/google";
@@ -11,6 +12,33 @@ import { useEffect, useRef } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
 
+// Helper function to safely get date from Firestore Timestamp
+const getDateFromTimestamp = (timestamp: any): Date | null => {
+  if (!timestamp) return null;
+  
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  if (typeof timestamp === 'object' && timestamp.toDate) {
+    return timestamp.toDate();
+  }
+  
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  if (typeof timestamp === 'string') {
+    return new Date(timestamp);
+  }
+  
+  if (typeof timestamp === 'number') {
+    return new Date(timestamp);
+  }
+  
+  return null;
+};
+
 // Inner component to access hooks
 function AppContent({ children }: { children: React.ReactNode }) {
   const { products, transactions } = useFirebase();
@@ -21,17 +49,46 @@ function AppContent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (products && products.length > 0) {
       const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Helper function to check if product is recently added (within last 24 hours)
+      const isRecentlyAdded = (product: any) => {
+        const createdDate = getDateFromTimestamp(product.createdAt);
+        if (!createdDate) return false;
+        
+        const hoursSinceCreation = (today.getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+        return hoursSinceCreation < 24; // Product added within last 24 hours
+      };
       
       // 1. LIQUIDATION ALERTS (Aging products - no sales in 30+ days)
+      // EXCLUDE recently added products (within 24 hours)
       const liquidationItems = products.filter(p => {
         if (p.stock <= 0) return false;
         
+        // Skip recently added products - they shouldn't trigger deadstock alerts
+        if (isRecentlyAdded(p)) {
+          console.log(`Skipping liquidation alert for recently added product: ${p.name}`);
+          return false;
+        }
+        
         const lastSale = transactions
-          .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
+          .filter(t => t.status === 'completed' && t.items.some((item: any) => item.id === p.id || item.name === p.name))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
-        const lastSaleDate = lastSale ? new Date(lastSale.date) : new Date(0);
-        const daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        let daysSinceSale = 0;
+        
+        if (lastSale) {
+          const lastSaleDate = new Date(lastSale.date);
+          lastSaleDate.setHours(0, 0, 0, 0);
+          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          // If never sold, use creation date
+          const createdDate = getDateFromTimestamp(p.createdAt);
+          if (createdDate) {
+            createdDate.setHours(0, 0, 0, 0);
+            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          }
+        }
         
         return daysSinceSale >= 30;
       });
@@ -50,15 +107,19 @@ function AppContent({ children }: { children: React.ReactNode }) {
       });
 
       // 2. EXPIRY ALERTS (Simulated for this workspace - using specific categories/tags)
-      // Note: In a real system, you'd have an 'expiryDate' field.
-      // Here we simulate by highlighting Solutions/Contact Lenses that are older than 6 months.
       const expiryItems = products.filter(p => {
         if (p.stock <= 0) return false;
+        
+        // Skip recently added products
+        if (isRecentlyAdded(p)) return false;
+        
         const perishableCategories = ['Solutions', 'Contact Lenses'];
         if (!perishableCategories.includes(p.category)) return false;
         
-        const creationDate = (p.createdAt as any)?.toDate ? (p.createdAt as any).toDate() : new Date(typeof p.createdAt === 'number' ? p.createdAt : 0);
-        const monthsInStock = (today.getTime() - creationDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
+        const createdDate = getDateFromTimestamp(p.createdAt);
+        if (!createdDate) return false;
+        
+        const monthsInStock = (today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
         
         return monthsInStock >= 6;
       });
@@ -87,7 +148,6 @@ function AppContent({ children }: { children: React.ReactNode }) {
         const key = `low-${item.id}`;
         currentNotified.add(key);
         
-        // Only notify if we haven't notified for this item in this session
         if (!notifiedItemsRef.current.has(key)) {
           showNotification(
             `⚠️ ${item.name} is low on stock (${item.stock} left)`,
@@ -104,7 +164,6 @@ function AppContent({ children }: { children: React.ReactNode }) {
         const key = `out-${item.id}`;
         currentNotified.add(key);
         
-        // Only notify if we haven't notified for this item in this session
         if (!notifiedItemsRef.current.has(key)) {
           showNotification(
             `❌ ${item.name} is out of stock`,
@@ -125,10 +184,15 @@ function AppContent({ children }: { children: React.ReactNode }) {
           notifiedItemsRef.current.delete(key);
         } else if (type === 'out' && product && product.stock > 0) {
           notifiedItemsRef.current.delete(key);
+        } else if (type === 'liquid' && product) {
+          // Remove liquidation alert if product is no longer in liquidation state
+          if (product.stock <= 0) {
+            notifiedItemsRef.current.delete(key);
+          }
         }
       });
     }
-  }, [products, showNotification]);
+  }, [products, transactions, showNotification]);
 
   return <>{children}</>;
 }

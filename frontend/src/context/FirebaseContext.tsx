@@ -8,7 +8,8 @@ import {
   useEffect,
   useState,
   useCallback,
-  ReactNode
+  ReactNode,
+  useRef
 } from "react";
 
 import {
@@ -39,7 +40,9 @@ import {
   getDoc,
   setDoc,
   where,
-  limit
+  limit,
+  startAfter,
+  DocumentSnapshot
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
@@ -158,6 +161,26 @@ const FirebaseContext = createContext<FirebaseContextType | undefined>(
   undefined
 );
 
+// Helper function to format last login date
+const formatLastLogin = (date: Date): string => {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins} min${diffMins === 1 ? '' : 's'} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+  
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
 // ================= PROVIDER =================
 
 export function FirebaseProvider({ children }: { children: ReactNode }) {
@@ -176,10 +199,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const [isOnline, setIsOnline] = useState(true);
 
-  // 🔥 CACHE FLAGS
+  // 🔥 CACHE FLAGS WITH TIMESTAMPS FOR QUOTA MANAGEMENT
   const [hasFetchedProducts, setHasFetchedProducts] = useState(false);
   const [hasFetchedTransactions, setHasFetchedTransactions] = useState(false);
   const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
+  
+  const [isFetchingProducts, setIsFetchingProducts] = useState(false);
+  const [isFetchingTransactions, setIsFetchingTransactions] = useState(false);
+  const [isFetchingUsers, setIsFetchingUsers] = useState(false);
+  
+  // Track last fetch times to prevent excessive reads (quota management)
+  const lastProductsFetchRef = useRef<number>(0);
+  const lastTransactionsFetchRef = useRef<number>(0);
+  const lastUsersFetchRef = useRef<number>(0);
+  
+  // Cache invalidation time (5 minutes)
+  const CACHE_TTL = 5 * 60 * 1000;
 
   // ================= AUTH =================
 
@@ -208,6 +243,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             status: data.status || "Active"
           });
         } else {
+          setUserRole("staff");
+          setUserName("Staff");
           setAppUser({
             uid: u.uid,
             email: u.email,
@@ -222,6 +259,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId("");
         setUserEmail("");
         setStaffUsers([]);
+        setHasFetchedProducts(false);
+        setHasFetchedTransactions(false);
+        setHasFetchedUsers(false);
       }
 
       setLoading(false);
@@ -233,101 +273,247 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   // ================= NETWORK =================
 
   useEffect(() => {
-    window.addEventListener("online", () => setIsOnline(true));
-    window.addEventListener("offline", () => setIsOnline(false));
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
 
-  // ================= FETCH =================
+  // ================= FETCH PRODUCTS (OPTIMIZED) =================
 
-  const fetchProducts = useCallback(async () => {
-    if (hasFetchedProducts) return;
+  const fetchProducts = useCallback(async (forceRefresh = false) => {
+    const now = Date.now();
+    
+    // Check cache TTL - don't fetch if we fetched recently and not forcing refresh
+    if (!forceRefresh && hasFetchedProducts && (now - lastProductsFetchRef.current) < CACHE_TTL) {
+      console.log("Using cached products data, last fetch:", new Date(lastProductsFetchRef.current).toLocaleTimeString());
+      return;
+    }
+    
+    if (isFetchingProducts) return;
+    
+    try {
+      setIsFetchingProducts(true);
+      
+      console.log("Fetching products from Firestore...");
+      const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
+      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50)); // Reduced from 100 to 50 for quota
+      
+      const snap = await getDocs(q);
 
-    const q = query(
-      collection(db, `clinics/${CLINIC_ID}/products`),
-      orderBy("createdAt", "desc"),
-      limit(50)
-    );
-
-    const snap = await getDocs(q);
-
-    setProducts(
-      snap.docs.map((d) => ({
+      const fetchedProducts = snap.docs.map((d) => ({
         id: d.id,
         ...d.data()
-      })) as Product[]
-    );
+      })) as Product[];
 
-    setHasFetchedProducts(true);
-  }, [hasFetchedProducts]);
+      setProducts(fetchedProducts);
+      setHasFetchedProducts(true);
+      lastProductsFetchRef.current = now;
+      
+      console.log(`Fetched ${fetchedProducts.length} products`);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setIsFetchingProducts(false);
+    }
+  }, [hasFetchedProducts, isFetchingProducts]);
 
-  const fetchTransactions = useCallback(async () => {
-    if (!user || hasFetchedTransactions) return;
+  // ================= FETCH TRANSACTIONS (OPTIMIZED) =================
 
-    const q = query(
-      collection(db, `clinics/${CLINIC_ID}/transactions`),
-      orderBy("date", "desc"),
-      limit(50)
-    );
+  const fetchTransactions = useCallback(async (forceRefresh = false) => {
+    if (!user) return;
+    
+    const now = Date.now();
+    
+    // Check cache TTL
+    if (!forceRefresh && hasFetchedTransactions && (now - lastTransactionsFetchRef.current) < CACHE_TTL) {
+      console.log("Using cached transactions data");
+      return;
+    }
+    
+    if (isFetchingTransactions) return;
 
-    const snap = await getDocs(q);
+    try {
+      setIsFetchingTransactions(true);
+      
+      console.log("Fetching transactions from Firestore...");
+      const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(50)); // Reduced to 50
+      
+      const snap = await getDocs(q);
 
-    setTransactions(
-      snap.docs.map((d) => ({
+      const fetchedTransactions = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
-        date: d.data().date?.toDate()
-      })) as Transaction[]
-    );
+        date: d.data().date?.toDate() || new Date()
+      })) as Transaction[];
 
-    setHasFetchedTransactions(true);
-  }, [user, hasFetchedTransactions]);
+      setTransactions(fetchedTransactions);
+      setHasFetchedTransactions(true);
+      lastTransactionsFetchRef.current = now;
+      
+      console.log(`Fetched ${fetchedTransactions.length} transactions`);
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+    } finally {
+      setIsFetchingTransactions(false);
+    }
+  }, [user, hasFetchedTransactions, isFetchingTransactions]);
 
-  const fetchStaffUsers = useCallback(async () => {
-    if (!user || hasFetchedUsers) return;
+  // ================= FETCH STAFF USERS (OPTIMIZED) =================
 
-    const q = query(
-      collection(db, "users"),
-      orderBy("createdAt", "desc"),
-      limit(50)
-    );
+  const fetchStaffUsers = useCallback(async (forceRefresh = false) => {
+    if (!user || userRole !== "admin") {
+      console.log("Skipping staff users fetch - not admin or not logged in");
+      return;
+    }
+    
+    const now = Date.now();
+    
+    // Check cache TTL - admin users can refresh more frequently if needed
+    if (!forceRefresh && hasFetchedUsers && (now - lastUsersFetchRef.current) < CACHE_TTL) {
+      console.log("Using cached staff users data");
+      return;
+    }
+    
+    if (isFetchingUsers) return;
 
-    const snap = await getDocs(q);
+    try {
+      setIsFetchingUsers(true);
+      
+      console.log("Fetching staff users from Firestore...");
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, orderBy("createdAt", "desc"), limit(50));
+      
+      const snap = await getDocs(q);
 
-    setStaffUsers(
-      snap.docs.map((d) => ({
+      const fetchedUsers = snap.docs.map((d) => ({
         uid: d.id,
-        ...d.data()
-      })) as StaffUser[]
-    );
+        ...d.data(),
+        lastLogin: d.data().lastLogin || "Never"
+      })) as StaffUser[];
 
-    setHasFetchedUsers(true);
-  }, [user, hasFetchedUsers]);
+      setStaffUsers(fetchedUsers);
+      setHasFetchedUsers(true);
+      lastUsersFetchRef.current = now;
+      
+      console.log(`Fetched ${fetchedUsers.length} staff users`);
+    } catch (error) {
+      console.error("Error fetching staff users:", error);
+    } finally {
+      setIsFetchingUsers(false);
+    }
+  }, [user, userRole, hasFetchedUsers, isFetchingUsers]);
 
+  // Initial data fetch on login (only once, not on every render)
   useEffect(() => {
-    fetchProducts();
-    if (user) fetchTransactions();
-  }, [user]);
+    if (user) {
+      // Use a small delay to prevent race conditions
+      const timer = setTimeout(() => {
+        fetchProducts(false);
+        fetchTransactions(false);
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user, fetchProducts, fetchTransactions]);
 
+  // Fetch staff users only when admin role is detected and after initial load
   useEffect(() => {
-    if (userRole === "admin") fetchStaffUsers();
-  }, [userRole]);
+    if (user && userRole === "admin" && !hasFetchedUsers && !isFetchingUsers) {
+      const timer = setTimeout(() => {
+        fetchStaffUsers(false);
+      }, 500); // Longer delay for staff users fetch
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user, userRole, hasFetchedUsers, isFetchingUsers, fetchStaffUsers]);
 
   // ================= AUTH ACTIONS =================
 
   const login = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const loggedInUser = userCredential.user;
+      
+      const userRef = doc(db, "users", loggedInUser.uid);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        if (userData.status === "Inactive") {
+          await signOut(auth);
+          throw new Error("This account has been deactivated. Please contact an administrator.");
+        }
+        if (userData.status === "Deleted") {
+          await signOut(auth);
+          throw new Error("This account has been deleted. Please contact an administrator.");
+        }
+      }
+      
+      const now = new Date();
+      const formattedLastLogin = formatLastLogin(now);
+      
+      // Update lastLogin - don't await to avoid blocking
+      updateDoc(userRef, {
+        lastLogin: formattedLastLogin,
+        lastLoginAt: serverTimestamp(),
+        lastActive: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }).catch((error) => {
+        console.warn("Could not update lastLogin:", error);
+      });
+      
+      // Reset cache flags on successful login
+      setHasFetchedProducts(false);
+      setHasFetchedTransactions(false);
+      setHasFetchedUsers(false);
+      lastProductsFetchRef.current = 0;
+      lastTransactionsFetchRef.current = 0;
+      lastUsersFetchRef.current = 0;
+      
+    } catch (error) {
+      console.error("Login error:", error);
+      throw error;
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+      setProducts([]);
+      setTransactions([]);
+      setStaffUsers([]);
+      setUserRole(null);
+      setUserName("");
+      setUserId("");
+      setUserEmail("");
+      setAppUser(null);
+      setHasFetchedProducts(false);
+      setHasFetchedTransactions(false);
+      setHasFetchedUsers(false);
+      setIsFetchingProducts(false);
+      setIsFetchingTransactions(false);
+      setIsFetchingUsers(false);
+      lastProductsFetchRef.current = 0;
+      lastTransactionsFetchRef.current = 0;
+      lastUsersFetchRef.current = 0;
+    } catch (error) {
+      console.error("Logout error:", error);
+      throw error;
+    }
   };
 
   // ================= PRODUCT =================
 
   const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
-      console.log("Adding product to Firestore:", { name: data.name, sku: data.sku, hasImage: !!data.image });
-      
       const docRef = await addDoc(
         collection(db, `clinics/${CLINIC_ID}/products`),
         {
@@ -340,155 +526,209 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const newProduct = { ...data, id: docRef.id };
       setProducts((prev) => [newProduct as Product, ...prev]);
       
-      console.log("Product added successfully with ID:", docRef.id, "Image URL:", data.image);
       return docRef.id;
     } catch (error) {
-      console.error("Error adding product to Firestore:", error);
+      console.error("Error adding product:", error);
       throw error;
     }
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
-    await updateDoc(
-      doc(db, `clinics/${CLINIC_ID}/products`, id),
-      {
-        ...updates,
-        updatedAt: serverTimestamp()
-      }
-    );
+    try {
+      await updateDoc(
+        doc(db, `clinics/${CLINIC_ID}/products`, id),
+        {
+          ...updates,
+          updatedAt: serverTimestamp()
+        }
+      );
 
-    setProducts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
-    );
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
+      );
+    } catch (error) {
+      console.error("Error updating product:", error);
+      throw error;
+    }
   };
 
   const deleteProduct = async (id: string) => {
-    await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
-
-    setProducts((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      throw error;
+    }
   };
 
-  const adjustStock = async (
-    id: string,
-    newStock: number,
-    reason: string
-  ) => {
-    await updateDoc(
-      doc(db, `clinics/${CLINIC_ID}/products`, id),
-      {
-        stock: newStock,
-        updatedAt: serverTimestamp()
-      }
-    );
+  const adjustStock = async (id: string, newStock: number, reason: string) => {
+    try {
+      await updateDoc(
+        doc(db, `clinics/${CLINIC_ID}/products`, id),
+        {
+          stock: newStock,
+          updatedAt: serverTimestamp()
+        }
+      );
 
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, stock: newStock } : p
-      )
-    );
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === id ? { ...p, stock: newStock } : p
+        )
+      );
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      throw error;
+    }
   };
 
   // ================= TRANSACTION =================
 
   const addTransaction = async (data: Omit<Transaction, 'id' | 'createdAt'>) => {
-    const docRef = await addDoc(
-      collection(db, `clinics/${CLINIC_ID}/transactions`),
-      {
-        ...data,
-        createdAt: serverTimestamp()
-      }
-    );
+    try {
+      const docRef = await addDoc(
+        collection(db, `clinics/${CLINIC_ID}/transactions`),
+        {
+          ...data,
+          createdAt: serverTimestamp()
+        }
+      );
 
-    const newTransaction = { ...data, id: docRef.id };
-    setTransactions((prev) => [newTransaction as Transaction, ...prev]);
-    
-    // Return the document ID for immediate use
-    return docRef.id;
+      const newTransaction = { ...data, id: docRef.id };
+      setTransactions((prev) => [newTransaction as Transaction, ...prev]);
+      
+      return docRef.id;
+    } catch (error) {
+      console.error("Error adding transaction:", error);
+      throw error;
+    }
   };
 
   const voidTransaction = async (id: string) => {
-    await updateDoc(
-      doc(db, `clinics/${CLINIC_ID}/transactions`, id),
-      {
-        status: "voided",
-        updatedAt: serverTimestamp()
-      }
-    );
+    try {
+      await updateDoc(
+        doc(db, `clinics/${CLINIC_ID}/transactions`, id),
+        {
+          status: "voided",
+          updatedAt: serverTimestamp()
+        }
+      );
 
-    setTransactions((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, status: "voided" } : t
-      )
-    );
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, status: "voided" } : t
+        )
+      );
+    } catch (error) {
+      console.error("Error voiding transaction:", error);
+      throw error;
+    }
   };
 
   // ================= STAFF =================
 
   const createStaffUser = async (email: string, password: string, name: string, role: "admin" | "staff") => {
-    const secondaryAuth = getSecondaryAuth();
-    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-    
-    await setDoc(doc(db, "users", userCredential.user.uid), {
-      email,
-      name,
-      role,
-      status: "Active",
-      createdAt: serverTimestamp(),
-      lastLogin: "Never"
-    });
-    
-    await updateProfile(userCredential.user, { displayName: name });
-    
-    return userCredential.user.uid;
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      
+      await setDoc(doc(db, "users", userCredential.user.uid), {
+        email,
+        name,
+        role,
+        status: "Active",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastLogin: "Never"
+      });
+      
+      await updateProfile(userCredential.user, { displayName: name });
+      
+      // Invalidate cache to force refresh
+      setHasFetchedUsers(false);
+      lastUsersFetchRef.current = 0;
+      await fetchStaffUsers(true);
+      
+      return userCredential.user.uid;
+    } catch (error) {
+      console.error("Error creating staff user:", error);
+      throw error;
+    }
   };
 
   const updateStaffUser = async (uid: string, data: Partial<StaffUser>) => {
-    await updateDoc(doc(db, "users", uid), {
-      ...data,
-      updatedAt: serverTimestamp()
-    });
-    
-    setStaffUsers((prev) =>
-      prev.map((u) => (u.uid === uid ? { ...u, ...data } : u))
-    );
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        ...data,
+        updatedAt: serverTimestamp()
+      });
+      
+      setStaffUsers((prev) =>
+        prev.map((u) => (u.uid === uid ? { ...u, ...data } : u))
+      );
+    } catch (error) {
+      console.error("Error updating staff user:", error);
+      throw error;
+    }
   };
 
   const deleteStaffUser = async (uid: string) => {
-    await updateDoc(doc(db, "users", uid), {
-      status: "Deleted",
-      updatedAt: serverTimestamp()
-    });
-    
-    setStaffUsers((prev) =>
-      prev.map((u) => (u.uid === uid ? { ...u, status: "Deleted" } : u))
-    );
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        status: "Deleted",
+        updatedAt: serverTimestamp()
+      });
+      
+      setStaffUsers((prev) =>
+        prev.map((u) => (u.uid === uid ? { ...u, status: "Deleted" } : u))
+      );
+    } catch (error) {
+      console.error("Error deleting staff user:", error);
+      throw error;
+    }
   };
 
   const deactivateStaffUser = async (uid: string) => {
-    await updateDoc(doc(db, "users", uid), {
-      status: "Inactive",
-      updatedAt: serverTimestamp()
-    });
-    
-    setStaffUsers((prev) =>
-      prev.map((u) => (u.uid === uid ? { ...u, status: "Inactive" } : u))
-    );
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        status: "Inactive",
+        updatedAt: serverTimestamp()
+      });
+      
+      setStaffUsers((prev) =>
+        prev.map((u) => (u.uid === uid ? { ...u, status: "Inactive" } : u))
+      );
+    } catch (error) {
+      console.error("Error deactivating staff user:", error);
+      throw error;
+    }
   };
 
   const reactivateStaffUser = async (uid: string) => {
-    await updateDoc(doc(db, "users", uid), {
-      status: "Active",
-      updatedAt: serverTimestamp()
-    });
-    
-    setStaffUsers((prev) =>
-      prev.map((u) => (u.uid === uid ? { ...u, status: "Active" } : u))
-    );
+    try {
+      await updateDoc(doc(db, "users", uid), {
+        status: "Active",
+        updatedAt: serverTimestamp()
+      });
+      
+      setStaffUsers((prev) =>
+        prev.map((u) => (u.uid === uid ? { ...u, status: "Active" } : u))
+      );
+    } catch (error) {
+      console.error("Error reactivating staff user:", error);
+      throw error;
+    }
   };
 
   const resetStaffPassword = async (email: string) => {
-    const secondaryAuth = getSecondaryAuth();
-    await sendPasswordResetEmail(secondaryAuth, email);
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      await sendPasswordResetEmail(secondaryAuth, email);
+    } catch (error) {
+      console.error("Error resetting password:", error);
+      throw error;
+    }
   };
 
   // ================= ANALYTICS =================
@@ -519,7 +759,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     voidTransaction,
 
     staffUsers,
-    fetchStaffUsers,
+    fetchStaffUsers: () => fetchStaffUsers(true),
 
     createStaffUser,
     updateStaffUser,

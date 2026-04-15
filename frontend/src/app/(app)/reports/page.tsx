@@ -35,6 +35,46 @@ interface TransactionType {
   status: "completed" | "voided";
 }
 
+// Helper function to safely get date from Firestore Timestamp
+const getDateFromTimestamp = (timestamp: any): Date | null => {
+  if (!timestamp) return null;
+  
+  if (timestamp instanceof Date) {
+    return timestamp;
+  }
+  
+  if (typeof timestamp === 'object' && timestamp.toDate) {
+    return timestamp.toDate();
+  }
+  
+  if (timestamp.seconds) {
+    return new Date(timestamp.seconds * 1000);
+  }
+  
+  if (typeof timestamp === 'string') {
+    return new Date(timestamp);
+  }
+  
+  if (typeof timestamp === 'number') {
+    return new Date(timestamp);
+  }
+  
+  return null;
+};
+
+// Helper function to calculate days since product was added (for never-sold products)
+const getDaysSinceCreation = (product: any, today: Date): number => {
+  const createdDate = getDateFromTimestamp(product.createdAt);
+  
+  if (createdDate) {
+    createdDate.setHours(0, 0, 0, 0);
+    return Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+  }
+  
+  // If no creation date, use lastMovedDaysAgo or default to 0 (assume new product)
+  return product.lastMovedDaysAgo || 0;
+};
+
 export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
@@ -294,7 +334,7 @@ export default function ReportsPage() {
         priority: item.confidence
       }));
 
-    // Calculate deadstock items (30+ days without sales)
+    // Calculate deadstock items (30+ days without sales) - FIXED
     const liquidationItems = products
       .filter(p => p.stock > 0)
       .map(p => {
@@ -311,14 +351,8 @@ export default function ReportsPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          const createdAt = (p as any).createdAt;
-          if (createdAt) {
-            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
-            createdDate.setHours(0, 0, 0, 0);
-            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
-          } else {
-            daysSinceSale = 30;
-          }
+          // FIXED: Use proper date parsing helper
+          daysSinceSale = getDaysSinceCreation(p, today);
           lastSaleDate = null;
         }
 
@@ -347,42 +381,55 @@ export default function ReportsPage() {
     doc.setTextColor(0, 0, 0);
     doc.text("1. Predicted Inventory Needs (Next 30 Days)", 14, 38);
     
-    autoTable(doc, {
-      startY: 42,
-      margin: { left: 14, right: 14 },
-      head: [['Product', 'Current Stock', 'Predicted Demand', 'Restock Goal', 'Priority']],
-      body: priorityNeeds.map(r => [
-        r.productName,
-        r.currentStock,
-        r.predictedDemand,
-        r.recommendedOrder,
-        r.priority.toUpperCase()
-      ]),
-      headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
-      styles: { fontSize: 8, textColor: [0, 0, 0] }
-    });
+    if (priorityNeeds.length > 0) {
+      autoTable(doc, {
+        startY: 42,
+        margin: { left: 14, right: 14 },
+        head: [['Product', 'Current Stock', 'Predicted Demand', 'Restock Goal', 'Priority']],
+        body: priorityNeeds.map(r => [
+          r.productName,
+          r.currentStock,
+          r.predictedDemand,
+          r.recommendedOrder,
+          r.priority.toUpperCase()
+        ]),
+        headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
+        styles: { fontSize: 8, textColor: [0, 0, 0] }
+      });
+    } else {
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("No items require restocking within the next 30 days.", 14, 48);
+    }
 
-    const secondTableY = (doc as any).lastAutoTable.finalY + 15;
+    const secondTableY = priorityNeeds.length > 0 ? (doc as any).lastAutoTable.finalY + 15 : 55;
     
     doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
     doc.text("2. Space Optimization: Recommended for Liquidation", 14, secondTableY);
     
-    autoTable(doc, {
-      startY: secondTableY + 4,
-      margin: { left: 14, right: 14 },
-      head: [['Aging Product', 'Category', 'Stock', 'Days Idle', 'Value (PHP)']],
-      body: liquidationItems.map(p => [
-        p.name,
-        p.category,
-        p.stock,
-        p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
-        (p.stock * p.markupPrice).toLocaleString()
-      ]),
-      headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
-      styles: { fontSize: 8, textColor: [0, 0, 0] }
-    });
+    if (liquidationItems.length > 0) {
+      autoTable(doc, {
+        startY: secondTableY + 4,
+        margin: { left: 14, right: 14 },
+        head: [['Aging Product', 'Category', 'Stock', 'Days Idle', 'Value (PHP)']],
+        body: liquidationItems.map(p => [
+          p.name,
+          p.category,
+          p.stock,
+          p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
+          (p.stock * p.markupPrice).toLocaleString()
+        ]),
+        headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
+        styles: { fontSize: 8, textColor: [0, 0, 0] }
+      });
+    } else {
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("No deadstock items identified.", 14, secondTableY + 10);
+    }
 
-    const summaryY = (doc as any).lastAutoTable.finalY + 15;
+    const summaryY = liquidationItems.length > 0 ? (doc as any).lastAutoTable.finalY + 15 : secondTableY + 25;
     if (summaryY < pageHeight - 40) {
       doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
@@ -435,14 +482,8 @@ export default function ReportsPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          const createdAt = (p as any).createdAt;
-          if (createdAt) {
-            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
-            createdDate.setHours(0, 0, 0, 0);
-            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
-          } else {
-            daysSinceSale = 30;
-          }
+          // FIXED: Use proper date parsing helper
+          daysSinceSale = getDaysSinceCreation(p, today);
           lastSaleDate = null;
         }
 

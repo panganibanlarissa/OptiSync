@@ -1,7 +1,7 @@
 // src/app/(app)/dashboard/AdminDashboard.tsx
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, Variants } from "framer-motion";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
@@ -55,9 +55,9 @@ interface DeadstockItem {
   lockedCapital: number;
   priority: 'high' | 'medium' | 'low';
   lastSaleDate: Date | null;
-  aiSuggestion?: string;
-  aiSuggestionType?: 'critical' | 'warning' | 'info';
-  recommendedDiscount?: number;
+  aiSuggestion?: string | null;
+  aiSuggestionType?: 'critical' | 'warning' | 'info' | null;
+  recommendedDiscount?: number | null;
 }
 
 interface Recommendation {
@@ -129,7 +129,7 @@ export default function AdminDashboard() {
   const [forecastPeriod, setForecastPeriod] = useState<30 | 60 | 90>(30);
   const [hoveredBar, setHoveredBar] = useState<{ label: string; fullLabel: string; actual: number; forecast: number } | null>(null);
   const { products, transactions } = useFirebase();
-  const { loading, recommendations, forecastData, usingML, dataLoaded } = useMLForecasting();
+  const { loading, recommendations, forecastData, usingML, dataLoaded, deadstockSuggestions } = useMLForecasting();
 
   const completedTransactions = useMemo(() => {
     return transactions.filter((t: any) => t.status === 'completed');
@@ -152,6 +152,33 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
+  // Helper function to safely get date from Firestore Timestamp
+  const getDateFromTimestamp = (timestamp: any): Date | null => {
+    if (!timestamp) return null;
+    
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
+    if (typeof timestamp === 'object' && timestamp.toDate) {
+      return timestamp.toDate();
+    }
+    
+    if (timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000);
+    }
+    
+    if (typeof timestamp === 'string') {
+      return new Date(timestamp);
+    }
+    
+    if (typeof timestamp === 'number') {
+      return new Date(timestamp);
+    }
+    
+    return null;
+  };
+
   // Weekly sales data
   const weeklySalesData = useMemo(() => {
     const today = new Date();
@@ -164,6 +191,12 @@ export default function AdminDashboard() {
     const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
     const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
     const useMLForWeekly = hasMLForecastData && monthlyForecasts.length > 0;
+    
+    console.log('📊 WEEKLY TREND VISUALIZATION:');
+    console.log(`  - ML Active: ${usingML}`);
+    console.log(`  - Has ML Forecast Data: ${hasMLForecastData}`);
+    console.log(`  - Monthly Forecasts Available: ${monthlyForecasts.length}`);
+    console.log(`  - Using ML for Weekly Forecast: ${useMLForWeekly}`);
     
     for (let i = 0; i < 7; i++) {
       const date = new Date(today);
@@ -193,12 +226,6 @@ export default function AdminDashboard() {
         forecastValue = Math.round(avgDailyForecast * dayMultiplier);
         const positionVariation = 0.9 + (i * 0.03);
         forecastValue = Math.round(forecastValue * positionVariation);
-      } else {
-        const weeklyAverage = 15000;
-        const dayMultiplier = dayMultipliers[dayName] || 1.0;
-        forecastValue = Math.round(weeklyAverage * dayMultiplier);
-        const positionVariation = 0.9 + (i * 0.03);
-        forecastValue = Math.round(forecastValue * positionVariation);
       }
       
       result.push({
@@ -208,6 +235,12 @@ export default function AdminDashboard() {
         forecast: forecastValue,
         date: date
       });
+    }
+    
+    console.log(`  - Data Points: ${result.length} days`);
+    console.log(`  - Actual Sales Total: ₱${result.reduce((sum, d) => sum + d.actual, 0).toLocaleString()}`);
+    if (useMLForWeekly) {
+      console.log(`  - Forecast Sales Total: ₱${result.reduce((sum, d) => sum + d.forecast, 0).toLocaleString()}`);
     }
     
     return result;
@@ -237,6 +270,12 @@ export default function AdminDashboard() {
     const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
     const useMLForMonthly = hasMLForecastData && monthlyForecasts.length > 0;
     
+    console.log('📊 MONTHLY TREND VISUALIZATION:');
+    console.log(`  - ML Active: ${usingML}`);
+    console.log(`  - Has ML Forecast Data: ${hasMLForecastData}`);
+    console.log(`  - Forecast Data Points from ML: ${monthlyForecasts.length}`);
+    console.log(`  - Using ML for Monthly Forecast: ${useMLForMonthly}`);
+    
     for (let month = 0; month < 12; month++) {
       const actualSales = actualSalesByMonth[month];
       
@@ -252,12 +291,6 @@ export default function AdminDashboard() {
       
       if (mlForecastValue) {
         predictedValue = mlForecastValue;
-      } else if (useMLForMonthly && monthlyForecasts.length > 0) {
-        const avgForecast = monthlyForecasts.reduce((sum, f) => sum + f.value, 0) / monthlyForecasts.length;
-        predictedValue = Math.round(avgForecast * seasonalMultipliers[month]);
-      } else {
-        const baselineAvg = 50000;
-        predictedValue = Math.round(baselineAvg * seasonalMultipliers[month]);
       }
       
       result.push({
@@ -271,15 +304,40 @@ export default function AdminDashboard() {
       });
     }
     
+    console.log(`  - Data Points: ${result.length} months`);
+    console.log(`  - Actual Sales Total: ₱${result.reduce((sum, d) => sum + d.actual, 0).toLocaleString()}`);
+    if (useMLForMonthly) {
+      console.log(`  - Forecast Sales Total: ₱${result.reduce((sum, d) => sum + d.forecast, 0).toLocaleString()}`);
+    }
+    
     return result;
   }, [completedTransactions, forecastData, usingML]);
 
   const chartData = activeTab === "weekly" ? weeklySalesData : monthlySalesData;
+  
   const chartMaxValue = useMemo(() => {
     if (!chartData || chartData.length === 0) return 100000;
-    const max = Math.max(...chartData.map((d: ChartDataPoint) => Math.max(d.actual, d.forecast)));
-    return Math.ceil(max / 20000) * 20000 || 100000;
-  }, [chartData]);
+    const maxActual = Math.max(...chartData.map((d: ChartDataPoint) => d.actual));
+    const maxForecast = usingML ? Math.max(...chartData.map((d: ChartDataPoint) => d.forecast)) : 0;
+    const max = Math.max(maxActual, maxForecast);
+    const roundedMax = Math.ceil(max / 20000) * 20000 || 100000;
+    
+    console.log(`📈 CHART SCALE CALCULATION:`);
+    console.log(`  - Max Actual Value: ₱${maxActual.toLocaleString()}`);
+    console.log(`  - Max Forecast Value: ₱${maxForecast.toLocaleString()}`);
+    console.log(`  - Absolute Max: ₱${max.toLocaleString()}`);
+    console.log(`  - Rounded Chart Max: ₱${roundedMax.toLocaleString()}`);
+    
+    return roundedMax;
+  }, [chartData, usingML]);
+
+  useEffect(() => {
+    console.log(`🔄 TREND VISUALIZATION TAB CHANGED: ${activeTab.toUpperCase()}`);
+    console.log(`  - ML Status: ${usingML ? 'ACTIVE' : 'INACTIVE'}`);
+    console.log(`  - Data Points: ${chartData.length}`);
+    console.log(`  - Chart Max Value: ₱${chartMaxValue.toLocaleString()}`);
+    console.log(`  - Forecast Points: ${chartData.filter(d => d.forecast > 0).length}`);
+  }, [activeTab, usingML, chartData.length, chartMaxValue]);
 
   const lowStockCount = useMemo(() => {
     return products.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
@@ -354,9 +412,15 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
-  // FORECAST DATA - Uses ML-calculated 30d, 60d, 90d values from backend
+  // Demand Forecasting Data with Console Logs
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
+    console.log('📊 DEMAND FORECASTING:');
+    console.log(`  - ML Active: ${usingML}`);
+    console.log(`  - Has Enough Data: ${hasEnoughDataForML}`);
+    console.log(`  - Recommendations Count: ${recommendations?.length || 0}`);
+    
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
+      console.log('  - Forecast Items:');
       return recommendations.map((r: Recommendation) => {
         const predictedDemand30d = typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) 
           ? r.predictedDemand30d 
@@ -368,6 +432,8 @@ export default function AdminDashboard() {
           ? r.predictedDemand90d 
           : 0;
         
+        console.log(`    • ${r.productName}: Stock ${r.currentStock} | 30d: ${predictedDemand30d} | 60d: ${predictedDemand60d} | 90d: ${predictedDemand90d} | Trend: ${r.trend}`);
+        
         return {
           name: r.productName,
           currentStock: r.currentStock,
@@ -378,6 +444,8 @@ export default function AdminDashboard() {
           priority: r.confidence
         };
       });
+    } else {
+      console.log('  - No forecast data available');
     }
     return [];
   }, [usingML, hasEnoughDataForML, recommendations]);
@@ -409,15 +477,16 @@ export default function AdminDashboard() {
     }));
   }, [products]);
 
-  // DEADSTOCK DATA - No emojis, clean professional text
+  // DEADSTOCK DATA - FIXED: Properly handles new products with creation date
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    console.group('===== DEADSTOCK IMPACT AI ANALYSIS =====');
+    console.group('===== DEADSTOCK IMPACT ANALYSIS =====');
     console.log(`Total Products: ${products.length}`);
     console.log(`Completed Transactions: ${completedTransactions.length}`);
-    console.log(`ML Service: ${usingML && hasEnoughDataForML ? 'ACTIVE' : 'INACTIVE'}`);
+    console.log(`ML Service Active: ${usingML ? 'YES' : 'NO'}`);
+    console.log(`AI Suggestions Available: ${deadstockSuggestions.size}`);
 
     const deadstockItems: DeadstockItem[] = [];
 
@@ -432,92 +501,35 @@ export default function AdminDashboard() {
       
       let daysSinceSale = 0;
       let lastSaleDate: Date | null = null;
+      let neverSold = false;
       
       if (lastSale) {
         lastSaleDate = new Date(lastSale.date);
         lastSaleDate.setHours(0, 0, 0, 0);
         daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
       } else {
-        const createdAt = (p as any).createdAt;
-        if (createdAt) {
-          const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+        // If never sold, use creation date
+        neverSold = true;
+        const createdDate = getDateFromTimestamp((p as any).createdAt);
+        
+        if (createdDate) {
           createdDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          console.log(`  📅 ${p.name}: created ${createdDate.toLocaleDateString()}, days since: ${daysSinceSale}`);
         } else {
-          daysSinceSale = 30;
+          // If no creation date, use lastMovedDaysAgo or default to 0 (assume new)
+          daysSinceSale = p.lastMovedDaysAgo || 0;
+          console.log(`  ⚠️ ${p.name}: no creation date, using lastMovedDaysAgo: ${daysSinceSale}`);
         }
         lastSaleDate = null;
       }
       
+      // Only include if actually 30+ days unsold
       if (daysSinceSale >= 30) {
-        // Calculate historical sales velocity for AI suggestion
-        let historicalVelocity = 0;
-        if (lastSale) {
-          const threeMonthsAgo = new Date();
-          threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-          const recentSales = salesForProduct.filter((s: any) => new Date(s.date) >= threeMonthsAgo);
-          let totalQuantity = 0;
-          for (const sale of recentSales) {
-            const item = sale.items.find((item: any) => item.id === p.id);
-            if (item) totalQuantity += item.quantity;
-          }
-          historicalVelocity = totalQuantity / 3;
-        }
-        
-        // Generate AI suggestion based on multiple factors
-        let suggestion = "";
-        let suggestionType: 'critical' | 'warning' | 'info' = 'info';
-        let discountPercent = 0;
-        
-        // Factor 1: Days unsold
-        if (daysSinceSale >= 75) {
-          discountPercent = 55;
-          suggestionType = 'critical';
-        } else if (daysSinceSale >= 60) {
-          discountPercent = 45;
-          suggestionType = 'critical';
-        } else if (daysSinceSale >= 50) {
-          discountPercent = 35;
-          suggestionType = 'critical';
-        } else if (daysSinceSale >= 40) {
-          discountPercent = 28;
-          suggestionType = 'warning';
-        } else if (daysSinceSale >= 30) {
-          discountPercent = 20;
-          suggestionType = 'info';
-        }
-        
-        // Factor 2: Locked capital adjustment
         const lockedCapital = p.stock * p.markupPrice;
-        if (lockedCapital > 100000) discountPercent += 10;
-        else if (lockedCapital > 50000) discountPercent += 5;
-        else if (lockedCapital > 25000) discountPercent += 3;
+        const mlSuggestion = deadstockSuggestions.get(p.id);
         
-        // Factor 3: Category adjustment
-        if (p.category === 'Contact Lenses' || p.category === 'Solutions') {
-          discountPercent = Math.min(65, discountPercent + 5);
-        }
-        
-        // Factor 4: Historical velocity adjustment
-        if (historicalVelocity > 10) {
-          discountPercent = Math.max(10, discountPercent - 10);
-        }
-        
-        discountPercent = Math.min(65, Math.max(10, discountPercent));
-        
-        // Generate suggestion text (no emojis)
-        if (daysSinceSale >= 50) {
-          suggestion = `[CRITICAL] ${daysSinceSale} days unsold. ML analysis recommends ${discountPercent}% IMMEDIATE MARKDOWN to recover ₱${lockedCapital.toLocaleString()} locked capital.`;
-        } else if (daysSinceSale >= 40) {
-          suggestion = `[WARNING] ${daysSinceSale} days unsold. Recommendation: ${discountPercent}% discount or bundle with popular items.`;
-        } else {
-          suggestion = `[INFO] ${daysSinceSale} days without movement. Consider ${discountPercent}% discount or "Buy One Get One 50% Off" promotion.`;
-        }
-        
-        // Add category-specific note
-        if (p.category === 'Contact Lenses' || p.category === 'Solutions') {
-          suggestion += ` As a perishable ${p.category.toLowerCase()}, prioritize clearance.`;
-        }
+        console.log(`  💀 ${p.name}: ${daysSinceSale} days ${neverSold ? '(never sold)' : 'unsold'} - INCLUDED`);
         
         deadstockItems.push({
           id: p.sku || p.id.slice(0, 8),
@@ -525,30 +537,26 @@ export default function AdminDashboard() {
           category: p.category,
           stock: p.stock,
           daysSinceSale: daysSinceSale,
-          lockedCapital: p.markupPrice * p.stock,
+          lockedCapital: lockedCapital,
           priority: (daysSinceSale > 90 ? 'high' : daysSinceSale > 60 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
           lastSaleDate: lastSaleDate,
-          aiSuggestion: suggestion,
-          aiSuggestionType: suggestionType,
-          recommendedDiscount: discountPercent
+          aiSuggestion: mlSuggestion?.suggestion || null,
+          aiSuggestionType: mlSuggestion?.suggestionType || null,
+          recommendedDiscount: mlSuggestion?.recommendedDiscount || null
         });
+      } else {
+        console.log(`  ✅ ${p.name}: ${daysSinceSale} days ${neverSold ? '(never sold)' : 'unsold'} - SKIPPED (under 30 days)`);
       }
     }
 
-    // Sort by locked capital (highest first)
     deadstockItems.sort((a, b) => b.lockedCapital - a.lockedCapital);
 
-    console.log(`Total deadstock items found: ${deadstockItems.length}`);
-    if (deadstockItems.length > 0) {
-      console.log(`AI Suggestions generated with multi-factor ML analysis:`);
-      deadstockItems.forEach(item => {
-        console.log(`   - ${item.name}: ${item.daysSinceSale} days | ${item.recommendedDiscount}% discount | ${item.aiSuggestionType?.toUpperCase()}`);
-      });
-    }
+    console.log(`Total deadstock items: ${deadstockItems.length}`);
+    console.log(`Items with AI suggestions: ${deadstockItems.filter(i => i.aiSuggestion).length}`);
     console.groupEnd();
 
     return deadstockItems;
-  }, [products, completedTransactions, usingML, hasEnoughDataForML]);
+  }, [products, completedTransactions, usingML, deadstockSuggestions]);
 
   const totalLockedCapital = useMemo(() => {
     return DEADSTOCK_DATA.reduce((sum: number, item: DeadstockItem) => sum + item.lockedCapital, 0);
@@ -598,6 +606,16 @@ export default function AdminDashboard() {
         </motion.div>
       )}
 
+      {!usingML && dataLoaded && (
+        <motion.div 
+          variants={itemVariants}
+          className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs text-gray-600 flex items-center gap-2"
+        >
+          <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+          Showing actual sales only. AI predictions unavailable.
+        </motion.div>
+      )}
+
       <motion.div
         variants={containerVariants}
         className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4"
@@ -624,7 +642,7 @@ export default function AdminDashboard() {
               </div>
               <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-500 ml-1">
                 <BarChart3 size={10} className="sm:w-3 sm:h-3" />
-                <span>Actual vs. Predicted Sales</span>
+                <span>Actual {usingML ? 'vs. AI Predicted Sales' : 'Sales Only'}</span>
               </div>
             </div>
 
@@ -679,6 +697,7 @@ export default function AdminDashboard() {
                         isWide={activeTab === "monthly"}
                         onHover={() => handleBarHover(data.label, data.fullLabel, data.actual, data.forecast)}
                         onLeave={handleBarLeave}
+                        usingML={usingML}
                       />
                     ))}
                   </div>
@@ -692,10 +711,12 @@ export default function AdminDashboard() {
                         <span className="text-gray-400">Actual:</span>
                         <span className="ml-1 font-bold">₱{hoveredBar.actual.toLocaleString()}</span>
                       </div>
-                      <div>
-                        <span className="text-gray-400">Predicted:</span>
-                        <span className="ml-1 font-bold text-blue-300">₱{hoveredBar.forecast.toLocaleString()}</span>
-                      </div>
+                      {usingML && hoveredBar.forecast > 0 && (
+                        <div>
+                          <span className="text-gray-400">AI Predicted:</span>
+                          <span className="ml-1 font-bold text-blue-300">₱{hoveredBar.forecast.toLocaleString()}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -708,12 +729,14 @@ export default function AdminDashboard() {
                         Actual Sales
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
-                      <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                        Predicted
-                      </span>
-                    </div>
+                    {usingML && (
+                      <div className="flex items-center gap-1.5 sm:gap-2">
+                        <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
+                        <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
+                          AI Predicted
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -729,7 +752,6 @@ export default function AdminDashboard() {
           </div>
         </motion.div>
 
-        {/* PERFORMANCE HEATMAP SECTION */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
@@ -790,7 +812,6 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* DEMAND FORECASTING SECTION */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
@@ -805,7 +826,7 @@ export default function AdminDashboard() {
                   Demand Forecasting
                 </h2>
                 <p className="text-[9px] sm:text-xs font-medium text-blue-600">
-                  {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'Waiting for sufficient data'}
+                  {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
                 </p>
               </div>
             </div>
@@ -847,11 +868,13 @@ export default function AdminDashboard() {
                   <Database size={20} className="text-gray-400" />
                 </div>
                 <p className="text-sm text-gray-500">
-                  {!usingML || !hasEnoughDataForML 
+                  {!usingML 
+                    ? "AI prediction service is currently unavailable" 
+                    : !hasEnoughDataForML 
                     ? "Insufficient data for AI recommendations"
                     : "No reorder recommendations at this time"}
                 </p>
-                {!hasEnoughDataForML && (
+                {!hasEnoughDataForML && usingML && (
                   <p className="text-[10px] text-gray-400 mt-2">
                     Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
                   </p>
@@ -861,7 +884,6 @@ export default function AdminDashboard() {
           </div>
         </motion.div>
 
-        {/* DEADSTOCK IMPACT SECTION - No emojis */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-red-100 p-3 sm:p-6 h-fit lg:h-full relative overflow-hidden flex flex-col"
@@ -889,17 +911,26 @@ export default function AdminDashboard() {
           <div className="space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '400px' }}>
             {DEADSTOCK_DATA.length > 0 ? (
               DEADSTOCK_DATA.map((item: DeadstockItem) => {
-                const suggestion = item.aiSuggestion || (
-                  usingML && hasEnoughDataForML 
-                    ? `AI ANALYSIS: ${item.daysSinceSale} days without movement. Consider promotion.`
-                    : `Insufficient data for AI recommendation. Need ${MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales.`
-                );
+                const hasAISuggestion = usingML && item.aiSuggestion;
                 
-                const suggestionType = item.aiSuggestionType || 'info';
-                const discountBadge = item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
+                const suggestion = hasAISuggestion 
+                  ? item.aiSuggestion 
+                  : `Item unsold for ${item.daysSinceSale} days. Enable AI service for intelligent recommendations.`;
                 
-                const suggestionBgColor = suggestionType === 'critical' ? 'bg-red-50 border-red-200' : suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200';
-                const suggestionTextColor = suggestionType === 'critical' ? 'text-red-600' : suggestionType === 'warning' ? 'text-orange-600' : 'text-blue-600';
+                const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                const discountBadge = hasAISuggestion && item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
+                
+                const suggestionBgColor = hasAISuggestion 
+                  ? (suggestionType === 'critical' ? 'bg-red-50 border-red-200' : 
+                     suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 
+                     'bg-blue-50 border-blue-200')
+                  : 'bg-gray-50 border-gray-200';
+                
+                const suggestionTextColor = hasAISuggestion 
+                  ? (suggestionType === 'critical' ? 'text-red-600' : 
+                     suggestionType === 'warning' ? 'text-orange-600' : 
+                     'text-blue-600')
+                  : 'text-gray-500';
                 
                 return (
                   <div key={item.id} className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-shadow">
@@ -930,7 +961,7 @@ export default function AdminDashboard() {
                     
                     <div className="border-t border-gray-100 pt-2">
                       <p className="text-[8px] sm:text-[9px] font-medium text-gray-400 uppercase tracking-wider mb-1">
-                        {usingML && hasEnoughDataForML ? 'AI SUGGESTION (ML Analysis)' : 'STATUS'}
+                        {usingML && hasAISuggestion ? 'AI SUGGESTION (ML Analysis)' : 'STATUS'}
                       </p>
                       <div className={`${suggestionBgColor} border rounded p-2 min-h-[50px] flex items-center`}>
                         <p className={`text-[9px] sm:text-xs ${suggestionTextColor} leading-relaxed`}>
@@ -1085,6 +1116,7 @@ interface ChartBarGroupProps {
   isWide?: boolean;
   onHover: () => void;
   onLeave: () => void;
+  usingML: boolean;
 }
 
 function ChartBarGroup({
@@ -1097,9 +1129,10 @@ function ChartBarGroup({
   isWide = false,
   onHover,
   onLeave,
+  usingML,
 }: ChartBarGroupProps) {
   const actualHeight = `${Math.min((actual / maxVal) * 100, 100)}%`;
-  const forecastHeight = `${Math.min((forecast / maxVal) * 100, 100)}%`;
+  const forecastHeight = usingML ? `${Math.min((forecast / maxVal) * 100, 100)}%` : '0%';
   const barWidthClass = isWide ? "w-8 sm:w-16" : "w-4 sm:w-10";
 
   return (
@@ -1115,12 +1148,15 @@ function ChartBarGroup({
           transition={{ duration: 0.5, delay: delay, ease: "easeOut" }}
           className={`${barWidthClass} bg-[#0B3C8A] rounded-t-sm origin-bottom opacity-90 group-hover:opacity-100 shadow-sm transition-opacity`}
         ></motion.div>
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: forecastHeight }}
-          transition={{ duration: 0.5, delay: delay + 0.1, ease: "easeOut" }}
-          className={`${barWidthClass} bg-blue-300 rounded-t-sm origin-bottom opacity-70 group-hover:opacity-90 shadow-sm transition-opacity`}
-        ></motion.div>
+        
+        {usingML && (
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: forecastHeight }}
+            transition={{ duration: 0.5, delay: delay + 0.1, ease: "easeOut" }}
+            className={`${barWidthClass} bg-blue-300 rounded-t-sm origin-bottom opacity-70 group-hover:opacity-90 shadow-sm transition-opacity`}
+          ></motion.div>
+        )}
       </div>
       <span className="text-[10px] sm:text-xs font-medium text-gray-400 group-hover:text-gray-700 transition-colors">
         {label}

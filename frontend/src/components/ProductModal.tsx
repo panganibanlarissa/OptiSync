@@ -3,7 +3,7 @@
 
 import React, { useState, useRef } from "react";
 import { motion, Variants } from "framer-motion";
-import { X, UploadCloud, Save, Trash2, Glasses, Calendar, Package as PackageIcon } from "lucide-react";
+import { X, UploadCloud, Save, Trash2, Calendar, Package as PackageIcon } from "lucide-react";
 import Image from "next/image";
 import { uploadImage } from "@/services/cloudinary";
 import { useNotification } from "@/components/NotificationProvider";
@@ -32,10 +32,10 @@ export interface ProductFormData {
   adjustmentReason?: string;
 }
 
-interface ProductModalProps {
+export interface ProductModalProps {
   mode: 'add' | 'edit' | 'adjust';
   product: ProductFormData;
-  products?: any[]; // Added to calculate SKU based on category
+  products?: any[];
   onClose: () => void;
   onSave: (data: ProductFormData) => void;
   onDelete?: (id: string) => void;
@@ -48,7 +48,15 @@ const modalVariants: Variants = {
   exit: { opacity: 0, scale: 0.95 } 
 };
 
-export default function ProductModal({ mode, product, products = [], onClose, onSave, onDelete, userRole }: ProductModalProps) {
+export default function ProductModal({ 
+  mode, 
+  product, 
+  products = [], 
+  onClose, 
+  onSave, 
+  onDelete, 
+  userRole 
+}: ProductModalProps) {
   const [formData, setFormData] = useState<ProductFormData>(product);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -95,6 +103,20 @@ export default function ProductModal({ mode, product, products = [], onClose, on
     const file = e.target.files?.[0];
     if (!file) return;
     
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file');
+      showNotification('Please select an image file', 'error');
+      return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be less than 5MB');
+      showNotification('Image must be less than 5MB', 'error');
+      return;
+    }
+    
     setUploadError(null);
     setSelectedFile(file);
     const localPreviewUrl = URL.createObjectURL(file);
@@ -111,17 +133,20 @@ export default function ProductModal({ mode, product, products = [], onClose, on
       
       if (selectedFile) {
         try {
-          console.log('Starting image upload...');
+          console.log('Starting image upload for:', selectedFile.name);
+          showNotification('Uploading image...', 'info');
+          
           imageUrl = await uploadImage(selectedFile, 'products');
+          
           console.log('Image upload successful:', imageUrl);
-          showNotification("Image uploaded successfully", "success");
+          showNotification('Image uploaded successfully', 'success');
         } catch (uploadError) {
           console.error('Image upload failed:', uploadError);
-          const errorMessage = uploadError instanceof Error ? uploadError.message : "Image upload failed";
+          const errorMessage = uploadError instanceof Error ? uploadError.message : 'Image upload failed';
           setUploadError(errorMessage);
-          showNotification(errorMessage, "error");
-          // Continue without image - don't block product creation
-          imageUrl = null;
+          showNotification(errorMessage, 'error');
+          setUploading(false);
+          return; // Stop here if image upload fails
         }
       }
       
@@ -130,15 +155,17 @@ export default function ProductModal({ mode, product, products = [], onClose, on
         image: imageUrl
       };
       
+      console.log('Saving product with image URL:', imageUrl);
       await onSave(dataToSave);
       
+      // Clean up preview URL
       if (previewUrl && previewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(previewUrl);
       }
       
     } catch (error) {
       console.error('Error saving product:', error);
-      showNotification("Failed to save product", "error");
+      showNotification('Failed to save product', 'error');
     } finally {
       setUploading(false);
     }
@@ -244,7 +271,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
             <div className="flex flex-col items-center justify-center mb-2 sm:mb-3">
               <div 
                 onClick={() => !uploading && fileInputRef.current?.click()} 
-                className={`group relative w-16 h-16 sm:w-24 sm:h-24 rounded-full sm:rounded-lg border-2 border-dashed 
+                className={`group relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border-2 border-dashed 
                   ${uploading ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-[#0B3C8A] bg-slate-50 hover:bg-blue-50 cursor-pointer'} 
                   flex flex-col items-center justify-center transition-all overflow-hidden`}
               >
@@ -255,17 +282,36 @@ export default function ProductModal({ mode, product, products = [], onClose, on
                   </div>
                 ) : previewUrl ? (
                   <div className="relative w-full h-full">
-                    <Image src={previewUrl} alt="Preview" fill sizes="96px" className="object-cover" />
+                    <Image 
+                      src={previewUrl} 
+                      alt="Preview" 
+                      fill 
+                      sizes="96px" 
+                      className="object-cover" 
+                      unoptimized={previewUrl.startsWith('blob:')}
+                    />
                   </div>
                 ) : (
-                  <UploadCloud className="text-gray-400 w-5 h-5 sm:w-6 sm:h-6" />
+                  <div className="flex flex-col items-center">
+                    <UploadCloud className="text-gray-400 w-6 h-6 sm:w-8 sm:h-8" />
+                    <span className="text-[8px] text-gray-400 mt-1">Click to upload</span>
+                  </div>
                 )}
               </div>
-              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} disabled={uploading} />
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="image/jpeg,image/png,image/gif,image/webp" 
+                onChange={handleFileSelect} 
+                disabled={uploading} 
+              />
               {uploadError && (
                 <p className="text-[9px] text-red-500 mt-1 text-center">{uploadError}</p>
               )}
-              <p className="text-[8px] text-gray-400 mt-1">Click to upload image</p>
+              <p className="text-[8px] text-gray-400 mt-1">
+                Supported formats: JPEG, PNG, GIF, WebP (Max 5MB)
+              </p>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -353,7 +399,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
                   className={`w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 ${THEME_RING} focus:outline-none`} 
                 />
                 <p className="text-[9px] text-gray-400 mt-1">
-                  Products will appear in expiry alerts {isPerishable ? '30 days before expiry' : ''}
+                  Products will appear in expiry alerts 30 days before expiry
                 </p>
               </div>
             )}
@@ -369,8 +415,17 @@ export default function ProductModal({ mode, product, products = [], onClose, on
           <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors">
             Cancel
           </button>
-          <button type="submit" form="product-form" disabled={uploading} className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400' : THEME_BG + ' ' + THEME_HOVER} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2 transition-colors`}>
-            {uploading ? 'Uploading...' : <><Save size={14}/> {mode === 'add' ? 'Save' : 'Update'}</>}
+          <button 
+            type="submit" 
+            form="product-form" 
+            disabled={uploading} 
+            className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400 cursor-wait' : THEME_BG + ' ' + THEME_HOVER} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2 transition-colors`}
+          >
+            {uploading ? (
+              <>Uploading...</>
+            ) : (
+              <><Save size={14}/> {mode === 'add' ? 'Save' : 'Update'}</>
+            )}
           </button>
         </div>
       </motion.div>

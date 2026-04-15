@@ -1,6 +1,6 @@
 // src/services/mlApiClient.ts
 
-const ML_API_URL = process.env.NEXT_PUBLIC_ML_API_URL || 'http://localhost:8000';
+const ML_API_URL = process.env.NEXT_PUBLIC_ML_SERVICE_URL || 'http://localhost:8000';
 
 export interface ProductData {
   id: string;
@@ -12,6 +12,7 @@ export interface ProductData {
   baseCost: number;
   reorderPoint: number;
   lastMovedDaysAgo: number;
+  createdAt: string | null;
 }
 
 export interface TransactionData {
@@ -20,6 +21,20 @@ export interface TransactionData {
   date: string;
   status: string;
   items: Array<{ id: string; name: string; quantity: number; price: number }>;
+}
+
+export interface DeadstockSuggestion {
+  productId: string;
+  suggestion: string;
+  suggestionType: 'critical' | 'warning' | 'info';
+  recommendedDiscount: number;
+  mlFactors: {
+    daysFactor: number;
+    capitalFactor: number;
+    categoryUrgency: number;
+    velocityFactor: number;
+    finalDiscount: number;
+  };
 }
 
 export interface ForecastResponse {
@@ -42,6 +57,7 @@ export interface ForecastResponse {
     trend: 'up' | 'down' | 'stable';
     confidence: 'high' | 'medium' | 'low';
   }>;
+  deadstockSuggestions?: DeadstockSuggestion[]; // NEW: AI suggestions for deadstock items
   usingML: boolean;
   dataPoints: number;
 }

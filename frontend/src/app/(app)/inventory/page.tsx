@@ -14,16 +14,13 @@ import {
   AlertTriangle,
   Glasses,
   X,
-  UploadCloud,
-  Save,
-  Trash2,
   Clock,
   ArrowRightLeft,
   QrCode,
   Download,
+  Trash2,
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
-import { uploadImage } from "@/services/cloudinary";
 import QRScannerModal from "@/components/QRScannerModal";
 import ProductModal, { ProductFormData } from "@/components/ProductModal";
 
@@ -104,7 +101,6 @@ export default function InventoryPage() {
     adjustStock, 
     loading,
     getLowStockProducts,
-    getDeadstockProducts,
     userRole,
     transactions
   } = useFirebase();
@@ -136,7 +132,34 @@ export default function InventoryPage() {
     return lowStockAlerts;
   }, [lowStockAlerts]);
   
-  // FIXED: Calculate deadstock using the SAME logic as Admin Dashboard
+  // Helper function to safely get date from Firestore Timestamp
+  const getDateFromTimestamp = (timestamp: any): Date | null => {
+    if (!timestamp) return null;
+    
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
+    if (typeof timestamp === 'object' && timestamp.toDate) {
+      return timestamp.toDate();
+    }
+    
+    if (timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000);
+    }
+    
+    if (typeof timestamp === 'string') {
+      return new Date(timestamp);
+    }
+    
+    if (typeof timestamp === 'number') {
+      return new Date(timestamp);
+    }
+    
+    return null;
+  };
+  
+  // Calculate deadstock using the SAME logic as Admin Dashboard
   const deadstockAlerts = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -160,14 +183,15 @@ export default function InventoryPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
-          const createdAt = (p as any).createdAt;
-          if (createdAt) {
-            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+          // If no sales, use createdAt date
+          const createdDate = getDateFromTimestamp((p as any).createdAt);
+          
+          if (createdDate) {
             createdDate.setHours(0, 0, 0, 0);
             daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
           } else {
-            daysSinceSale = 30; // Default minimum threshold
+            // If no createdAt, use lastMovedDaysAgo field or default to 0
+            daysSinceSale = p.lastMovedDaysAgo || 0;
           }
           lastSaleDate = null;
         }
@@ -187,11 +211,16 @@ export default function InventoryPage() {
           lockedCapital
         };
       })
-      .filter(item => item.daysSinceSale >= 30)  // Only show items 30+ days without sales
-      .sort((a, b) => b.lockedCapital - a.lockedCapital);  // Sort by highest locked capital first
+      .filter(item => item.daysSinceSale >= 30)
+      .sort((a, b) => b.lockedCapital - a.lockedCapital);
     
     return deadstockItems as DeadstockItem[];
   }, [products, transactions]);
+  
+  // Create a Set of deadstock product IDs for quick lookup in ProductCard
+  const deadstockProductIds = useMemo(() => {
+    return new Set(deadstockAlerts.map(item => item.id));
+  }, [deadstockAlerts]);
   
   // Display all items
   const displayActionRequired = reorderNeededProducts;
@@ -207,7 +236,6 @@ export default function InventoryPage() {
   });
 
   const openAddModal = () => {
-    // Generate SKU based on category count
     const categoryDefaults: Record<string, string> = {
       "Frames": "FRM",
       "Lenses": "LNS",
@@ -339,13 +367,13 @@ export default function InventoryPage() {
   return (
     <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
       <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
-        {/* LEFT COLUMN - PRODUCT CATALOG with INTERNAL SCROLL */}
+        {/* LEFT COLUMN - PRODUCT CATALOG */}
         <motion.div 
           initial={{ opacity: 0, y: 15 }} 
           animate={{ opacity: 1, y: 0 }} 
           className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
         >
-          {/* Header - fixed, doesn't scroll */}
+          {/* Header */}
           <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-slate-50 flex flex-col gap-3">
             <div className="flex flex-row justify-between items-center gap-2">
               <div className="flex items-center gap-2 sm:gap-3">
@@ -454,7 +482,7 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          {/* PRODUCT GRID - with internal scroll */}
+          {/* PRODUCT GRID */}
           <div 
             className="flex-1 overflow-y-auto p-2 sm:p-5 bg-gray-50/50 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
           >
@@ -477,6 +505,7 @@ export default function InventoryPage() {
                       setCreatedProductId(product.id);
                     }}
                     userRole={userRole}
+                    isDeadstock={deadstockProductIds.has(product.id)}
                   />
                 ))
               ) : (
@@ -488,10 +517,10 @@ export default function InventoryPage() {
           </div>
         </motion.div>
 
-        {/* RIGHT COLUMN - SIDEBAR ALERTS (no scroll) */}
+        {/* RIGHT COLUMN - SIDEBAR ALERTS */}
         <aside className="w-full lg:w-70 xl:w-75 flex flex-col gap-2 sm:gap-3 lg:gap-4 shrink-0">
           
-          {/* ACTION REQUIRED SECTION - Scrollable - Shows products needing restock */}
+          {/* ACTION REQUIRED SECTION */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
@@ -515,12 +544,10 @@ export default function InventoryPage() {
               Products below reorder point.
             </p>
             
-            {/* Content area - expands to fit items */}
             <div className="space-y-2 sm:space-y-3">
               {displayActionRequired.length > 0 ? (
                 <div className="space-y-2 sm:space-y-3">
                   {displayActionRequired.map((item: LowStockItem) => {
-                    // Calculate how many units needed to reach reorder point
                     const neededToRestock = Math.max(0, item.reorderPoint - item.stock);
                     return (
                       <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-red-100 shadow-sm hover:shadow-md transition-shadow">
@@ -564,7 +591,7 @@ export default function InventoryPage() {
             </div>
           </motion.div>
 
-          {/* DEADSTOCK SECTION - FIXED: Now shows all deadstock items with correct logic */}
+          {/* DEADSTOCK SECTION */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
@@ -590,12 +617,10 @@ export default function InventoryPage() {
               AI-flagged items with no sales in 30+ days.
             </p>
             
-            {/* Content area - expands to fit items */}
             <div className="space-y-2 sm:space-y-3">
               {displayDeadstock.length > 0 ? (
                 <div className="space-y-2 sm:space-y-3">
                   {displayDeadstock.map((item: DeadstockItem) => {
-                    // Determine priority based on days unsold (matching Admin Dashboard logic)
                     const priority = item.daysSinceSale > 90 ? 'high' : item.daysSinceSale > 60 ? 'medium' : 'low';
                     const priorityColor = priority === 'high' ? 'red' : priority === 'medium' ? 'orange' : 'blue';
                     
@@ -645,7 +670,7 @@ export default function InventoryPage() {
         </aside>
       </div>
 
-      {/* MODALS remain unchanged */}
+      {/* MODALS */}
       <AnimatePresence>
         {isQRScannerOpen && (
           <QRScannerModal
@@ -714,14 +739,14 @@ export default function InventoryPage() {
   );
 }
 
-
-function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole }: { 
+function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole, isDeadstock }: { 
   data: InventoryData, 
   viewMode: 'grid' | 'list', 
   onEdit: () => void, 
   onAdjust: () => void,
   onQR: () => void,
-  userRole?: string | null
+  userRole?: string | null,
+  isDeadstock?: boolean
 }) {
   const renderImage = () => {
     const isOutOfStock = data.stock <= 0;
@@ -749,7 +774,6 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole }: {
     );
   };
   
-  const isDeadstock = data.lastMovedDaysAgo >= 30;
   const isLowStock = data.stock <= data.reorderPoint && data.stock > 0;
   const isOutOfStock = data.stock <= 0;
 
@@ -938,12 +962,10 @@ function QRCodeModal({ productId, productName, onClose }: {
 }) {
   const qrRef = useRef<HTMLDivElement>(null);
 
-  // Create unique QR code data by including both product ID and name
   const qrValue = `${window.location.origin}/inventory?product=${productId}&name=${encodeURIComponent(productName)}`;
 
   const downloadQRCode = async () => {
     try {
-      // Using a QR code generation API since we can't use canvas directly in this context
       const qrImage = await fetch(
         `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrValue)}`
       );
