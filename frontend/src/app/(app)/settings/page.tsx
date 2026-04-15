@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase, StaffUser } from "@/context/FirebaseContext";
@@ -17,7 +17,10 @@ import {
   CheckCircle2,
   Clock,
   Ban,
-  UserCheck
+  UserCheck,
+  Eye,
+  EyeOff,
+  RefreshCw
 } from "lucide-react";
 
 // --- THEME CONSTANTS ---
@@ -43,6 +46,61 @@ const modalVariants: Variants = {
   exit: { opacity: 0, scale: 0.95 }
 };
 
+// --- PASSWORD STRENGTH UTILITIES ---
+interface PasswordStrength {
+  score: number;        // 0–4
+  label: "Too Short" | "Weak" | "Fair" | "Good" | "Strong";
+  color: string;        // Tailwind bg class
+  textColor: string;    // Tailwind text class
+  barWidth: string;     // Tailwind w- class
+  checks: {
+    length: boolean;
+    uppercase: boolean;
+    lowercase: boolean;
+    number: boolean;
+    special: boolean;
+  };
+}
+
+function evaluatePassword(password: string): PasswordStrength {
+  const checks = {
+    length:    password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number:    /[0-9]/.test(password),
+    special:   /[^A-Za-z0-9]/.test(password),
+  };
+
+  if (password.length === 0) {
+    return {
+      score: 0,
+      label: "Too Short",
+      color: "bg-gray-200",
+      textColor: "text-gray-400",
+      barWidth: "w-0",
+      checks
+    };
+  }
+
+  if (password.length < 8) {
+    return {
+      score: 0,
+      label: "Too Short",
+      color: "bg-red-400",
+      textColor: "text-red-500",
+      barWidth: "w-1/4",
+      checks
+    };
+  }
+
+  const passed = Object.values(checks).filter(Boolean).length;
+
+  if (passed <= 2) return { score: 1, label: "Weak",   color: "bg-red-500",    textColor: "text-red-600",    barWidth: "w-1/4",   checks };
+  if (passed === 3) return { score: 2, label: "Fair",   color: "bg-yellow-400", textColor: "text-yellow-600", barWidth: "w-2/4",   checks };
+  if (passed === 4) return { score: 3, label: "Good",   color: "bg-blue-500",   textColor: "text-blue-600",   barWidth: "w-3/4",   checks };
+  return               { score: 4, label: "Strong",  color: "bg-emerald-500", textColor: "text-emerald-600", barWidth: "w-full",  checks };
+}
+
 export default function SettingsPage() {
   // Data State
   const { 
@@ -62,6 +120,7 @@ export default function SettingsPage() {
   // Use staffUsers directly from context - no local state duplication
   const users = staffUsers;
   const loading = firebaseLoading;
+  const [refreshing, setRefreshing] = useState(false);
 
   // Modal State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -76,23 +135,45 @@ export default function SettingsPage() {
     role: "Staff" as "Staff" | "Admin",
     status: "Active" as "Active" | "Inactive"
   });
+
+  // Password visibility toggle
+  const [showPassword, setShowPassword] = useState(false);
   
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [userToAction, setUserToAction] = useState<StaffUser | null>(null);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { showNotification } = useNotification();
+
+  // Password strength — computed live as the user types
+  const passwordStrength = useMemo(
+    () => evaluatePassword(userForm.password),
+    [userForm.password]
+  );
 
   // Load users when component mounts or when userRole changes
   useEffect(() => {
     const loadUsers = async () => {
       if (userRole === 'admin') {
+        console.log("🔄 Loading staff users...");
         await fetchStaffUsers();
+        console.log("✅ Staff users loaded:", staffUsers.length);
       }
     };
     loadUsers();
   }, [userRole, fetchStaffUsers]);
+
+  // Manual refresh function
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    console.log("🔄 Manually refreshing staff users...");
+    await fetchStaffUsers();
+    console.log("✅ Staff users refreshed:", staffUsers.length);
+    setRefreshing(false);
+    showNotification("Staff list refreshed", "success", "Refreshed");
+  };
 
   // Check if current user is admin
   if (userRole !== 'admin') {
@@ -109,7 +190,7 @@ export default function SettingsPage() {
     );
   }
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
@@ -122,7 +203,7 @@ export default function SettingsPage() {
   const handleUserFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setUserForm({ ...userForm, [name]: value });
-    // Clear error for this field
+    // Clear error for this field on change
     if (formErrors[name]) {
       setFormErrors(prev => {
         const newErrors = { ...prev };
@@ -145,10 +226,14 @@ export default function SettingsPage() {
       errors.email = "Invalid email format";
     }
     
-    if (modalMode === "add" && !userForm.password) {
-      errors.password = "Password is required";
-    } else if (modalMode === "add" && userForm.password.length < 6) {
-      errors.password = "Password must be at least 6 characters";
+    if (modalMode === "add") {
+      if (!userForm.password) {
+        errors.password = "Password is required";
+      } else if (userForm.password.length < 8) {
+        errors.password = "Password must be at least 8 characters";
+      } else if (passwordStrength.score < 2) {
+        errors.password = "Password is too weak — add uppercase letters, numbers, or symbols";
+      }
     }
     
     setFormErrors(errors);
@@ -159,6 +244,7 @@ export default function SettingsPage() {
     setModalMode("add");
     setUserForm({ uid: "", name: "", email: "", password: "", role: "Staff", status: "Active" });
     setFormErrors({});
+    setShowPassword(false);
     setIsUserModalOpen(true);
   };
 
@@ -173,6 +259,7 @@ export default function SettingsPage() {
       status: user.status === "Active" ? "Active" : "Inactive"
     });
     setFormErrors({});
+    setShowPassword(false);
     setIsUserModalOpen(true);
   };
 
@@ -194,6 +281,7 @@ export default function SettingsPage() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       if (modalMode === "add") {
         await createStaffUser(
@@ -207,6 +295,8 @@ export default function SettingsPage() {
           "success",
           "User Created"
         );
+        // Refresh the staff list after adding
+        await fetchStaffUsers();
       } else if (modalMode === "edit") {
         await updateStaffUser(userForm.uid, {
           name: userForm.name,
@@ -219,6 +309,8 @@ export default function SettingsPage() {
           "success",
           "User Updated"
         );
+        // Refresh the staff list after updating
+        await fetchStaffUsers();
       }
       setIsUserModalOpen(false);
     } catch (error: unknown) {
@@ -229,6 +321,8 @@ export default function SettingsPage() {
         "error",
         "Error"
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -315,21 +409,43 @@ export default function SettingsPage() {
     }
   };
 
+  // Format last login for display
+  const formatLastLogin = (lastLogin: string | undefined) => {
+    if (!lastLogin || lastLogin === "Never") return "Never";
+    return lastLogin;
+  };
+
+  // Count active and inactive users
+  const activeCount = users.filter(u => u.status === 'Active').length;
+  const inactiveCount = users.filter(u => u.status === 'Inactive').length;
+
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20">
       <div className="w-full">
         
         {/* HEADER */}
         <motion.div variants={containerVariants} initial="hidden" animate="visible" className="mb-6 sm:mb-8">
-          <motion.h1 variants={itemVariants} className="text-2xl sm:text-3xl font-black text-gray-800 flex items-center gap-3">
-            <div className="p-2 bg-blue-50 rounded-xl shadow-sm">
-              <Users className={THEME_TEXT} size={26} />
+          <div className="flex justify-between items-start">
+            <div>
+              <motion.h1 variants={itemVariants} className="text-2xl sm:text-3xl font-black text-gray-800 flex items-center gap-3">
+                <div className="p-2 bg-blue-50 rounded-xl shadow-sm">
+                  <Users className={THEME_TEXT} size={26} />
+                </div>
+                Staff Management
+              </motion.h1>
+              <motion.p variants={itemVariants} className="text-sm text-gray-500 mt-2 ml-1">
+                Manage system access and roles for your employees.
+              </motion.p>
             </div>
-            Staff Management
-          </motion.h1>
-          <motion.p variants={itemVariants} className="text-sm text-gray-500 mt-2 ml-1">
-            Manage system access and roles for your employees.
-          </motion.p>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className={`p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-[#0B3C8A] hover:border-[#0B3C8A] transition-all ${refreshing ? 'animate-spin' : ''}`}
+              title="Refresh staff list"
+            >
+              <RefreshCw size={18} />
+            </button>
+          </div>
         </motion.div>
 
         <motion.div variants={containerVariants} initial="hidden" animate="visible" className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -337,7 +453,7 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-lg font-bold text-gray-800">Staff Accounts</h2>
               <p className="text-xs text-gray-500 mt-1">
-                {users.filter(u => u.status === 'Active').length} active, {users.filter(u => u.status === 'Inactive').length} inactive
+                {activeCount} active, {inactiveCount} inactive
               </p>
             </div>
             <button 
@@ -420,7 +536,7 @@ export default function SettingsPage() {
                         <td className="p-4 sm:p-5">
                           <div className="flex items-center gap-1 text-xs text-gray-500">
                             <Clock size={12} className="opacity-50" />
-                            {user.lastLogin || 'Never'}
+                            {formatLastLogin(user.lastLogin)}
                           </div>
                         </td>
                         <td className="p-4 sm:p-5 text-right">
@@ -512,6 +628,7 @@ export default function SettingsPage() {
               </div>
               
               <form id="user-form" onSubmit={handleSaveUser} className="p-5 sm:p-6 space-y-4">
+                {/* Full Name */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Full Name <span className="text-red-500">*</span>
@@ -531,6 +648,7 @@ export default function SettingsPage() {
                   )}
                 </div>
                 
+                {/* Email Address */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Email Address <span className="text-red-500">*</span>
@@ -550,28 +668,79 @@ export default function SettingsPage() {
                   )}
                 </div>
                  
+                {/* Password (add mode only) */}
                 {modalMode === "add" && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
                       Password <span className="text-red-500">*</span>
                     </label>
-                    <input 
-                      required 
-                      name="password" 
-                      value={userForm.password} 
-                      onChange={handleUserFormChange}
-                      type="password" 
-                      placeholder="•••••••• (min. 6 characters)" 
-                      className={`w-full px-4 py-2.5 rounded-xl border ${
-                        formErrors.password ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-2'
-                      } text-sm text-gray-900 ${THEME_RING} focus:outline-none bg-white`} 
-                    />
+
+                    {/* Input with show/hide toggle */}
+                    <div className="relative">
+                      <input 
+                        required 
+                        name="password" 
+                        value={userForm.password} 
+                        onChange={handleUserFormChange}
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Min. 8 characters"
+                        className={`w-full px-4 py-2.5 pr-10 rounded-xl border ${
+                          formErrors.password ? 'border-red-300 focus:ring-red-200' : 'border-gray-300 focus:ring-2'
+                        } text-sm text-gray-900 ${THEME_RING} focus:outline-none bg-white`} 
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+
+                    {/* Strength bar — only shown when the user has started typing */}
+                    {userForm.password.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {/* Bar */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.barWidth}`}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-bold shrink-0 ${passwordStrength.textColor}`}>
+                            {passwordStrength.label}
+                          </span>
+                        </div>
+
+                        {/* Requirement checklist */}
+                        <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                          {[
+                            { key: "length",    label: "8+ characters" },
+                            { key: "uppercase", label: "Uppercase letter" },
+                            { key: "lowercase", label: "Lowercase letter" },
+                            { key: "number",    label: "Number" },
+                            { key: "special",   label: "Special character" },
+                          ].map(({ key, label }) => {
+                            const passed = passwordStrength.checks[key as keyof typeof passwordStrength.checks];
+                            return (
+                              <li key={key} className={`flex items-center gap-1 text-[10px] ${passed ? "text-emerald-600" : "text-gray-400"}`}>
+                                <CheckCircle2 size={10} className={passed ? "text-emerald-500" : "text-gray-300"} />
+                                {label}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
                     {formErrors.password && (
                       <p className="text-red-500 text-[10px] mt-1">{formErrors.password}</p>
                     )}
                   </div>
                 )}
 
+                {/* Account Status (edit mode only) */}
                 {modalMode === "edit" && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
@@ -592,6 +761,7 @@ export default function SettingsPage() {
                   </div>
                 )}
 
+                {/* System Role */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     System Role
@@ -611,7 +781,7 @@ export default function SettingsPage() {
                 {modalMode === "add" && (
                   <p className="text-[10px] text-gray-500 bg-blue-50 p-2 rounded-lg">
                     <AlertCircle size={12} className="inline mr-1 text-blue-500" />
-                    New users will receive an email to set up their account.
+                    The new account will be stored immediately. The staff member can log in using the credentials you set.
                   </p>
                 )}
               </form>
@@ -621,15 +791,24 @@ export default function SettingsPage() {
                   type="button" 
                   onClick={() => setIsUserModalOpen(false)} 
                   className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-bold hover:bg-gray-100 transition-colors"
+                  disabled={isSubmitting}
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
                   form="user-form" 
-                  className={`flex-1 px-4 py-2.5 rounded-xl ${THEME_BG} text-white text-sm font-bold ${THEME_HOVER} transition-colors shadow-sm`}
+                  disabled={isSubmitting || (modalMode === "add" && userForm.password.length > 0 && passwordStrength.score < 2)}
+                  className={`flex-1 px-4 py-2.5 rounded-xl ${THEME_BG} text-white text-sm font-bold ${THEME_HOVER} transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
                 >
-                  {modalMode === "add" ? "Create User" : "Update User"}
+                  {isSubmitting ? (
+                    <>
+                      <span className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white" />
+                      {modalMode === "add" ? "Creating..." : "Updating..."}
+                    </>
+                  ) : (
+                    modalMode === "add" ? "Create User" : "Update User"
+                  )}
                 </button>
               </div>
             </motion.div>
@@ -684,7 +863,7 @@ export default function SettingsPage() {
               </h3>
               <p className="text-sm text-gray-500 mb-6 leading-relaxed">
                 ⚠️ <span className="font-bold text-red-600">This action is irreversible!</span><br/><br/>
-                Are you sure you want to permanently delete <span className="font-bold text-gray-800">{userToAction.name}</span>'s account? 
+                Are you sure you want to permanently delete <span className="font-bold text-gray-800">{userToAction.name}</span>&apos;s account? 
                 They will be completely removed from the system and cannot be restored.
               </p>
               <div className="flex gap-3">

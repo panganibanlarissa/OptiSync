@@ -1,4 +1,4 @@
-// frontend/src/hooks/useMLForecasting.ts
+// src/hooks/useMLForecasting.ts
 import { useState, useEffect, useCallback } from 'react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { mlForecasting as localMLForecasting } from '@/services/mlForecasting';
@@ -12,11 +12,13 @@ interface ForecastDataPoint {
   upper?: number;
 }
 
-interface Recommendation {
+export interface Recommendation {
   productId: string;
   productName: string;
   currentStock: number;
-  predictedDemand: number;
+  predictedDemand30d: number;
+  predictedDemand60d: number;
+  predictedDemand90d: number;
   recommendedOrder: number;
   daysUntilOut: number;
   trend: 'up' | 'down' | 'stable';
@@ -88,16 +90,40 @@ export function useMLForecasting() {
         // Check if ML service is available
         const healthCheck = await mlApiClient.healthCheck();
         
-        if (healthCheck) {
+        if (healthCheck && healthCheck.status === 'healthy') {
           mlServiceAvailable = true;
           console.log('Python ML Service is available, using Prophet/Scikit-learn');
           
           const result = await mlApiClient.generateForecast(productData, transactionData);
-          forecastData = result.forecastData;
-          recommendations = result.recommendations;
-          usingML = result.usingML;
+          forecastData = result.forecastData || [];
           
-          console.log('ML API Response:', { usingML: result.usingML, dataPoints: result.dataPoints });
+          // Map the recommendations - ensure numbers are valid
+          recommendations = (result.recommendations || []).map((rec: any) => {
+            // Log the raw response for debugging
+            console.log('Raw recommendation from API:', rec);
+            
+            return {
+              productId: rec.productId || '',
+              productName: rec.productName || '',
+              currentStock: typeof rec.currentStock === 'number' ? rec.currentStock : 0,
+              predictedDemand30d: typeof rec.predictedDemand30d === 'number' ? rec.predictedDemand30d : 0,
+              predictedDemand60d: typeof rec.predictedDemand60d === 'number' ? rec.predictedDemand60d : 0,
+              predictedDemand90d: typeof rec.predictedDemand90d === 'number' ? rec.predictedDemand90d : 0,
+              recommendedOrder: typeof rec.recommendedOrder === 'number' ? rec.recommendedOrder : 0,
+              daysUntilOut: typeof rec.daysUntilOut === 'number' ? rec.daysUntilOut : 0,
+              trend: rec.trend || 'stable',
+              confidence: rec.confidence || 'low'
+            };
+          });
+          
+          usingML = result.usingML || false;
+          
+          console.log('ML API Response:', { 
+            usingML: result.usingML, 
+            dataPoints: result.dataPoints,
+            recommendationsCount: recommendations.length 
+          });
+          console.log('Mapped recommendations:', recommendations);
         } else {
           throw new Error('ML service not available');
         }
@@ -112,7 +138,19 @@ export function useMLForecasting() {
         forecastData = await localMLForecasting.generateSalesForecast(transactions, 'monthly');
         
         if (hasEnoughData) {
-          recommendations = await localMLForecasting.generateRecommendations(products, transactions);
+          const fallbackRecs = await localMLForecasting.generateRecommendations(products, transactions);
+          recommendations = fallbackRecs.map((rec: any) => ({
+            productId: rec.productId,
+            productName: rec.productName,
+            currentStock: rec.currentStock,
+            predictedDemand30d: rec.predictedDemand || 0,
+            predictedDemand60d: Math.round((rec.predictedDemand || 0) * 1.9),
+            predictedDemand90d: Math.round((rec.predictedDemand || 0) * 2.7),
+            recommendedOrder: rec.recommendedOrder,
+            daysUntilOut: rec.daysUntilOut,
+            trend: rec.trend,
+            confidence: rec.confidence
+          }));
         }
         
         usingML = hasEnoughData;

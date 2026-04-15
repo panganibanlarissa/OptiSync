@@ -360,17 +360,17 @@ export default function StaffDashboard() {
 
   // Format recommendations for display
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
-    if (hasEnoughDataForML && recommendations.length > 0) {
-      return recommendations.slice(0, 3).map(r => ({
-        name: r.productName,
-        currentStock: r.currentStock,
-        predictedDemand: r.predictedDemand,
-        trend: r.trend,
-        priority: r.confidence
-      }));
-    }
-    return [];
-  }, [hasEnoughDataForML, recommendations]);
+  if (hasEnoughDataForML && recommendations.length > 0) {
+    return recommendations.slice(0, 3).map(r => ({
+      name: r.productName,
+      currentStock: r.currentStock,
+      predictedDemand: r.predictedDemand30d,  // Changed from r.predictedDemand to r.predictedDemand30d
+      trend: r.trend,
+      priority: r.confidence
+    }));
+  }
+  return [];
+}, [hasEnoughDataForML, recommendations]);
 
   // Calculate heatmap data from real products
   const HEATMAP_DATA: HeatmapData[] = useMemo(() => {

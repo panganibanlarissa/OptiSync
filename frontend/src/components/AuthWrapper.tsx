@@ -1,31 +1,38 @@
 // src/components/AuthWrapper.tsx
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useFirebase } from "@/context/FirebaseContext";
 
 const publicPaths = ['/login', '/', '/landing'];
 
 export default function AuthWrapper({ children }: { children: React.ReactNode }) {
-  const { user, appUser, loading } = useFirebase();
+  const { user, appUser, loading, logout } = useFirebase();
   const router = useRouter();
   const pathname = usePathname();
+  const [showDeactivatedMessage, setShowDeactivatedMessage] = useState(false);
 
   useEffect(() => {
     if (!loading) {
       const isPublicPath = publicPaths.includes(pathname);
       
+      // Handle deactivated/deleted users
+      if (user && appUser && (appUser.status === 'Inactive' || appUser.status === 'Deleted')) {
+        // Force logout
+        logout();
+        setShowDeactivatedMessage(true);
+        router.push('/login');
+        return;
+      }
+      
       if (!user && !isPublicPath) {
         router.push('/login');
       } else if (user && isPublicPath) {
         router.push('/dashboard');
-      } else if (user && appUser?.status === 'Inactive') {
-        // Log out inactive users
-        router.push('/login?error=inactive');
       }
     }
-  }, [user, appUser, loading, pathname, router]);
+  }, [user, appUser, loading, pathname, router, logout]);
 
   if (loading) {
     return (
@@ -35,8 +42,8 @@ export default function AuthWrapper({ children }: { children: React.ReactNode })
     );
   }
 
-  // Don't render anything for inactive users
-  if (user && appUser?.status === 'Inactive') {
+  // Don't render anything for deactivated/deleted users (they're being redirected)
+  if (user && appUser && (appUser.status === 'Inactive' || appUser.status === 'Deleted')) {
     return null;
   }
 

@@ -34,7 +34,9 @@ export interface ForecastResponse {
     productId: string;
     productName: string;
     currentStock: number;
-    predictedDemand: number;
+    predictedDemand30d: number;
+    predictedDemand60d: number;
+    predictedDemand90d: number;
     recommendedOrder: number;
     daysUntilOut: number;
     trend: 'up' | 'down' | 'stable';
@@ -42,21 +44,6 @@ export interface ForecastResponse {
   }>;
   usingML: boolean;
   dataPoints: number;
-  modelUsed: string;        // NEW: Which ML model was used
-  confidenceInterval: {     // NEW: Confidence interval for forecasts
-    lower: number;
-    upper: number;
-  };
-}
-
-export interface DeadstockResponse {
-  productId: string;
-  productName: string;
-  stock: number;
-  daysUnsold: number;
-  lockedCapital: number;
-  suggestion: string;
-  priority: 'high' | 'medium' | 'low';
 }
 
 class MLApiClient {
@@ -109,62 +96,6 @@ class MLApiClient {
       return await response.json();
     } catch (error) {
       console.error('ML API forecast error:', error);
-      throw error;
-    }
-  }
-
-  async analyzeDeadstock(
-    products: ProductData[],
-    transactions: TransactionData[]
-  ): Promise<DeadstockResponse[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/deadstock`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ products, transactions }),
-        signal: AbortSignal.timeout(this.timeout),
-      });
-
-      if (!response.ok) {
-        throw new Error(`ML API error: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('ML API deadstock error:', error);
-      throw error;
-    }
-  }
-
-  async predictDemand(
-    product: ProductData,
-    transactions: TransactionData[]
-  ): Promise<{
-    productId: string;
-    productName: string;
-    predictedDemand: number;
-    confidence: string;
-    usingML: boolean;
-  }> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/demand`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ product, transactions }),
-        signal: AbortSignal.timeout(this.timeout),
-      });
-
-      if (!response.ok) {
-        throw new Error(`ML API error: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('ML API demand error:', error);
       throw error;
     }
   }

@@ -4,6 +4,7 @@
 import React, { useState, useMemo } from "react";
 import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase } from "@/context/FirebaseContext";
+import { useMLForecasting } from "@/hooks/useMLForecasting";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { 
@@ -19,7 +20,10 @@ import {
   AlertOctagon,
   BarChart3
 } from "lucide-react";
-import { useMLForecasting } from "@/hooks/useMLForecasting";
+
+const THEME_BG = "bg-[#0B3C8A]";
+const THEME_HOVER = "hover:bg-[#082F6E]";
+const THEME_TEXT = "text-[#0B3C8A]";
 
 interface TransactionType {
   id: string;
@@ -30,46 +34,6 @@ interface TransactionType {
   date: Date;
   status: "completed" | "voided";
 }
-
-const THEME_BG = "bg-[#0B3C8A]";
-const THEME_HOVER = "hover:bg-[#082F6E]";
-const THEME_TEXT = "text-[#0B3C8A]";
-
-// Generate available months for filtering
-const getAvailableMonths = (transactions: TransactionType[]) => {
-  const months = new Set<string>();
-  transactions.forEach(trx => {
-    const date = new Date(trx.date);
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    months.add(monthKey);
-  });
-  return Array.from(months).sort().reverse();
-};
-
-// Generate available years for filtering
-const getAvailableYears = (transactions: TransactionType[]) => {
-  const years = new Set<number>();
-  transactions.forEach(trx => {
-    const year = new Date(trx.date).getFullYear();
-    years.add(year);
-  });
-  return Array.from(years).sort().reverse();
-};
-
-// Generate available days for filtering
-const getAvailableDays = (transactions: TransactionType[], year: number, month: string) => {
-  const days = new Set<number>();
-  transactions.forEach(trx => {
-    const date = new Date(trx.date);
-    const transactionYear = date.getFullYear();
-    const transactionMonth = `${transactionYear}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    
-    if ((year === 0 || transactionYear === year) && (month === "all" || transactionMonth === month)) {
-      days.add(date.getDate());
-    }
-  });
-  return Array.from(days).sort((a, b) => a - b);
-};
 
 export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
@@ -85,7 +49,8 @@ export default function ReportsPage() {
     userRole
   } = useFirebase();
 
-  const { recommendations, forecastData, usingML } = useMLForecasting();
+  // Get recommendations from ML service (for inventory optimization report)
+  const { recommendations, usingML } = useMLForecasting();
 
   const transactions = useMemo(() => {
     return firebaseTransactions as TransactionType[];
@@ -95,18 +60,49 @@ export default function ReportsPage() {
     return firebaseProducts;
   }, [firebaseProducts]);
 
-  // Get available months based on selected year
+  // Helper functions for filtering
+  const getAvailableMonths = (transactions: TransactionType[]) => {
+    const months = new Set<string>();
+    transactions.forEach(trx => {
+      const date = new Date(trx.date);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      months.add(monthKey);
+    });
+    return Array.from(months).sort().reverse();
+  };
+
+  const getAvailableYears = (transactions: TransactionType[]) => {
+    const years = new Set<number>();
+    transactions.forEach(trx => {
+      const year = new Date(trx.date).getFullYear();
+      years.add(year);
+    });
+    return Array.from(years).sort().reverse();
+  };
+
+  const getAvailableDays = (transactions: TransactionType[], year: number, month: string) => {
+    const days = new Set<number>();
+    transactions.forEach(trx => {
+      const date = new Date(trx.date);
+      const transactionYear = date.getFullYear();
+      const transactionMonth = `${transactionYear}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      
+      if ((year === 0 || transactionYear === year) && (month === "all" || transactionMonth === month)) {
+        days.add(date.getDate());
+      }
+    });
+    return Array.from(days).sort((a, b) => a - b);
+  };
+
   const availableMonths = useMemo(() => {
     const months = getAvailableMonths(transactions);
     return months.filter(month => parseInt(month.split('-')[0]) === selectedYear);
   }, [transactions, selectedYear]);
 
-  // Get available years
   const availableYears = useMemo(() => {
     return getAvailableYears(transactions);
   }, [transactions]);
 
-  // Get available days based on selected month and year
   const availableDays = useMemo(() => {
     return getAvailableDays(transactions, selectedYear, selectedMonth);
   }, [transactions, selectedYear, selectedMonth]);
@@ -162,7 +158,6 @@ export default function ReportsPage() {
     const totalSales = filteredTransactions.reduce((sum, trx) => sum + trx.total, 0);
     const voidedAmount = voidedTransactions.reduce((sum, trx) => sum + trx.total, 0);
 
-    // Generate table with footer callback
     autoTable(doc, {
       startY: 40,
       margin: { top: 40, right: 14, left: 14, bottom: 20 },
@@ -183,7 +178,6 @@ export default function ReportsPage() {
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
       styles: { fontSize: 9, textColor: [0, 0, 0] },
       didDrawPage: (data) => {
-        // Add header to every page
         doc.setFontSize(16);
         doc.setTextColor(0, 0, 0);
         doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
@@ -196,47 +190,27 @@ export default function ReportsPage() {
         doc.setTextColor(60, 60, 60);
         doc.text(`Period: ${periodText} | Generated: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
         
-        // Add horizontal line under header
         doc.setDrawColor(200, 200, 200);
         doc.line(14, 32, pageWidth - 14, 32);
-        
-        // Footer (temporary - will be updated in second pass)
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        
-        const footerText = "Confidential - For Record Keeping Only";
-        const lineY = pageHeight - 15;
-        doc.setDrawColor(200, 200, 200);
-        doc.line(14, lineY, pageWidth - 14, lineY);
-        doc.text(footerText, 14, lineY + 5);
-        // Page number will be filled in after
-        doc.text("", pageWidth - 14, lineY + 5, { align: 'right' });
       }
     });
 
     const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY || 40;
-    
-    // Get initial page count (before adding summary page if needed)
     const initialPages = doc.getNumberOfPages();
-    
-    // Calculate safe area (top of footer area starts around pageHeight - 30)
     const footerAreaStart = pageHeight - 30;
-    let summaryStartY = Math.max(finalY + 10, 40); // Ensure minimum spacing from table
+    let summaryStartY = Math.max(finalY + 10, 40);
     
-    // If summary would overlap with footer, add a new page
     if (summaryStartY + 60 > footerAreaStart) {
       doc.addPage();
       summaryStartY = 40;
     }
     
-    // Summary section
     doc.setFontSize(10);
     doc.setTextColor(60, 60, 60);
     doc.text(`Total Transactions: ${filteredTransactions.length}`, 14, summaryStartY);
     doc.text(`Completed: ${validTransactions.length}`, 14, summaryStartY + 7);
     doc.text(`Voided: ${voidedTransactions.length}`, 14, summaryStartY + 14);
     
-    // Sales breakdown
     doc.setDrawColor(200, 200, 200);
     doc.line(14, summaryStartY + 20, pageWidth - 14, summaryStartY + 20);
     
@@ -246,23 +220,21 @@ export default function ReportsPage() {
     
     if (validTransactions.length > 0) {
       doc.setFontSize(10);
-      doc.setTextColor(20, 20, 20); // Black
+      doc.setTextColor(20, 20, 20);
       doc.text(`Completed Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, summaryStartY + 34);
     }
     
     if (voidedTransactions.length > 0) {
       doc.setFontSize(10);
-      doc.setTextColor(80, 80, 80); // Dark Gray
+      doc.setTextColor(80, 80, 80);
       doc.text(`Voided Amount: PHP ${voidedAmount.toLocaleString()}`, 14, summaryStartY + 41);
     }
 
-    // Update page numbers on all pages with correct total
     const totalPages = doc.getNumberOfPages();
     const lineY = pageHeight - 15;
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       
-      // Add header/footer only to new pages (beyond initial count)
       if (i > initialPages) {
         doc.setFontSize(16);
         doc.setTextColor(0, 0, 0);
@@ -280,7 +252,6 @@ export default function ReportsPage() {
         doc.line(14, 32, pageWidth - 14, 32);
       }
       
-      // Add footer to all pages
       doc.setDrawColor(200, 200, 200);
       doc.line(14, lineY, pageWidth - 14, lineY);
       
@@ -307,16 +278,23 @@ export default function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 1. Stock Accuracy Logic (Comparing registered stock vs actual movements)
+    // Calculate stock accuracy
     const movingItems = products.filter(p => transactions.some(t => t.items.some(i => i.name === p.name)));
     const stockAccuracyRate = products.length > 0 ? (movingItems.length / products.length) * 100 : 100;
 
-    // 2. Predicted Inventory Needs (30-day forecast - aligned with Demand Forecasting dashboard)
+    // Get priority needs from ML recommendations (using the 30-day forecast)
     const priorityNeeds = recommendations
-      .filter(r => r.daysUntilOut <= 30)
-      .sort((a, b) => a.daysUntilOut - b.daysUntilOut);
+      .filter((item: any) => item.daysUntilOut <= 30)
+      .sort((a: any, b: any) => a.daysUntilOut - b.daysUntilOut)
+      .map((item: any) => ({
+        productName: item.productName,
+        currentStock: item.currentStock,
+        predictedDemand: item.predictedDemand30d,
+        recommendedOrder: item.recommendedOrder,
+        priority: item.confidence
+      }));
 
-    // 3. Space Optimization: Deadstock (30+ days without sales - aligned with Deadstock Impact dashboard)
+    // Calculate deadstock items (30+ days without sales)
     const liquidationItems = products
       .filter(p => p.stock > 0)
       .map(p => {
@@ -333,7 +311,6 @@ export default function ReportsPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
           const createdAt = (p as any).createdAt;
           if (createdAt) {
             const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
@@ -350,14 +327,13 @@ export default function ReportsPage() {
       .filter(p => p.daysSinceSale >= 30)
       .sort((a, b) => b.daysSinceSale - a.daysSinceSale);
 
-    // Generate Header Function
     const addHeader = (pageNumber: number) => {
       doc.setPage(pageNumber);
       doc.setFontSize(16);
-      doc.setTextColor(0, 0, 0); // Black
+      doc.setTextColor(0, 0, 0);
       doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
       doc.setFontSize(12);
-      doc.setTextColor(40, 40, 40); // Dark Gray
+      doc.setTextColor(40, 40, 40);
       doc.text("Monthly Inventory Optimization Report", pageWidth / 2, 22, { align: 'center' });
       doc.setFontSize(9);
       doc.text(`Generated: ${today.toLocaleDateString()} | Accuracy Rating: ${stockAccuracyRate.toFixed(1)}%`, pageWidth / 2, 28, { align: 'center' });
@@ -367,7 +343,6 @@ export default function ReportsPage() {
 
     addHeader(1);
 
-    // Section 1: Predicted Needs Table (30-day forecast)
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
     doc.text("1. Predicted Inventory Needs (Next 30 Days)", 14, 38);
@@ -381,7 +356,7 @@ export default function ReportsPage() {
         r.currentStock,
         r.predictedDemand,
         r.recommendedOrder,
-        r.confidence.toUpperCase()
+        r.priority.toUpperCase()
       ]),
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
       styles: { fontSize: 8, textColor: [0, 0, 0] }
@@ -389,7 +364,6 @@ export default function ReportsPage() {
 
     const secondTableY = (doc as any).lastAutoTable.finalY + 15;
     
-    // Section 2: Space Optimization (Deadstock - 30+ days)
     doc.setFontSize(11);
     doc.text("2. Space Optimization: Recommended for Liquidation", 14, secondTableY);
     
@@ -408,7 +382,6 @@ export default function ReportsPage() {
       styles: { fontSize: 8, textColor: [0, 0, 0] }
     });
 
-    // Executive Summary at the bottom
     const summaryY = (doc as any).lastAutoTable.finalY + 15;
     if (summaryY < pageHeight - 40) {
       doc.setFontSize(10);
@@ -421,7 +394,6 @@ export default function ReportsPage() {
       doc.text(`• Potential capital recovery from liquidation: PHP ${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
     }
 
-    // Add Footer to all pages
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
         addHeader(i);
@@ -447,7 +419,6 @@ export default function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Identify deadstock using the same Deadstock Impact logic (30+ days without sales)
     const agingData = products
       .filter(p => p.stock > 0)
       .map(p => {
@@ -464,14 +435,13 @@ export default function ReportsPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
           const createdAt = (p as any).createdAt;
           if (createdAt) {
             const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
             createdDate.setHours(0, 0, 0, 0);
             daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
           } else {
-            daysSinceSale = 30; // Default minimum threshold
+            daysSinceSale = 30;
           }
           lastSaleDate = null;
         }
@@ -518,11 +488,11 @@ export default function ReportsPage() {
         doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
         
         doc.setFontSize(11);
-        doc.setTextColor(40, 40, 40); // Dark Gray
+        doc.setTextColor(40, 40, 40);
         doc.text("Aging Inventory & Dead Capital Report", pageWidth / 2, 23, { align: 'center' });
         
         doc.setFontSize(9);
-        doc.setTextColor(60, 60, 60); // Gray
+        doc.setTextColor(60, 60, 60);
         doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
         
         doc.setDrawColor(200, 200, 200);
@@ -539,22 +509,21 @@ export default function ReportsPage() {
     }
 
     doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0); // Black
+    doc.setTextColor(0, 0, 0);
     doc.text("Executive Summary", 14, summaryStartY);
     
     doc.setFontSize(10);
-    doc.setTextColor(40, 40, 40); // Dark Gray
+    doc.setTextColor(40, 40, 40);
     doc.text(`Total Aging Items: ${agingData.length}`, 14, summaryStartY + 8);
     
     doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0); // Black
+    doc.setTextColor(0, 0, 0);
     doc.text(`Total Dead Capital: PHP ${totalDeadCapital.toLocaleString()}`, 14, summaryStartY + 18);
     
     doc.setFontSize(9);
-    doc.setTextColor(60, 60, 60); // Gray
+    doc.setTextColor(60, 60, 60);
     doc.text("* Dead capital represents the locked value of inventory that has not moved in 30+ days.", 14, summaryStartY + 28);
 
-    // Add footer to all pages with page numbers
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
@@ -626,10 +595,9 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Filters - All in one line on desktop */}
+        {/* Filters */}
         <div className="p-4 sm:p-6 border-b border-gray-100 bg-gray-50/30">
           <div className="flex flex-col lg:flex-row gap-3">
-            {/* Search */}
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
               <input 
@@ -641,7 +609,6 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* Status */}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "voided")}
@@ -652,7 +619,6 @@ export default function ReportsPage() {
               <option value="voided">Voided</option>
             </select>
 
-            {/* Year */}
             <select
               value={selectedYear}
               onChange={(e) => {
@@ -667,7 +633,6 @@ export default function ReportsPage() {
               ))}
             </select>
 
-            {/* Month */}
             <select
               value={selectedMonth}
               onChange={(e) => {
@@ -689,7 +654,6 @@ export default function ReportsPage() {
               })}
             </select>
 
-            {/* Day */}
             <select
               value={selectedDay}
               onChange={(e) => setSelectedDay(e.target.value)}
@@ -704,7 +668,6 @@ export default function ReportsPage() {
               ))}
             </select>
 
-            {/* Clear Button */}
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
@@ -715,7 +678,6 @@ export default function ReportsPage() {
             )}
           </div>
 
-          {/* Results count */}
           <div className="text-xs text-gray-500 mt-3">
             Showing {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
           </div>
@@ -749,22 +711,22 @@ export default function ReportsPage() {
                     <tr key={`ledger-${idx}`} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-4 font-mono font-medium text-gray-500">
                         {trx.id.slice(-8).toUpperCase()}
-                      </td>
+                       </td>
                       <td className="p-4">
                         <div className="text-gray-900 font-medium">{trx.staffName || 'System'}</div>
                         <div className="text-gray-500 text-[10px]">{formattedDate} {formattedTime}</div>
-                      </td>
+                       </td>
                       <td className="p-4 font-semibold text-gray-800">
                         {trx.patientName}
-                      </td>
+                       </td>
                       <td className="p-4 text-gray-600 max-w-xs">
                         <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
                           {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
                         </div>
-                      </td>
+                       </td>
                       <td className="p-4 text-right font-bold text-gray-800">
                         ₱{trx.total.toLocaleString()}
-                      </td>
+                       </td>
                       <td className="p-4 text-center">
                         {trx.status === 'completed' ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">
@@ -775,7 +737,7 @@ export default function ReportsPage() {
                             <XCircle size={12}/> VOIDED
                           </span>
                         )}
-                      </td>
+                       </td>
                     </tr>
                   );
                 })

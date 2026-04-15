@@ -68,9 +68,12 @@ interface DeadstockItem {
   name: string;
   stock: number;
   lastMovedDaysAgo: number;
+  daysSinceSale: number;  // Added for consistency with Admin Dashboard
   category: string;
   markupPrice: number;
   baseCost: number;
+  lastSaleDate: Date | null;
+  lockedCapital: number;
 }
 
 const modalVariants: Variants = { 
@@ -102,7 +105,8 @@ export default function InventoryPage() {
     loading,
     getLowStockProducts,
     getDeadstockProducts,
-    userRole
+    userRole,
+    transactions
   } = useFirebase();
   
   const [products, setProducts] = useState<InventoryData[]>([]);
@@ -132,7 +136,62 @@ export default function InventoryPage() {
     return lowStockAlerts;
   }, [lowStockAlerts]);
   
-  const deadstockAlerts = (getDeadstockProducts?.() ?? []) as DeadstockItem[];
+  // FIXED: Calculate deadstock using the SAME logic as Admin Dashboard
+  const deadstockAlerts = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const completedTransactions = transactions.filter(t => t.status === 'completed');
+    
+    const deadstockItems = products
+      .filter(p => p.stock > 0)
+      .map(p => {
+        const salesForProduct = completedTransactions
+          .filter(t => t.items.some(item => item.id === p.id))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        const lastSale = salesForProduct[0];
+        
+        let daysSinceSale = 0;
+        let lastSaleDate: Date | null = null;
+        
+        if (lastSale) {
+          lastSaleDate = new Date(lastSale.date);
+          lastSaleDate.setHours(0, 0, 0, 0);
+          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          // If no sales, use createdAt date (aligns with Deadstock Impact logic)
+          const createdAt = (p as any).createdAt;
+          if (createdAt) {
+            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+            createdDate.setHours(0, 0, 0, 0);
+            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          } else {
+            daysSinceSale = 30; // Default minimum threshold
+          }
+          lastSaleDate = null;
+        }
+        
+        const lockedCapital = p.markupPrice * p.stock;
+        
+        return {
+          id: p.id,
+          name: p.name,
+          stock: p.stock,
+          lastMovedDaysAgo: p.lastMovedDaysAgo || daysSinceSale,
+          daysSinceSale,
+          category: p.category,
+          markupPrice: p.markupPrice,
+          baseCost: p.baseCost,
+          lastSaleDate,
+          lockedCapital
+        };
+      })
+      .filter(item => item.daysSinceSale >= 30)  // Only show items 30+ days without sales
+      .sort((a, b) => b.lockedCapital - a.lockedCapital);  // Sort by highest locked capital first
+    
+    return deadstockItems as DeadstockItem[];
+  }, [products, transactions]);
   
   // Display all items
   const displayActionRequired = reorderNeededProducts;
@@ -491,7 +550,7 @@ export default function InventoryPage() {
             </div>
           </motion.div>
 
-          {/* DEADSTOCK SECTION - Scrollable */}
+          {/* DEADSTOCK SECTION - FIXED: Now shows all deadstock items with correct logic */}
           <motion.div 
             initial={{ opacity: 0, x: 20 }} 
             animate={{ opacity: 1, x: 0 }} 
@@ -521,26 +580,44 @@ export default function InventoryPage() {
             <div className="space-y-2 sm:space-y-3">
               {displayDeadstock.length > 0 ? (
                 <div className="space-y-2 sm:space-y-3">
-                  {displayDeadstock.map((item: DeadstockItem) => (
-                    <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-1 gap-2">
-                        <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate flex-1">
-                          {item.name}
-                        </span>
-                        <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 whitespace-nowrap shrink-0">
-                          {item.lastMovedDaysAgo}d
-                        </span>
+                  {displayDeadstock.map((item: DeadstockItem) => {
+                    // Determine priority based on days unsold (matching Admin Dashboard logic)
+                    const priority = item.daysSinceSale > 90 ? 'high' : item.daysSinceSale > 60 ? 'medium' : 'low';
+                    const priorityColor = priority === 'high' ? 'red' : priority === 'medium' ? 'orange' : 'blue';
+                    
+                    return (
+                      <div key={item.id} className="p-2 sm:p-2.5 rounded-lg border bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex justify-between items-start mb-1 gap-2">
+                          <span className="text-[11px] sm:text-xs font-semibold text-gray-800 leading-tight pr-2 truncate flex-1">
+                            {item.name}
+                          </span>
+                          <span className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded bg-${priorityColor}-100 text-${priorityColor}-700 whitespace-nowrap shrink-0`}>
+                            {item.daysSinceSale}d
+                          </span>
+                        </div>
+                        <div className="mt-1 sm:mt-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-slate-600 font-medium flex items-center gap-1">
+                              <Clock size={10}/> {item.daysSinceSale}d Unsold
+                            </span>
+                            <span className="text-[9px] font-bold text-gray-700">
+                              ₱{item.lockedCapital.toLocaleString()}
+                            </span>
+                          </div>
+                          {item.lastSaleDate && (
+                            <div className="text-[8px] text-gray-400 mt-1">
+                              Last sold: {item.lastSaleDate.toLocaleDateString()}
+                            </div>
+                          )}
+                          {!item.lastSaleDate && (
+                            <div className="text-[8px] text-gray-400 mt-1">
+                              Never sold
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="mt-1 sm:mt-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1.5 flex items-center justify-between">
-                        <span className="text-[9px] text-slate-600 font-medium flex items-center gap-1">
-                          <Clock size={10}/> {item.lastMovedDaysAgo}d Unsold
-                        </span>
-                        <span className="text-[9px] font-bold text-blue-600 cursor-pointer hover:text-blue-800">
-                          Mark Down
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="py-10 text-center">

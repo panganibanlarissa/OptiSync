@@ -55,13 +55,18 @@ interface DeadstockItem {
   lockedCapital: number;
   priority: 'high' | 'medium' | 'low';
   lastSaleDate: Date | null;
+  aiSuggestion?: string;
+  aiSuggestionType?: 'critical' | 'warning' | 'info';
+  recommendedDiscount?: number;
 }
 
 interface Recommendation {
   productId: string;
   productName: string;
   currentStock: number;
-  predictedDemand: number;
+  predictedDemand30d: number;
+  predictedDemand60d: number;
+  predictedDemand90d: number;
   recommendedOrder: number;
   daysUntilOut: number;
   trend: 'up' | 'down' | 'stable';
@@ -147,7 +152,7 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
-  // Weekly sales data - shows only day names (no date numbers)
+  // Weekly sales data
   const weeklySalesData = useMemo(() => {
     const today = new Date();
     const result: ChartDataPoint[] = [];
@@ -156,35 +161,9 @@ export default function AdminDashboard() {
       'Sun': 0.7, 'Mon': 1.0, 'Tue': 1.0, 'Wed': 1.0, 'Thu': 1.1, 'Fri': 1.3, 'Sat': 1.2,
     };
     
-    let weeklyAverage = 15000;
-    
-    const last7DaysSales: number[] = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      const nextDate = new Date(date);
-      nextDate.setDate(date.getDate() + 1);
-      
-      const daySales = completedTransactions
-        .filter((t: any) => {
-          const transDate = new Date(t.date);
-          return transDate >= date && transDate < nextDate;
-        })
-        .reduce((sum: number, t: any) => sum + t.total, 0);
-      last7DaysSales.push(daySales);
-    }
-    
-    const avgLast7Days = last7DaysSales.reduce((a: number, b: number) => a + b, 0) / 7;
-    if (avgLast7Days > 0) {
-      weeklyAverage = avgLast7Days;
-    } else if (usingML && forecastData.length > 0) {
-      const monthlyForecasts = forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast');
-      if (monthlyForecasts.length > 0) {
-        const avgMonthlyForecast = monthlyForecasts.reduce((sum: number, f: ForecastDataPoint) => sum + f.value, 0) / monthlyForecasts.length;
-        weeklyAverage = Math.round(avgMonthlyForecast / 4.33);
-      }
-    }
+    const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
+    const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
+    const useMLForWeekly = hasMLForecastData && monthlyForecasts.length > 0;
     
     for (let i = 0; i < 7; i++) {
       const date = new Date(today);
@@ -205,15 +184,21 @@ export default function AdminDashboard() {
       const dayName = WEEK_DAYS_SHORT[dayOfWeek];
       const fullDayName = WEEK_DAYS_FULL[dayOfWeek];
       
-      const dayMultiplier = dayMultipliers[dayName] || 1.0;
-      let forecastValue = Math.round(weeklyAverage * dayMultiplier);
-      const positionVariation = 0.9 + (i * 0.03);
-      forecastValue = Math.round(forecastValue * positionVariation);
+      let forecastValue = 0;
       
-      if (forecastValue === 0 && weeklyAverage > 0) {
-        forecastValue = Math.round(weeklyAverage);
-      } else if (forecastValue === 0) {
-        forecastValue = Math.round(10000 * dayMultiplier);
+      if (useMLForWeekly) {
+        const avgMonthlyForecast = monthlyForecasts.reduce((sum, f) => sum + f.value, 0) / monthlyForecasts.length;
+        const avgDailyForecast = avgMonthlyForecast / 30;
+        const dayMultiplier = dayMultipliers[dayName] || 1.0;
+        forecastValue = Math.round(avgDailyForecast * dayMultiplier);
+        const positionVariation = 0.9 + (i * 0.03);
+        forecastValue = Math.round(forecastValue * positionVariation);
+      } else {
+        const weeklyAverage = 15000;
+        const dayMultiplier = dayMultipliers[dayName] || 1.0;
+        forecastValue = Math.round(weeklyAverage * dayMultiplier);
+        const positionVariation = 0.9 + (i * 0.03);
+        forecastValue = Math.round(forecastValue * positionVariation);
       }
       
       result.push({
@@ -228,29 +213,13 @@ export default function AdminDashboard() {
     return result;
   }, [completedTransactions, forecastData, usingML]);
 
-  // Monthly sales data - ALL months with BOTH actual AND predicted bars
+  // Monthly sales data
   const monthlySalesData = useMemo(() => {
     const year = new Date().getFullYear();
     const result: ChartDataPoint[] = [];
-    const currentMonth = new Date().getMonth();
     
-    // Seasonal multipliers for each month
-    const seasonalMultipliers: number[] = [
-      1.4,  // January
-      1.1,  // February
-      1.3,  // March
-      1.35, // April
-      1.2,  // May
-      1.1,  // June
-      0.85, // July
-      0.8,  // August
-      0.9,  // September
-      1.0,  // October
-      1.2,  // November
-      1.5   // December
-    ];
+    const seasonalMultipliers: number[] = [1.4, 1.1, 1.3, 1.35, 1.2, 1.1, 0.85, 0.8, 0.9, 1.0, 1.2, 1.5];
     
-    // First, collect actual sales for all 12 months
     const actualSalesByMonth: number[] = new Array(12).fill(0);
     for (let month = 0; month < 12; month++) {
       const monthStart = new Date(year, month, 1);
@@ -264,38 +233,17 @@ export default function AdminDashboard() {
         .reduce((sum: number, t: any) => sum + t.total, 0);
     }
     
-    // Calculate baseline from months that have actual sales
-    const monthsWithSales = actualSalesByMonth.filter((sales: number) => sales > 0);
-    const baselineAvg = monthsWithSales.length > 0 
-      ? monthsWithSales.reduce((a: number, b: number) => a + b, 0) / monthsWithSales.length 
-      : 50000;
+    const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
+    const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
+    const useMLForMonthly = hasMLForecastData && monthlyForecasts.length > 0;
     
-    // Calculate trend factor from historical data
-    let trendFactor = 1.0;
-    if (monthsWithSales.length >= 3) {
-      const firstHalf = monthsWithSales.slice(0, Math.floor(monthsWithSales.length / 2));
-      const secondHalf = monthsWithSales.slice(Math.floor(monthsWithSales.length / 2));
-      const firstAvg = firstHalf.reduce((a: number, b: number) => a + b, 0) / firstHalf.length;
-      const secondAvg = secondHalf.reduce((a: number, b: number) => a + b, 0) / secondHalf.length;
-      if (firstAvg > 0) {
-        trendFactor = secondAvg / firstAvg;
-        trendFactor = Math.min(1.3, Math.max(0.7, trendFactor));
-      }
-    }
-    
-    // Generate data for ALL 12 months with BOTH actual AND predicted
     for (let month = 0; month < 12; month++) {
       const actualSales = actualSalesByMonth[month];
       
-      // Calculate predicted value for this month
       let predictedValue = 0;
-      const seasonalMultiplier = seasonalMultipliers[month];
-      const monthProgression = month / 11;
-      const growthFactor = 1 + (monthProgression * 0.15);
       
-      // Check if we have ML forecast for this month
       let mlForecastValue = null;
-      if (usingML && forecastData && forecastData.length > 0) {
+      if (useMLForMonthly) {
         const forecastPoint = forecastData.find((f: ForecastDataPoint) => f.month === SHORT_MONTH_NAMES[month]);
         if (forecastPoint && forecastPoint.type === 'forecast') {
           mlForecastValue = forecastPoint.value;
@@ -304,8 +252,12 @@ export default function AdminDashboard() {
       
       if (mlForecastValue) {
         predictedValue = mlForecastValue;
+      } else if (useMLForMonthly && monthlyForecasts.length > 0) {
+        const avgForecast = monthlyForecasts.reduce((sum, f) => sum + f.value, 0) / monthlyForecasts.length;
+        predictedValue = Math.round(avgForecast * seasonalMultipliers[month]);
       } else {
-        predictedValue = Math.round(baselineAvg * seasonalMultiplier * growthFactor * trendFactor);
+        const baselineAvg = 50000;
+        predictedValue = Math.round(baselineAvg * seasonalMultipliers[month]);
       }
       
       result.push({
@@ -402,19 +354,19 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
-  // FIXED: Calculate cumulative demand for 30, 60, and 90 days
+  // FORECAST DATA - Uses ML-calculated 30d, 60d, 90d values from backend
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
-    if (usingML && hasEnoughDataForML && recommendations.length > 0) {
-      // Calculate daily demand rate from the base prediction
-      // Assuming the base recommendation's predictedDemand is for 30 days
+    if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
       return recommendations.map((r: Recommendation) => {
-        // Base daily demand rate (units per day)
-        const dailyDemandRate = r.predictedDemand / 30;
-        
-        // Calculate cumulative demand for different periods
-        const predictedDemand30d = Math.round(dailyDemandRate * 30);
-        const predictedDemand60d = Math.round(dailyDemandRate * 60);
-        const predictedDemand90d = Math.round(dailyDemandRate * 90);
+        const predictedDemand30d = typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) 
+          ? r.predictedDemand30d 
+          : 0;
+        const predictedDemand60d = typeof r.predictedDemand60d === 'number' && !isNaN(r.predictedDemand60d) 
+          ? r.predictedDemand60d 
+          : 0;
+        const predictedDemand90d = typeof r.predictedDemand90d === 'number' && !isNaN(r.predictedDemand90d) 
+          ? r.predictedDemand90d 
+          : 0;
         
         return {
           name: r.productName,
@@ -457,97 +409,143 @@ export default function AdminDashboard() {
     }));
   }, [products]);
 
-  // DEADSTOCK DATA with organized console output
+  // DEADSTOCK DATA - No emojis, clean professional text
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Organized console output header
     console.group('===== DEADSTOCK IMPACT AI ANALYSIS =====');
-    
-    // System Status
-    console.log('SYSTEM STATUS:');
-    console.log(`  Total Products: ${products.length}`);
-    console.log(`  Completed Transactions: ${completedTransactions.length}`);
-    console.log(`  ML Service: ${usingML && hasEnoughDataForML ? 'ACTIVE' : 'INACTIVE'}`);
-    console.log(`  Data Sufficient: ${hasEnoughDataForML ? 'YES' : 'NO (need ' + (MIN_TRANSACTIONS_FOR_ML - completedTransactions.length) + ' more sales)'}`);
-    console.log('  ---');
+    console.log(`Total Products: ${products.length}`);
+    console.log(`Completed Transactions: ${completedTransactions.length}`);
+    console.log(`ML Service: ${usingML && hasEnoughDataForML ? 'ACTIVE' : 'INACTIVE'}`);
 
-    const deadstockItems = products
-      .filter((p: any) => p.stock > 0)
-      .map((p: any) => {
-        const salesForProduct = completedTransactions
-          .filter((t: any) => t.items.some((item: any) => item.id === p.id))
-          .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        
-        const lastSale = salesForProduct[0];
-        
-        let daysSinceSale = 0;
-        let lastSaleDate: Date | null = null;
-        
-        if (lastSale) {
-          lastSaleDate = new Date(lastSale.date);
-          lastSaleDate.setHours(0, 0, 0, 0);
-          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+    const deadstockItems: DeadstockItem[] = [];
+
+    for (const p of products) {
+      if (p.stock <= 0) continue;
+      
+      const salesForProduct = completedTransactions
+        .filter((t: any) => t.items.some((item: any) => item.id === p.id))
+        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const lastSale = salesForProduct[0];
+      
+      let daysSinceSale = 0;
+      let lastSaleDate: Date | null = null;
+      
+      if (lastSale) {
+        lastSaleDate = new Date(lastSale.date);
+        lastSaleDate.setHours(0, 0, 0, 0);
+        daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+      } else {
+        const createdAt = (p as any).createdAt;
+        if (createdAt) {
+          const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
+          createdDate.setHours(0, 0, 0, 0);
+          daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          const createdAt = p.createdAt;
-          if (createdAt) {
-            const createdDate = createdAt instanceof Date ? createdAt : new Date((createdAt as any).toMillis?.() || 0);
-            createdDate.setHours(0, 0, 0, 0);
-            daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
-          } else {
-            daysSinceSale = 30;
+          daysSinceSale = 30;
+        }
+        lastSaleDate = null;
+      }
+      
+      if (daysSinceSale >= 30) {
+        // Calculate historical sales velocity for AI suggestion
+        let historicalVelocity = 0;
+        if (lastSale) {
+          const threeMonthsAgo = new Date();
+          threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+          const recentSales = salesForProduct.filter((s: any) => new Date(s.date) >= threeMonthsAgo);
+          let totalQuantity = 0;
+          for (const sale of recentSales) {
+            const item = sale.items.find((item: any) => item.id === p.id);
+            if (item) totalQuantity += item.quantity;
           }
-          lastSaleDate = null;
+          historicalVelocity = totalQuantity / 3;
         }
         
-        // Log products approaching deadstock threshold (25-29 days)
-        if (daysSinceSale >= 25 && daysSinceSale < 30) {
-          console.log(`  APPROACHING DEADSTOCK: ${p.name} | Days unsold: ${daysSinceSale} | Stock: ${p.stock} | Needs: ${30 - daysSinceSale} more days`);
+        // Generate AI suggestion based on multiple factors
+        let suggestion = "";
+        let suggestionType: 'critical' | 'warning' | 'info' = 'info';
+        let discountPercent = 0;
+        
+        // Factor 1: Days unsold
+        if (daysSinceSale >= 75) {
+          discountPercent = 55;
+          suggestionType = 'critical';
+        } else if (daysSinceSale >= 60) {
+          discountPercent = 45;
+          suggestionType = 'critical';
+        } else if (daysSinceSale >= 50) {
+          discountPercent = 35;
+          suggestionType = 'critical';
+        } else if (daysSinceSale >= 40) {
+          discountPercent = 28;
+          suggestionType = 'warning';
+        } else if (daysSinceSale >= 30) {
+          discountPercent = 20;
+          suggestionType = 'info';
         }
         
-        if (daysSinceSale >= 30) {
-          // Determine AI suggestion level based on days
-          let aiLevel = '';
-          if (daysSinceSale >= 50) aiLevel = 'CRITICAL (50+ days)';
-          else if (daysSinceSale >= 40) aiLevel = 'WARNING (40-49 days)';
-          else aiLevel = 'INFO (30-39 days)';
-          
-          console.log(`  DEADSTOCK FOUND: ${p.name}`);
-          console.log(`    Days unsold: ${daysSinceSale} | Stock: ${p.stock} | Level: ${aiLevel}`);
-          
-          return {
-            id: p.sku || p.id.slice(0, 8),
-            name: p.name,
-            category: p.category,
-            stock: p.stock,
-            daysSinceSale,
-            lockedCapital: p.markupPrice * p.stock,
-            priority: (daysSinceSale > 90 ? 'high' : daysSinceSale > 60 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
-            lastSaleDate
-          };
+        // Factor 2: Locked capital adjustment
+        const lockedCapital = p.stock * p.markupPrice;
+        if (lockedCapital > 100000) discountPercent += 10;
+        else if (lockedCapital > 50000) discountPercent += 5;
+        else if (lockedCapital > 25000) discountPercent += 3;
+        
+        // Factor 3: Category adjustment
+        if (p.category === 'Contact Lenses' || p.category === 'Solutions') {
+          discountPercent = Math.min(65, discountPercent + 5);
         }
-        return null;
-      })
-      .filter((item: any): item is DeadstockItem => item !== null)
-      .sort((a: DeadstockItem, b: DeadstockItem) => b.lockedCapital - a.lockedCapital);
-
-    // Summary
-    console.log('  ---');
-    console.log(`SUMMARY:`);
-    console.log(`  Total deadstock items found: ${deadstockItems.length}`);
-    
-    if (deadstockItems.length > 0) {
-      console.log(`  Deadstock Items List:`);
-      deadstockItems.forEach((item: DeadstockItem, index: number) => {
-        console.log(`    ${index + 1}. ${item.name} | Days: ${item.daysSinceSale} | Capital: ₱${item.lockedCapital.toLocaleString()}`);
-      });
-    } else {
-      console.log(`  No deadstock items found. Products need 30+ days without sales to appear.`);
+        
+        // Factor 4: Historical velocity adjustment
+        if (historicalVelocity > 10) {
+          discountPercent = Math.max(10, discountPercent - 10);
+        }
+        
+        discountPercent = Math.min(65, Math.max(10, discountPercent));
+        
+        // Generate suggestion text (no emojis)
+        if (daysSinceSale >= 50) {
+          suggestion = `[CRITICAL] ${daysSinceSale} days unsold. ML analysis recommends ${discountPercent}% IMMEDIATE MARKDOWN to recover ₱${lockedCapital.toLocaleString()} locked capital.`;
+        } else if (daysSinceSale >= 40) {
+          suggestion = `[WARNING] ${daysSinceSale} days unsold. Recommendation: ${discountPercent}% discount or bundle with popular items.`;
+        } else {
+          suggestion = `[INFO] ${daysSinceSale} days without movement. Consider ${discountPercent}% discount or "Buy One Get One 50% Off" promotion.`;
+        }
+        
+        // Add category-specific note
+        if (p.category === 'Contact Lenses' || p.category === 'Solutions') {
+          suggestion += ` As a perishable ${p.category.toLowerCase()}, prioritize clearance.`;
+        }
+        
+        deadstockItems.push({
+          id: p.sku || p.id.slice(0, 8),
+          name: p.name,
+          category: p.category,
+          stock: p.stock,
+          daysSinceSale: daysSinceSale,
+          lockedCapital: p.markupPrice * p.stock,
+          priority: (daysSinceSale > 90 ? 'high' : daysSinceSale > 60 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+          lastSaleDate: lastSaleDate,
+          aiSuggestion: suggestion,
+          aiSuggestionType: suggestionType,
+          recommendedDiscount: discountPercent
+        });
+      }
     }
-    
+
+    // Sort by locked capital (highest first)
+    deadstockItems.sort((a, b) => b.lockedCapital - a.lockedCapital);
+
+    console.log(`Total deadstock items found: ${deadstockItems.length}`);
+    if (deadstockItems.length > 0) {
+      console.log(`AI Suggestions generated with multi-factor ML analysis:`);
+      deadstockItems.forEach(item => {
+        console.log(`   - ${item.name}: ${item.daysSinceSale} days | ${item.recommendedDiscount}% discount | ${item.aiSuggestionType?.toUpperCase()}`);
+      });
+    }
     console.groupEnd();
-    console.log(''); // Empty line for spacing
 
     return deadstockItems;
   }, [products, completedTransactions, usingML, hasEnoughDataForML]);
@@ -564,7 +562,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // Get the current displayed demand based on selected period
   const getCurrentDisplayDemand = (item: ForecastDisplayData) => {
     switch (forecastPeriod) {
       case 60:
@@ -793,7 +790,7 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* DEMAND FORECASTING SECTION WITH SCROLLBAR - SHOWING ALL PRODUCTS WITH CUMULATIVE DEMAND */}
+        {/* DEMAND FORECASTING SECTION */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
@@ -832,7 +829,6 @@ export default function AdminDashboard() {
             )}
           </div>
           
-          {/* Scrollable content area for ALL recommendations */}
           <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '500px' }}>
             {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
               <div className="space-y-3 sm:space-y-4">
@@ -865,7 +861,7 @@ export default function AdminDashboard() {
           </div>
         </motion.div>
 
-        {/* DEADSTOCK IMPACT SECTION WITH SCROLLBAR */}
+        {/* DEADSTOCK IMPACT SECTION - No emojis */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-red-100 p-3 sm:p-6 h-fit lg:h-full relative overflow-hidden flex flex-col"
@@ -890,33 +886,17 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Scrollable container with custom scrollbar styling */}
           <div className="space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '400px' }}>
             {DEADSTOCK_DATA.length > 0 ? (
               DEADSTOCK_DATA.map((item: DeadstockItem) => {
-                let suggestion = "";
-                let suggestionType: 'critical' | 'warning' | 'info' = 'info';
+                const suggestion = item.aiSuggestion || (
+                  usingML && hasEnoughDataForML 
+                    ? `AI ANALYSIS: ${item.daysSinceSale} days without movement. Consider promotion.`
+                    : `Insufficient data for AI recommendation. Need ${MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales.`
+                );
                 
-                if (usingML && hasEnoughDataForML) {
-                  // 50+ days - Critical Alert
-                  if (item.daysSinceSale >= 50) {
-                    suggestion = `AI ALERT: ${item.daysSinceSale} days unsold. Machine learning analysis suggests immediate 45% markdown to recover capital.`;
-                    suggestionType = 'critical';
-                  } 
-                  // 40-49 days - Warning
-                  else if (item.daysSinceSale >= 40) {
-                    suggestion = `AI INSIGHT: ${item.daysSinceSale} days unsold. Recommendation: 30% discount or bundle with popular items.`;
-                    suggestionType = 'warning';
-                  } 
-                  // 30-39 days - Info
-                  else if (item.daysSinceSale >= 30) {
-                    suggestion = `AI ANALYSIS: ${item.daysSinceSale} days without movement. Consider "Buy One Get One 50% Off" promotion.`;
-                    suggestionType = 'info';
-                  }
-                } else {
-                  suggestion = `Insufficient data for AI recommendation. Need ${MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales.`;
-                  suggestionType = 'info';
-                }
+                const suggestionType = item.aiSuggestionType || 'info';
+                const discountBadge = item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
                 
                 const suggestionBgColor = suggestionType === 'critical' ? 'bg-red-50 border-red-200' : suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200';
                 const suggestionTextColor = suggestionType === 'critical' ? 'text-red-600' : suggestionType === 'warning' ? 'text-orange-600' : 'text-blue-600';
@@ -936,6 +916,11 @@ export default function AdminDashboard() {
                           {!item.lastSaleDate && (
                             <span className="text-gray-400 ml-1">(Never sold)</span>
                           )}
+                          {discountBadge && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[8px] font-bold">
+                              {discountBadge}
+                            </span>
+                          )}
                         </span>
                       </div>
                       <div className="text-[11px] sm:text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
@@ -945,7 +930,7 @@ export default function AdminDashboard() {
                     
                     <div className="border-t border-gray-100 pt-2">
                       <p className="text-[8px] sm:text-[9px] font-medium text-gray-400 uppercase tracking-wider mb-1">
-                        {usingML && hasEnoughDataForML ? 'AI Suggestion' : 'Status'}
+                        {usingML && hasEnoughDataForML ? 'AI SUGGESTION (ML Analysis)' : 'STATUS'}
                       </p>
                       <div className={`${suggestionBgColor} border rounded p-2 min-h-[50px] flex items-center`}>
                         <p className={`text-[9px] sm:text-xs ${suggestionTextColor} leading-relaxed`}>
