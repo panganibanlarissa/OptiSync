@@ -35,6 +35,7 @@ export interface ProductFormData {
 interface ProductModalProps {
   mode: 'add' | 'edit' | 'adjust';
   product: ProductFormData;
+  products?: any[]; // Added to calculate SKU based on category
   onClose: () => void;
   onSave: (data: ProductFormData) => void;
   onDelete?: (id: string) => void;
@@ -47,7 +48,7 @@ const modalVariants: Variants = {
   exit: { opacity: 0, scale: 0.95 } 
 };
 
-export default function ProductModal({ mode, product, onClose, onSave, onDelete, userRole }: ProductModalProps) {
+export default function ProductModal({ mode, product, products = [], onClose, onSave, onDelete, userRole }: ProductModalProps) {
   const [formData, setFormData] = useState<ProductFormData>(product);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -59,6 +60,28 @@ export default function ProductModal({ mode, product, onClose, onSave, onDelete,
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    
+    // Auto-generate SKU when category changes in 'add' mode
+    if (name === 'category' && mode === 'add') {
+      const categoryDefaults: Record<string, string> = {
+        "Frames": "FRM",
+        "Lenses": "LNS",
+        "Contact Lenses": "CTL",
+        "Solutions": "SOL",
+        "Accessories": "ACC"
+      };
+      const prefix = categoryDefaults[value] || "ITM";
+      const count = products.filter((p: any) => p.category === value).length + 1;
+      const generatedSku = `${prefix}-${count.toString().padStart(2, '0')}`;
+      
+      setFormData(prev => ({ 
+        ...prev, 
+        category: value,
+        sku: generatedSku
+      }));
+      return;
+    }
+
     setFormData(prev => ({ 
       ...prev, 
       [name]: name === 'baseCost' || name === 'markupPrice' || name === 'stock' || name === 'leadTimeDays' || name === 'reorderPoint' 
@@ -251,7 +274,7 @@ export default function ProductModal({ mode, product, onClose, onSave, onDelete,
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">SKU</label>
-                <input name="sku" value={formData.sku} onChange={handleChange} type="text" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input name="sku" value={formData.sku} onChange={handleChange} type="text" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 font-mono text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} readOnly={mode === 'add'} />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Specifications</label>

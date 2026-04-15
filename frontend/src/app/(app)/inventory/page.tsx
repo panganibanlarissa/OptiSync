@@ -207,11 +207,25 @@ export default function InventoryPage() {
   });
 
   const openAddModal = () => {
+    // Generate SKU based on category count
+    const categoryDefaults: Record<string, string> = {
+      "Frames": "FRM",
+      "Lenses": "LNS",
+      "Contact Lenses": "CTL",
+      "Solutions": "SOL",
+      "Accessories": "ACC"
+    };
+    
+    const defaultCategory = "Frames";
+    const prefix = categoryDefaults[defaultCategory] || "ITM";
+    const count = products.filter(p => p.category === defaultCategory).length + 1;
+    const generatedSku = `${prefix}-${count.toString().padStart(2, '0')}`;
+
     setModalMode('add');
     setCurrentProduct({ 
-      sku: "", 
+      sku: generatedSku, 
       name: "", 
-      category: "Frames", 
+      category: defaultCategory, 
       specifications: "", 
       baseCost: 0, 
       markupPrice: 0, 
@@ -675,6 +689,7 @@ export default function InventoryPage() {
           <ProductModal 
             mode={modalMode} 
             product={currentProduct} 
+            products={products}
             onClose={() => setIsModalOpen(false)} 
             onSave={handleSaveProduct} 
             onDelete={initiateDelete}

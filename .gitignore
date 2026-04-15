@@ -18,6 +18,9 @@ frontend/.next/
 /.next/
 /out/
 
+#backend
+/backend/__pycache__/
+
 # production
 /build
 
@@ -39,6 +42,24 @@ yarn-error.log*
 .env.production
 .env.development
 
+# Firebase / service account keys
+serviceAccountKey*.json
+firebase-admin*.json
+
+# Docker / local overrides
+docker-compose.override.yml
+.docker/
+
+# Caches and build helpers
+.cache/
+.parcel-cache/
+
+# Python virtual environments (repo-level and backend)
+.venv/
+venv/
+env/
+backend/venv/
+backend/.venv/
 # vercel
 .vercel
 

@@ -87,15 +87,15 @@ cd OptiSync
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- -p 3000
 ```
 
 ### 3. Backend (ML Service) Setup
 ```bash
-cd frontend/backend
-python -m venv venv
+cd backend
+python3.11 -m venv venv
 # Windows:
-.\venv\Scripts\activate
+venv\Scripts\activate
 # Unix/macOS:
 source venv/bin/activate
 pip install -r requirements.txt
