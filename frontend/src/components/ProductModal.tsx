@@ -53,6 +53,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(product.image || null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showNotification } = useNotification();
 
@@ -94,6 +95,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
     const file = e.target.files?.[0];
     if (!file) return;
     
+    setUploadError(null);
     setSelectedFile(file);
     const localPreviewUrl = URL.createObjectURL(file);
     setPreviewUrl(localPreviewUrl);
@@ -104,14 +106,21 @@ export default function ProductModal({ mode, product, products = [], onClose, on
     
     try {
       setUploading(true);
+      setUploadError(null);
       let imageUrl = formData.image;
       
       if (selectedFile) {
         try {
+          console.log('Starting image upload...');
           imageUrl = await uploadImage(selectedFile, 'products');
+          console.log('Image upload successful:', imageUrl);
+          showNotification("Image uploaded successfully", "success");
         } catch (uploadError) {
           console.error('Image upload failed:', uploadError);
-          showNotification("Image upload failed, product will be saved without image", "warning");
+          const errorMessage = uploadError instanceof Error ? uploadError.message : "Image upload failed";
+          setUploadError(errorMessage);
+          showNotification(errorMessage, "error");
+          // Continue without image - don't block product creation
           imageUrl = null;
         }
       }
@@ -128,7 +137,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
       }
       
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error saving product:', error);
       showNotification("Failed to save product", "error");
     } finally {
       setUploading(false);
@@ -242,6 +251,7 @@ export default function ProductModal({ mode, product, products = [], onClose, on
                 {uploading ? (
                   <div className="flex flex-col items-center">
                     <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[8px] text-blue-600 mt-1">Uploading...</span>
                   </div>
                 ) : previewUrl ? (
                   <div className="relative w-full h-full">
@@ -252,6 +262,10 @@ export default function ProductModal({ mode, product, products = [], onClose, on
                 )}
               </div>
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} disabled={uploading} />
+              {uploadError && (
+                <p className="text-[9px] text-red-500 mt-1 text-center">{uploadError}</p>
+              )}
+              <p className="text-[8px] text-gray-400 mt-1">Click to upload image</p>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">

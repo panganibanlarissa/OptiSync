@@ -1,3 +1,5 @@
+// src/context/FirebaseContext.tsx
+
 "use client";
 
 import {
@@ -122,29 +124,29 @@ interface FirebaseContextType {
   logout: () => Promise<void>;
 
   products: Product[];
-  addProduct: any;
-  updateProduct: any;
-  deleteProduct: any;
-  adjustStock: any;
+  addProduct: (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  adjustStock: (id: string, newStock: number, reason: string) => Promise<void>;
 
   transactions: Transaction[];
-  addTransaction: any;
-  voidTransaction: any;
+  addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
+  voidTransaction: (id: string) => Promise<void>;
 
   staffUsers: StaffUser[];
   fetchStaffUsers: () => Promise<void>;
 
-  createStaffUser: any;
-  updateStaffUser: any;
-  deleteStaffUser: any;
-  deactivateStaffUser: any;
-  reactivateStaffUser: any;
-  resetStaffPassword: any;
+  createStaffUser: (email: string, password: string, name: string, role: "admin" | "staff") => Promise<string>;
+  updateStaffUser: (uid: string, data: Partial<StaffUser>) => Promise<void>;
+  deleteStaffUser: (uid: string) => Promise<void>;
+  deactivateStaffUser: (uid: string) => Promise<void>;
+  reactivateStaffUser: (uid: string) => Promise<void>;
+  resetStaffPassword: (email: string) => Promise<void>;
 
   getLowStockProducts: () => Product[];
   getDeadstockProducts: () => Product[];
 
-  userRole: any;
+  userRole: string | null;
   userName: string;
   userId: string;
   userEmail: string;
@@ -167,7 +169,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
 
-  const [userRole, setUserRole] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -176,8 +178,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   // 🔥 CACHE FLAGS
   const [hasFetchedProducts, setHasFetchedProducts] = useState(false);
-  const [hasFetchedTransactions, setHasFetchedTransactions] =
-    useState(false);
+  const [hasFetchedTransactions, setHasFetchedTransactions] = useState(false);
   const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
 
   // ================= AUTH =================
@@ -203,7 +204,15 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             uid: u.uid,
             email: u.email,
             role: data.role,
-            name: data.name
+            name: data.name,
+            status: data.status || "Active"
+          });
+        } else {
+          setAppUser({
+            uid: u.uid,
+            email: u.email,
+            role: "staff",
+            name: "Staff"
           });
         }
       } else {
@@ -315,17 +324,28 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   // ================= PRODUCT =================
 
-  const addProduct = async (data: Product) => {
-    const ref = await addDoc(
-      collection(db, `clinics/${CLINIC_ID}/products`),
-      {
-        ...data,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }
-    );
+  const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      console.log("Adding product to Firestore:", { name: data.name, sku: data.sku, hasImage: !!data.image });
+      
+      const docRef = await addDoc(
+        collection(db, `clinics/${CLINIC_ID}/products`),
+        {
+          ...data,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }
+      );
 
-    setProducts((prev) => [{ ...data, id: ref.id }, ...prev]);
+      const newProduct = { ...data, id: docRef.id };
+      setProducts((prev) => [newProduct as Product, ...prev]);
+      
+      console.log("Product added successfully with ID:", docRef.id, "Image URL:", data.image);
+      return docRef.id;
+    } catch (error) {
+      console.error("Error adding product to Firestore:", error);
+      throw error;
+    }
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
@@ -370,8 +390,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   // ================= TRANSACTION =================
 
-  const addTransaction = async (data: Transaction) => {
-    const ref = await addDoc(
+  const addTransaction = async (data: Omit<Transaction, 'id' | 'createdAt'>) => {
+    const docRef = await addDoc(
       collection(db, `clinics/${CLINIC_ID}/transactions`),
       {
         ...data,
@@ -379,7 +399,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    setTransactions((prev) => [{ ...data, id: ref.id }, ...prev]);
+    const newTransaction = { ...data, id: docRef.id };
+    setTransactions((prev) => [newTransaction as Transaction, ...prev]);
+    
+    // Return the document ID for immediate use
+    return docRef.id;
   };
 
   const voidTransaction = async (id: string) => {
@@ -400,20 +424,80 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   // ================= STAFF =================
 
-  const createStaffUser = async () => {};
-  const updateStaffUser = async () => {};
-  const deleteStaffUser = async () => {};
-  const deactivateStaffUser = async () => {};
-  const reactivateStaffUser = async () => {};
-  const resetStaffPassword = async () => {};
+  const createStaffUser = async (email: string, password: string, name: string, role: "admin" | "staff") => {
+    const secondaryAuth = getSecondaryAuth();
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    
+    await setDoc(doc(db, "users", userCredential.user.uid), {
+      email,
+      name,
+      role,
+      status: "Active",
+      createdAt: serverTimestamp(),
+      lastLogin: "Never"
+    });
+    
+    await updateProfile(userCredential.user, { displayName: name });
+    
+    return userCredential.user.uid;
+  };
+
+  const updateStaffUser = async (uid: string, data: Partial<StaffUser>) => {
+    await updateDoc(doc(db, "users", uid), {
+      ...data,
+      updatedAt: serverTimestamp()
+    });
+    
+    setStaffUsers((prev) =>
+      prev.map((u) => (u.uid === uid ? { ...u, ...data } : u))
+    );
+  };
+
+  const deleteStaffUser = async (uid: string) => {
+    await updateDoc(doc(db, "users", uid), {
+      status: "Deleted",
+      updatedAt: serverTimestamp()
+    });
+    
+    setStaffUsers((prev) =>
+      prev.map((u) => (u.uid === uid ? { ...u, status: "Deleted" } : u))
+    );
+  };
+
+  const deactivateStaffUser = async (uid: string) => {
+    await updateDoc(doc(db, "users", uid), {
+      status: "Inactive",
+      updatedAt: serverTimestamp()
+    });
+    
+    setStaffUsers((prev) =>
+      prev.map((u) => (u.uid === uid ? { ...u, status: "Inactive" } : u))
+    );
+  };
+
+  const reactivateStaffUser = async (uid: string) => {
+    await updateDoc(doc(db, "users", uid), {
+      status: "Active",
+      updatedAt: serverTimestamp()
+    });
+    
+    setStaffUsers((prev) =>
+      prev.map((u) => (u.uid === uid ? { ...u, status: "Active" } : u))
+    );
+  };
+
+  const resetStaffPassword = async (email: string) => {
+    const secondaryAuth = getSecondaryAuth();
+    await sendPasswordResetEmail(secondaryAuth, email);
+  };
 
   // ================= ANALYTICS =================
 
   const getLowStockProducts = () =>
-    products.filter((p) => p.stock <= p.reorderPoint);
+    products.filter((p) => p.stock <= p.reorderPoint && p.stock > 0);
 
   const getDeadstockProducts = () =>
-    products.filter((p) => p.lastMovedDaysAgo >= 30);
+    products.filter((p) => p.lastMovedDaysAgo >= 30 && p.stock > 0);
 
   // ================= VALUE =================
 

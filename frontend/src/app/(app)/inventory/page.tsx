@@ -68,7 +68,7 @@ interface DeadstockItem {
   name: string;
   stock: number;
   lastMovedDaysAgo: number;
-  daysSinceSale: number;  // Added for consistency with Admin Dashboard
+  daysSinceSale: number;
   category: string;
   markupPrice: number;
   baseCost: number;

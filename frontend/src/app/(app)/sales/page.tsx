@@ -1,4 +1,5 @@
 // src/app/(app)/sales/page.tsx
+
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
@@ -122,6 +123,7 @@ export default function SalesPage() {
   const [amountGiven, setAmountGiven] = useState<string>("");
   const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [viewByMonth, setViewByMonth] = useState<boolean>(false);
+  const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
@@ -266,6 +268,8 @@ export default function SalesPage() {
     setCart([]);
     setTempReservedStock(new Map());
     setPatientName("");
+    setPaymentMethod("cash");
+    setAmountGiven("");
   };
 
   const handleCheckout = async () => {
@@ -287,6 +291,13 @@ export default function SalesPage() {
       }
     }
 
+    // Prevent double submission
+    if (isProcessingCheckout) {
+      return;
+    }
+
+    setIsProcessingCheckout(true);
+
     try {
       const currentUser = { 
         name: userName || "Staff",
@@ -296,6 +307,7 @@ export default function SalesPage() {
 
       const productsBecomingOutOfStock: Array<{ name: string; id: string }> = [];
 
+      // Update product stocks
       for (const cartItem of cart) {
         const product = (firebaseProducts as Product[]).find(p => p.id === cartItem.id);
         if (product) {
@@ -334,7 +346,7 @@ export default function SalesPage() {
 
       const change = paymentMethod === "cash" ? parseFloat(amountGiven) - total : undefined;
 
-      const newTransaction: any = {
+      const newTransactionData = {
         patientName: patientName || "Walk-in Patient",
         items: cart,
         total: total,
@@ -346,14 +358,22 @@ export default function SalesPage() {
         paymentMethod: paymentMethod
       };
 
-      if (paymentMethod === "cash") {
-        newTransaction.amountGiven = parseFloat(amountGiven);
-        newTransaction.change = change;
+      // Add transaction and get the returned ID
+      const transactionId = await addTransaction(newTransactionData as any);
+
+      // Verify transactionId exists before proceeding
+      if (!transactionId) {
+        throw new Error("Failed to create transaction - no ID returned");
       }
 
-      const transactionId = await addTransaction(newTransaction);
+      const newTransaction: Transaction = {
+        id: transactionId,
+        ...newTransactionData
+      };
+
       const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
       
+      // Show success notification
       showNotification(
         `Order completed: ${itemCount} item${itemCount !== 1 ? 's' : ''} for ₱${total.toLocaleString()}`, 
         "success", 
@@ -393,6 +413,7 @@ export default function SalesPage() {
         );
       }
 
+      // Show out of stock alerts
       for (const outOfStockProduct of productsBecomingOutOfStock) {
         showNotification(
           `❌ ${outOfStockProduct.name} is now out of stock`,
@@ -409,20 +430,20 @@ export default function SalesPage() {
         );
       }
       
-      const tempTransaction = {
-        id: transactionId,
-        ...newTransaction
-      } as Transaction;
+      // Set the transaction for receipt modal
+      setLastTransaction(newTransaction);
       
-      setLastTransaction(tempTransaction);
-      setShowCheckoutModal(true);
+      // Clear cart and form
       clearCart();
-      setPaymentMethod("cash");
-      setAmountGiven("");
+      
+      // Show the checkout modal
+      setShowCheckoutModal(true);
       
     } catch (error) {
       console.error("Checkout error:", error);
       showToastOnly("Failed to complete transaction. Please try again.", "error");
+    } finally {
+      setIsProcessingCheckout(false);
     }
   };
 
@@ -439,6 +460,9 @@ export default function SalesPage() {
   };
 
   const generateReceipt = (trx: Transaction) => {
+    // Safely handle transaction ID
+    const receiptId = trx.id ? trx.id.slice(-8).toUpperCase() : 'UNKNOWN';
+    
     const itemCount = trx.items.length;
     const estimatedHeight = 80 + (itemCount * 10);
     const doc = new jsPDF('p', 'mm', [80, Math.max(150, estimatedHeight)]);
@@ -495,7 +519,7 @@ export default function SalesPage() {
     const dateStr = receiptDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
     const timeStr = receiptDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     
-    doc.text(`Receipt: ${trx.id.slice(-8).toUpperCase()}  ${dateStr} ${timeStr}`, leftMargin, currentY);
+    doc.text(`Receipt: ${receiptId}  ${dateStr} ${timeStr}`, leftMargin, currentY);
     currentY += 2.5;
     
     if (trx.staffName) {
@@ -573,7 +597,7 @@ export default function SalesPage() {
     doc.setTextColor(100, 100, 100);
     doc.text("Please retain this receipt", pageWidth / 2, currentY, { align: 'center' });
 
-    doc.save(`Receipt_${trx.id.slice(-8)}.pdf`);
+    doc.save(`Receipt_${receiptId}.pdf`);
   };
 
   const handleVoid = async () => {
@@ -1017,12 +1041,12 @@ export default function SalesPage() {
 
               <button 
                 onClick={handleCheckout} 
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || isProcessingCheckout}
                 className={`w-full py-1.5 sm:py-2.5 rounded-md sm:rounded-lg font-bold text-white shadow-md transition-all text-xs sm:text-sm ${
-                  cart.length === 0 ? 'bg-gray-400 cursor-not-allowed' : `${THEME_BG} ${THEME_HOVER}`
+                  cart.length === 0 || isProcessingCheckout ? 'bg-gray-400 cursor-not-allowed' : `${THEME_BG} ${THEME_HOVER}`
                 }`}
               >
-                Pay ₱{total.toLocaleString()}
+                {isProcessingCheckout ? 'Processing...' : `Pay ₱${total.toLocaleString()}`}
               </button>
             </div>
           </div>
@@ -1116,13 +1140,13 @@ export default function SalesPage() {
                   <tbody className="divide-y divide-gray-100">
                     {filteredTransactions.map(trx => (
                       <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id.slice(-8).toUpperCase()}</td>
+                        <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
                         <td className="p-2 sm:p-3 text-gray-600">
                           <div className="flex items-center gap-1">
                             <Calendar size={12} className="text-gray-400" />
                             {formatDate(trx.date)}
                           </div>
-                        </td>
+                         </td>
                         <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                         <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
                         <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
@@ -1130,7 +1154,7 @@ export default function SalesPage() {
                           <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
                             {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
                           </div>
-                        </td>
+                         </td>
                         <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
                         <td className="p-2 sm:p-3 text-center">
                           <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
@@ -1142,15 +1166,15 @@ export default function SalesPage() {
                           }`}>
                             {trx.paymentMethod || 'N/A'}
                           </span>
-                        </td>
+                         </td>
                         <td className="p-2 sm:p-3 text-center">
                           {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
-                        </td>
+                         </td>
                         <td className="p-2 sm:p-3 text-center">
                           <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                             {trx.status}
                           </span>
-                        </td>
+                         </td>
                         <td className="p-2 sm:p-3 text-right">
                           <div className="flex items-center justify-end gap-1 sm:gap-1.5">
                             <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
@@ -1162,11 +1186,11 @@ export default function SalesPage() {
                               </button>
                             )}
                           </div>
-                        </td>
-                      </tr>
+                         </td>
+                       </tr>
                     ))}
                   </tbody>
-                </table>
+                 </table>
               </div>
             )}
           </div>
@@ -1174,7 +1198,7 @@ export default function SalesPage() {
       )}
 
       <AnimatePresence>
-        {showCheckoutModal && lastTransaction && (
+        {showCheckoutModal && lastTransaction && lastTransaction.id && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center">
               <div className="w-12 h-12 sm:w-16 sm:h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-emerald-600">

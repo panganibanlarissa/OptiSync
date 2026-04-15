@@ -179,6 +179,12 @@ export default function StaffDashboard() {
 
   const handleSaveNewProduct = async (formData: ProductFormData) => {
     try {
+      console.log("Saving new product with data:", {
+        name: formData.name,
+        hasImage: !!formData.image,
+        imageUrl: formData.image?.substring(0, 100)
+      });
+      
       const productToSave = {
         sku: formData.sku,
         name: formData.name,
@@ -190,22 +196,28 @@ export default function StaffDashboard() {
         stock: Number(formData.stock),
         lastMovedDaysAgo: 0,
         imageColor: formData.imageColor || IMAGE_COLORS[Math.floor(Math.random() * IMAGE_COLORS.length)],
-        image: formData.image || null,
+        image: formData.image || null, // This should now contain the Cloudinary URL
         leadTimeDays: Number(formData.leadTimeDays) || 7,
         reorderPoint: Number(formData.reorderPoint) || 10,
-        expiryDate: formData.expiryDate || null
+        expiryDate: formData.expiryDate || null,
+        createdAt: new Date().toISOString() // Add creation timestamp for reference
       };
+      
       const newProductId = await addProduct(productToSave);
+      console.log("Product saved successfully with ID:", newProductId);
+      
       showNotification(`New product "${formData.name}" added to catalog`, "success", "Product Added");
       setIsProductModalOpen(false);
+      
       if (newProductId) {
         setCreatedProductId(newProductId);
       }
     } catch (error) {
       console.error("Error adding product:", error);
-      showNotification("Failed to add new product", "error", "Error");
+      showNotification("Failed to add new product. Please try again.", "error", "Error");
     }
   };
+
 
   const completedTransactions = useMemo(() => {
     return transactions.filter(t => t.status === 'completed');
