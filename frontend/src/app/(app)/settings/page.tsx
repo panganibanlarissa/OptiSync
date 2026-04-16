@@ -145,7 +145,7 @@ export default function SettingsPage() {
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { showNotification } = useNotification();
+  const { showNotification, showToastOnly } = useNotification();
 
   // Password strength — computed live as the user types
   const passwordStrength = useMemo(
@@ -172,7 +172,7 @@ export default function SettingsPage() {
     await fetchStaffUsers();
     console.log("✅ Staff users refreshed:", staffUsers.length);
     setRefreshing(false);
-    showNotification("Staff list refreshed", "success", "Refreshed");
+    showToastOnly("Staff list refreshed", "success");
   };
 
   // Check if current user is admin

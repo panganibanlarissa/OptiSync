@@ -62,6 +62,14 @@ const getDateFromTimestamp = (timestamp: any): Date | null => {
   return null;
 };
 
+// Helper function to format date as YYYY-MM-DD in local time (not UTC)
+const getLocalDateStamp = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Helper function to calculate days since product was added (for never-sold products)
 const getDaysSinceCreation = (product: any, today: Date): number => {
   const createdDate = getDateFromTimestamp(product.createdAt);
@@ -195,7 +203,7 @@ export default function ReportsPage() {
     const validTransactions = filteredTransactions.filter(t => t.status === 'completed');
     const voidedTransactions = filteredTransactions.filter(t => t.status === 'voided');
     const totalRevenue = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
-    const totalSales = filteredTransactions.reduce((sum, trx) => sum + trx.total, 0);
+    const totalSales = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
     const voidedAmount = voidedTransactions.reduce((sum, trx) => sum + trx.total, 0);
 
     autoTable(doc, {
@@ -240,34 +248,53 @@ export default function ReportsPage() {
     const footerAreaStart = pageHeight - 30;
     let summaryStartY = Math.max(finalY + 10, 40);
     
-    if (summaryStartY + 60 > footerAreaStart) {
+    if (summaryStartY + 80 > footerAreaStart) {
       doc.addPage();
       summaryStartY = 40;
     }
     
-    doc.setFontSize(10);
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Summary Report", 14, summaryStartY);
+    
+    doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text(`Total Transactions: ${filteredTransactions.length}`, 14, summaryStartY);
-    doc.text(`Completed: ${validTransactions.length}`, 14, summaryStartY + 7);
-    doc.text(`Voided: ${voidedTransactions.length}`, 14, summaryStartY + 14);
+    doc.text(`Total Transactions: ${filteredTransactions.length}`, 14, summaryStartY + 8);
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Total count of all transaction records in this period (completed + voided).", 14, summaryStartY + 11);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Completed: ${validTransactions.length}`, 14, summaryStartY + 18);
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Number of transactions successfully processed and recorded.", 14, summaryStartY + 21);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Voided: ${voidedTransactions.length}`, 14, summaryStartY + 28);
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Number of transactions canceled or reversed; not included in revenue.", 14, summaryStartY + 31);
     
     doc.setDrawColor(200, 200, 200);
-    doc.line(14, summaryStartY + 20, pageWidth - 14, summaryStartY + 20);
+    doc.line(14, summaryStartY + 37, pageWidth - 14, summaryStartY + 37);
     
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total Sales: PHP ${totalSales.toLocaleString()}`, 14, summaryStartY + 27);
-    
-    if (validTransactions.length > 0) {
-      doc.setFontSize(10);
-      doc.setTextColor(20, 20, 20);
-      doc.text(`Completed Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, summaryStartY + 34);
-    }
+    doc.text(`Total Sales Revenue: PHP ${totalSales.toLocaleString()}`, 14, summaryStartY + 44);
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Sum of all completed transactions in this period.", 14, summaryStartY + 47);
     
     if (voidedTransactions.length > 0) {
-      doc.setFontSize(10);
+      doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
-      doc.text(`Voided Amount: PHP ${voidedAmount.toLocaleString()}`, 14, summaryStartY + 41);
+      doc.text(`Voided Amount: PHP ${voidedAmount.toLocaleString()}`, 14, summaryStartY + 54);
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Total value of canceled transactions; deducted from gross sales.", 14, summaryStartY + 57);
     }
 
     const totalPages = doc.getNumberOfPages();
@@ -302,8 +329,21 @@ export default function ReportsPage() {
       doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, lineY + 5, { align: 'right' });
     }
 
-    const fileName = periodText.replace(/ /g, '_');
-    doc.save(`Sales_Ledger_${fileName}.pdf`);
+    let fileNameStamp = "";
+    if (selectedDay !== "all") {
+      // Format: YYYY-MM-DD
+      fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
+    } else if (selectedMonth !== "all") {
+      // Format: YYYY-MM
+      fileNameStamp = selectedMonth;
+    } else if (selectedYear !== 0) {
+      // Format: YYYY
+      fileNameStamp = String(selectedYear);
+    } else {
+      // All Time
+      fileNameStamp = "All_Time";
+    }
+    doc.save(`Sales_Ledger_${fileNameStamp}.pdf`);
   };
 
   const exportInventoryOptimizationReport = () => {
@@ -451,7 +491,21 @@ export default function ReportsPage() {
         doc.text(`OptiSync AI Optimization Engine - Confidential Audit Report - Page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
     }
 
-    doc.save(`Inventory_Optimization_${today.toISOString().split('T')[0]}.pdf`);
+    let fileNameStamp = "";
+    if (selectedDay !== "all") {
+      // Format: YYYY-MM-DD
+      fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
+    } else if (selectedMonth !== "all") {
+      // Format: YYYY-MM
+      fileNameStamp = selectedMonth;
+    } else if (selectedYear !== 0) {
+      // Format: YYYY
+      fileNameStamp = String(selectedYear);
+    } else {
+      // All Time
+      fileNameStamp = getLocalDateStamp(today);
+    }
+    doc.save(`Inventory_Optimization_${fileNameStamp}.pdf`);
   };
 
   const exportAgingReport = () => {
@@ -580,7 +634,21 @@ export default function ReportsPage() {
         doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, lineY + 5, { align: 'right' });
     }
 
-    doc.save(`Aging_Report_${today.toISOString().split('T')[0]}.pdf`);
+    let fileNameStamp = "";
+    if (selectedDay !== "all") {
+      // Format: YYYY-MM-DD
+      fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
+    } else if (selectedMonth !== "all") {
+      // Format: YYYY-MM
+      fileNameStamp = selectedMonth;
+    } else if (selectedYear !== 0) {
+      // Format: YYYY
+      fileNameStamp = String(selectedYear);
+    } else {
+      // All Time
+      fileNameStamp = getLocalDateStamp(today);
+    }
+    doc.save(`Aging_Report_${fileNameStamp}.pdf`);
   };
 
   const clearFilters = () => {

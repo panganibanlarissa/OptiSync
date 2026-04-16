@@ -100,6 +100,18 @@ export default function Notifications() {
     return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
   };
 
+  const formatFullDateTime = (timestamp: Date) => {
+    const options: Intl.DateTimeFormatOptions = {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    };
+    return timestamp.toLocaleDateString('en-US', options);
+  };
+
   // Shared Render Function
   const renderNotificationList = (maxHeightClass: string) => (
     <ul className={`${maxHeightClass} overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200`}>
@@ -146,9 +158,14 @@ export default function Notifications() {
                 <p className="text-sm text-gray-600 mt-1 leading-snug">
                   {notif.message}
                 </p>
-                <p className="text-[11px] text-gray-400 mt-2 font-medium">
-                  {formatTime(notif.timestamp)}
-                </p>
+                <div className="flex flex-col gap-0.5 mt-2">
+                  <p className="text-[11px] text-gray-500 font-medium">
+                    {formatFullDateTime(notif.timestamp)}
+                  </p>
+                  <p className="text-[10px] text-gray-400 font-medium">
+                    {formatTime(notif.timestamp)}
+                  </p>
+                </div>
               </div>
             </div>
           </li>

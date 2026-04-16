@@ -63,7 +63,7 @@ export default function ProductModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(product.image || null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { showNotification } = useNotification();
+  const { showNotification, showToastOnly } = useNotification();
 
   const isPerishable = formData.category === "Solutions" || formData.category === "Contact Lenses";
 
@@ -134,12 +134,12 @@ export default function ProductModal({
       if (selectedFile) {
         try {
           console.log('Starting image upload for:', selectedFile.name);
-          showNotification('Uploading image...', 'info');
+          showToastOnly('Uploading image...', 'info');
           
           imageUrl = await uploadImage(selectedFile, 'products');
           
           console.log('Image upload successful:', imageUrl);
-          showNotification('Image uploaded successfully', 'success');
+          showToastOnly('Image uploaded successfully', 'success');
         } catch (uploadError) {
           console.error('Image upload failed:', uploadError);
           const errorMessage = uploadError instanceof Error ? uploadError.message : 'Image upload failed';

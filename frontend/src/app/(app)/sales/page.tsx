@@ -130,11 +130,16 @@ export default function SalesPage() {
       const transactionDate = new Date(transaction.date);
       
       if (viewByMonth) {
-        const transactionMonth = transactionDate.toISOString().slice(0, 7);
+        const year = transactionDate.getFullYear();
+        const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
+        const transactionMonth = `${year}-${month}`;
         const filterMonth = filterDate.slice(0, 7);
         return transactionMonth === filterMonth;
       } else {
-        const transactionDay = transactionDate.toISOString().slice(0, 10);
+        const year = transactionDate.getFullYear();
+        const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
+        const day = String(transactionDate.getDate()).padStart(2, '0');
+        const transactionDay = `${year}-${month}-${day}`;
         return transactionDay === filterDate;
       }
     });

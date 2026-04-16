@@ -97,7 +97,7 @@ function AppContent({ children }: { children: React.ReactNode }) {
         const key = `liquid-${item.id}`;
         if (!notifiedItemsRef.current.has(key)) {
           showNotification(
-            `📦 ${item.name} hasn't moved in 30+ days. Consider discounting to clear warehouse space.`,
+            `${item.name} hasn't moved in 30+ days. Consider discounting to clear warehouse space.`,
             "info",
             "Liquidation Alert",
             "/reports"
@@ -106,33 +106,64 @@ function AppContent({ children }: { children: React.ReactNode }) {
         }
       });
 
-      // 2. EXPIRY ALERTS (Simulated for this workspace - using specific categories/tags)
+      // 2. EXPIRY ALERTS (Using actual expiry dates from products)
       const expiryItems = products.filter(p => {
         if (p.stock <= 0) return false;
+        if (!p.expiryDate) return false;
         
         // Skip recently added products
         if (isRecentlyAdded(p)) return false;
         
-        const perishableCategories = ['Solutions', 'Contact Lenses'];
-        if (!perishableCategories.includes(p.category)) return false;
+        const expiryDate = new Date(p.expiryDate);
+        expiryDate.setHours(0, 0, 0, 0);
         
-        const createdDate = getDateFromTimestamp(p.createdAt);
-        if (!createdDate) return false;
+        // Calculate days until expiry
+        const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         
-        const monthsInStock = (today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
-        
-        return monthsInStock >= 6;
+        // Alert if expiring within 30 days or already expired
+        return daysUntilExpiry <= 30;
       });
 
       expiryItems.forEach(item => {
+        const expiryDate = new Date(item.expiryDate!);
+        expiryDate.setHours(0, 0, 0, 0);
+        const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        
         const key = `expiry-${item.id}`;
         if (!notifiedItemsRef.current.has(key)) {
-          showNotification(
-            `⏰ ${item.name} is nearing simulated shelf-life limits. Check physical expiry date.`,
-            "warning",
-            "Expiry Alert",
-            "/inventory"
-          );
+          if (daysUntilExpiry <= 0) {
+            // Already expired
+            showNotification(
+              `${item.name} has EXPIRED (${Math.abs(daysUntilExpiry)} days ago). Remove from sale immediately.`,
+              "error",
+              "Expired Product Alert",
+              "/inventory"
+            );
+          } else if (daysUntilExpiry <= 7) {
+            // Expiring very soon
+            showNotification(
+              `${item.name} expires in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}. URGENT action required!`,
+              "error",
+              "Critical Expiry Alert",
+              "/inventory"
+            );
+          } else if (daysUntilExpiry <= 14) {
+            // Expiring soon
+            showNotification(
+              `${item.name} expires in ${daysUntilExpiry} days. Plan clearance strategy.`,
+              "warning",
+              "Expiry Alert",
+              "/inventory"
+            );
+          } else {
+            // Expiring within 30 days
+            showNotification(
+              `${item.name} expires in ${daysUntilExpiry} days. Monitor closely.`,
+              "info",
+              "Upcoming Expiry",
+              "/inventory"
+            );
+          }
           notifiedItemsRef.current.add(key);
         }
       });
@@ -150,7 +181,7 @@ function AppContent({ children }: { children: React.ReactNode }) {
         
         if (!notifiedItemsRef.current.has(key)) {
           showNotification(
-            `⚠️ ${item.name} is low on stock (${item.stock} left)`,
+            `${item.name} is low on stock (${item.stock} left)`,
             "warning",
             "Low Stock Alert",
             "/inventory"
@@ -166,7 +197,7 @@ function AppContent({ children }: { children: React.ReactNode }) {
         
         if (!notifiedItemsRef.current.has(key)) {
           showNotification(
-            `❌ ${item.name} is out of stock`,
+            `${item.name} is out of stock`,
             "error",
             "Out of Stock Alert",
             "/inventory"
@@ -188,6 +219,20 @@ function AppContent({ children }: { children: React.ReactNode }) {
           // Remove liquidation alert if product is no longer in liquidation state
           if (product.stock <= 0) {
             notifiedItemsRef.current.delete(key);
+          }
+        } else if (type === 'expiry' && product) {
+          // Remove expiry alert if product no longer has stock or if expiry date has passed the 30-day window
+          if (product.stock <= 0) {
+            notifiedItemsRef.current.delete(key);
+          } else if (!product.expiryDate) {
+            notifiedItemsRef.current.delete(key);
+          } else {
+            const expiryDate = new Date(product.expiryDate);
+            expiryDate.setHours(0, 0, 0, 0);
+            const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysUntilExpiry > 30) {
+              notifiedItemsRef.current.delete(key);
+            }
           }
         }
       });

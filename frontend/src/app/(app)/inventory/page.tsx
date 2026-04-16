@@ -44,6 +44,7 @@ interface InventoryData {
   image: string | null;
   leadTimeDays: number;
   reorderPoint: number;
+  expiryDate?: string | null;
   totalSold?: number;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
@@ -118,7 +119,7 @@ export default function InventoryPage() {
   const [qrScanMode, setQRScanMode] = useState<'search' | 'adjust'>('search');
   const [createdProductId, setCreatedProductId] = useState<string | null>(null);
 
-  const { showNotification } = useNotification();
+  const { showNotification, showToastOnly } = useNotification();
 
   useEffect(() => {
     setProducts(firebaseProducts);
@@ -270,13 +271,13 @@ export default function InventoryPage() {
 
   const openEditModal = (product: InventoryData) => {
     setModalMode('edit');
-    setCurrentProduct({ ...product });
+    setCurrentProduct({ ...product, expiryDate: product.expiryDate ?? undefined } as ProductFormData);
     setIsModalOpen(true);
   };
 
   const openAdjustModal = (product: InventoryData) => {
     setModalMode('adjust');
-    setCurrentProduct({ ...product, adjustmentReason: "Manual Count" });
+    setCurrentProduct({ ...product, expiryDate: product.expiryDate ?? undefined, adjustmentReason: "Manual Count" } as ProductFormData);
     setIsModalOpen(true);
   };
 
@@ -300,7 +301,7 @@ export default function InventoryPage() {
           expiryDate: formData.expiryDate || null
         };
         const newProductId: string = await addProduct(newProduct);
-        showNotification(`New product "${formData.name}" added to catalog`, "success", "Product Added");
+        showToastOnly(`New product "${formData.name}" added to catalog`, "success");
         setIsModalOpen(false);
         if (newProductId) {
           setCreatedProductId(newProductId);
@@ -777,6 +778,33 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole, isDeads
   const isLowStock = data.stock <= data.reorderPoint && data.stock > 0;
   const isOutOfStock = data.stock <= 0;
 
+  // Calculate expiry status
+  const getExpiryStatus = () => {
+    if (!data.expiryDate) return { daysUntilExpiry: null, status: null, color: null };
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const expiryDate = new Date(data.expiryDate);
+    expiryDate.setHours(0, 0, 0, 0);
+    
+    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysUntilExpiry <= 0) {
+      return { daysUntilExpiry, status: 'EXPIRED', color: 'bg-red-600' };
+    } else if (daysUntilExpiry <= 7) {
+      return { daysUntilExpiry, status: 'URGENT', color: 'bg-red-500' };
+    } else if (daysUntilExpiry <= 14) {
+      return { daysUntilExpiry, status: 'EXPIRING', color: 'bg-orange-500' };
+    } else if (daysUntilExpiry <= 30) {
+      return { daysUntilExpiry, status: 'SOON', color: 'bg-yellow-500' };
+    }
+    
+    return { daysUntilExpiry, status: null, color: null };
+  };
+
+  const expiryInfo = getExpiryStatus();
+
   if (viewMode === 'list') {
     return (
       <div className={`bg-white p-2 sm:p-3 rounded-lg border border-gray-200 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 hover:shadow-md transition-shadow`}>
@@ -795,6 +823,20 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole, isDeads
                 <span className="truncate">Specs: {data.specifications}</span>
               )}
             </div>
+            {data.expiryDate && (
+              <div className={`text-[9px] sm:text-[10px] font-medium mt-1 ${
+                expiryInfo.status ? expiryInfo.color.replace('bg-', 'text-') : 'text-gray-500'
+              }`}>
+                Expires: {new Date(data.expiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {expiryInfo.daysUntilExpiry !== null && (
+                  <span className="ml-1">
+                    {expiryInfo.daysUntilExpiry <= 0 
+                      ? `(${Math.abs(expiryInfo.daysUntilExpiry)} overdue)` 
+                      : `(${expiryInfo.daysUntilExpiry}d)`}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end gap-2 sm:gap-3 mt-1 sm:mt-0 sm:pl-3 sm:border-l border-gray-100">
@@ -839,6 +881,11 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole, isDeads
           {data.sku}
         </div>
         <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end z-10">
+          {expiryInfo.status && (
+            <span className={`${expiryInfo.color} text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-0.5`}>
+              {expiryInfo.status}
+            </span>
+          )}
           {isLowStock && (
             <span className="bg-orange-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
               LOW
@@ -863,6 +910,19 @@ function ProductCard({ data, viewMode, onEdit, onAdjust, onQR, userRole, isDeads
         {data.specifications && (
           <p className="text-[9px] sm:text-[10px] text-gray-500 mb-2 truncate" title={data.specifications}>
             Specs: {data.specifications}
+          </p>
+        )}
+        {data.expiryDate && (
+          <p className={`text-[9px] sm:text-[10px] font-medium mb-2 ${
+            expiryInfo.status ? expiryInfo.color.replace('bg-', 'text-') : 'text-gray-500'
+          }`}>
+            Expires: {new Date(data.expiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {expiryInfo.daysUntilExpiry !== null && expiryInfo.daysUntilExpiry > 0 && (
+              <span className="ml-1">({expiryInfo.daysUntilExpiry}d left)</span>
+            )}
+            {expiryInfo.daysUntilExpiry !== null && expiryInfo.daysUntilExpiry <= 0 && (
+              <span className="ml-1">({Math.abs(expiryInfo.daysUntilExpiry)} days overdue)</span>
+            )}
           </p>
         )}
         <div className="flex items-center justify-between mb-2 sm:mb-3">

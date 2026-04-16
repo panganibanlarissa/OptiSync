@@ -42,7 +42,8 @@ import {
   where,
   limit,
   startAfter,
-  DocumentSnapshot
+  DocumentSnapshot,
+  onSnapshot
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
@@ -424,6 +425,69 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [user, fetchProducts, fetchTransactions]);
 
+  // ================= REAL-TIME LISTENER FOR PRODUCTS =================
+  useEffect(() => {
+    if (!user) return;
+
+    console.log("Setting up real-time listener for products...");
+    
+    try {
+      const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
+      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50));
+      
+      const unsubscribe = onSnapshot(q, (snap) => {
+        const fetchedProducts = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        })) as Product[];
+
+        setProducts(fetchedProducts);
+        setHasFetchedProducts(true);
+        lastProductsFetchRef.current = Date.now();
+        
+        console.log(`Real-time update: ${fetchedProducts.length} products`);
+      }, (error) => {
+        console.error("Error in products listener:", error);
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error setting up products listener:", error);
+    }
+  }, [user]);
+
+  // ================= REAL-TIME LISTENER FOR TRANSACTIONS =================
+  useEffect(() => {
+    if (!user) return;
+
+    console.log("Setting up real-time listener for transactions...");
+    
+    try {
+      const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(50));
+      
+      const unsubscribe = onSnapshot(q, (snap) => {
+        const fetchedTransactions = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+          date: d.data().date?.toDate() || new Date()
+        })) as Transaction[];
+
+        setTransactions(fetchedTransactions);
+        setHasFetchedTransactions(true);
+        lastTransactionsFetchRef.current = Date.now();
+        
+        console.log(`Real-time update: ${fetchedTransactions.length} transactions`);
+      }, (error) => {
+        console.error("Error in transactions listener:", error);
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error setting up transactions listener:", error);
+    }
+  }, [user]);
+
   // Fetch staff users only when admin role is detected and after initial load
   useEffect(() => {
     if (user && userRole === "admin" && !hasFetchedUsers && !isFetchingUsers) {
@@ -523,8 +587,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      const newProduct = { ...data, id: docRef.id };
-      setProducts((prev) => [newProduct as Product, ...prev]);
+      const now = new Date();
+      const newProduct: Product = { 
+        ...data, 
+        id: docRef.id,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+      
+      // Update local state with the Timestamp object for proper sorting
+      setProducts((prev) => [newProduct, ...prev]);
       
       return docRef.id;
     } catch (error) {
@@ -595,8 +667,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      const newTransaction = { ...data, id: docRef.id };
-      setTransactions((prev) => [newTransaction as Transaction, ...prev]);
+      const newTransaction: Transaction = { 
+        ...data, 
+        id: docRef.id,
+        createdAt: Timestamp.now()
+      };
+      setTransactions((prev) => [newTransaction, ...prev]);
       
       return docRef.id;
     } catch (error) {
