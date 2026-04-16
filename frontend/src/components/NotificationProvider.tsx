@@ -1,13 +1,14 @@
+// frontend/src/components/NotificationProvider.tsx
 "use client";
 
-import { createContext, useContext, useState, ReactNode, useCallback } from "react";
+import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, AlertTriangle, X, Info } from "lucide-react";
+import { notificationService, StoredNotification } from "@/services/notificationService";
+import { notificationMigration } from "@/services/notificationMigration";
 
-// --- TYPES ---
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
-// Define a type for transaction data that might be stored in notifications
 export interface TransactionData {
   transactionId: string;
   receiptNumber: string;
@@ -24,16 +25,15 @@ export interface TransactionData {
   }>;
 }
 
-// Define a type for inventory data that might be stored in notifications
 export interface InventoryData {
   productId: string;
   productName: string;
   oldStock?: number;
   newStock: number;
   reorderPoint?: number;
+  expiryDate?: string;
 }
 
-// Union type for all possible notification data
 export type NotificationData = TransactionData | InventoryData | Record<string, unknown>;
 
 export interface Notification {
@@ -47,6 +47,9 @@ export interface Notification {
   data?: NotificationData;
   forAdmin?: boolean;
   forStaff?: boolean;
+  isResolved?: boolean;
+  triggerEventId?: string;
+  resolvedAt?: Date;
 }
 
 interface NotificationContextType {
@@ -58,25 +61,27 @@ interface NotificationContextType {
     link?: string, 
     data?: NotificationData,
     forAdmin?: boolean,
-    forStaff?: boolean
-  ) => void;
+    forStaff?: boolean,
+    triggerEventId?: string,
+    eventTimestamp?: Date,
+    showToast?: boolean
+  ) => Promise<string | null>;
   showToastOnly: (
     message: string, 
     type?: NotificationType, 
     title?: string
-  ) => void; // New function for toast-only notifications
-  markAsRead: (id: string) => void;
-  markAllAsRead: () => void;
-  clearNotification: (id: string) => void;
+  ) => void;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  clearNotification: (id: string) => Promise<void>;
   unreadCount: number;
   userRole?: 'admin' | 'staff';
   setUserRole: (role: 'admin' | 'staff') => void;
+  resolveNotification: (triggerEventId: string) => Promise<void>;
 }
 
-// --- CONTEXT ---
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
-// --- HOOK (Use this in your pages) ---
 export const useNotification = () => {
   const context = useContext(NotificationContext);
   if (!context) {
@@ -85,13 +90,12 @@ export const useNotification = () => {
   return context;
 };
 
-// --- PROVIDER COMPONENT ---
 export default function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [storedNotifications, setStoredNotifications] = useState<StoredNotification[]>([]);
   const [toast, setToast] = useState<{ message: string; type: NotificationType } | null>(null);
   const [userRole, setUserRole] = useState<'admin' | 'staff'>('staff');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Helper functions - defined BEFORE they are used
   const getDefaultTitle = (type: NotificationType): string => {
     switch (type) {
       case 'success': return 'Success';
@@ -104,123 +108,168 @@ export default function NotificationProvider({ children }: { children: ReactNode
 
   const getToastIcon = (type: NotificationType) => {
     switch (type) {
-      case 'success':
-        return <CheckCircle2 size={18} />;
-      case 'error':
-        return <AlertTriangle size={18} />;
-      case 'warning':
-        return <AlertTriangle size={18} />;
-      case 'info':
-        return <Info size={18} />;
-      default:
-        return <Info size={18} />;
+      case 'success': return <CheckCircle2 size={18} />;
+      case 'error': return <AlertTriangle size={18} />;
+      case 'warning': return <AlertTriangle size={18} />;
+      case 'info': return <Info size={18} />;
+      default: return <Info size={18} />;
     }
   };
 
   const getToastStyles = (type: NotificationType) => {
     switch (type) {
-      case 'success':
-        return 'bg-white text-slate-800 border-green-200';
-      case 'error':
-        return 'bg-red-50 text-red-800 border-red-200';
-      case 'warning':
-        return 'bg-orange-50 text-orange-800 border-orange-200';
-      case 'info':
-        return 'bg-blue-50 text-blue-800 border-blue-200';
-      default:
-        return 'bg-white text-slate-800 border-gray-200';
+      case 'success': return 'bg-white text-slate-800 border-green-200';
+      case 'error': return 'bg-red-50 text-red-800 border-red-200';
+      case 'warning': return 'bg-orange-50 text-orange-800 border-orange-200';
+      case 'info': return 'bg-blue-50 text-blue-800 border-blue-200';
+      default: return 'bg-white text-slate-800 border-gray-200';
     }
   };
 
   const getToastIconBg = (type: NotificationType) => {
     switch (type) {
-      case 'success':
-        return 'bg-green-100 text-green-600';
-      case 'error':
-        return 'bg-red-100 text-red-600';
-      case 'warning':
-        return 'bg-orange-100 text-orange-600';
-      case 'info':
-        return 'bg-blue-100 text-blue-600';
-      default:
-        return 'bg-gray-100 text-gray-600';
+      case 'success': return 'bg-green-100 text-green-600';
+      case 'error': return 'bg-red-100 text-red-600';
+      case 'warning': return 'bg-orange-100 text-orange-600';
+      case 'info': return 'bg-blue-100 text-blue-600';
+      default: return 'bg-gray-100 text-gray-600';
     }
   };
 
-  // For permanent notifications that go to the Notification Center
-  const showNotification = useCallback((
+  const convertToNotification = (stored: StoredNotification): Notification => {
+    const timestamp = stored.eventTimestamp?.toDate() || stored.createdAt?.toDate() || new Date();
+    
+    return {
+      id: stored.id,
+      title: stored.title,
+      message: stored.message,
+      type: stored.type,
+      timestamp,
+      read: stored.read,
+      link: stored.link,
+      data: stored.data,
+      forAdmin: stored.forAdmin,
+      forStaff: stored.forStaff,
+      isResolved: stored.isResolved,
+      triggerEventId: stored.triggerEventId,
+      resolvedAt: stored.resolvedAt?.toDate()
+    };
+  };
+
+  // Filter notifications based on user role - SHOW ALL for staff that are forStaff=true
+  const filteredNotifications = storedNotifications
+    .filter(notif => !notif.isResolved)
+    .filter(notif => {
+      // If user is admin, show admin and staff notifications
+      if (userRole === 'admin') {
+        return true;
+      }
+      // If user is staff, only show notifications marked for staff
+      return notif.forStaff === true;
+    })
+    .map(convertToNotification);
+
+  const unreadCount = filteredNotifications.filter(n => !n.read).length;
+
+  useEffect(() => {
+    const initialize = async () => {
+      try {
+        await notificationMigration.runMigrationIfNeeded();
+      } catch (error) {
+        console.error('Migration error:', error);
+      }
+      
+      const unsubscribe = notificationService.subscribe((notifications: StoredNotification[]) => {
+        console.log(`📢 Received ${notifications.length} notifications from Firestore`);
+        setStoredNotifications(notifications);
+        setIsLoading(false);
+      });
+
+      notificationService.cleanupOldNotifications();
+
+      return () => {
+        unsubscribe();
+      };
+    };
+    
+    initialize();
+  }, []);
+
+  const showNotification = useCallback(async (
     message: string, 
     type: NotificationType = 'success', 
     title?: string,
     link?: string,
     data?: NotificationData,
-    forAdmin: boolean = false,
-    forStaff: boolean = true
-  ) => {
-    // Create a new notification with a timestamp-based ID
-    const newNotification: Notification = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      title: title || getDefaultTitle(type),
+    forAdmin: boolean = true,  // Changed to true by default for admin
+    forStaff: boolean = true,   // Changed to true by default for staff
+    triggerEventId?: string,
+    eventTimestamp?: Date,
+    showToast: boolean = true
+  ): Promise<string | null> => {
+    const eventId = triggerEventId || `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const notificationTitle = title || getDefaultTitle(type);
+    
+    // Check if notification already exists in current state
+    const existingNotification = storedNotifications.find(n => n.triggerEventId === eventId && !n.isResolved);
+    
+    if (existingNotification) {
+      console.log(`Notification already exists: ${eventId}`);
+      return existingNotification.id;
+    }
+    
+    const notificationId = await notificationService.createNotification(
+      notificationTitle,
       message,
       type,
-      timestamp: new Date(),
-      read: false,
-      link,
-      data,
-      forAdmin,
-      forStaff,
-    };
-
-    // Add to notifications list only if it's for the current user role
-    if ((forAdmin && userRole === 'admin') || (forStaff && userRole === 'staff')) {
-      setNotifications(prev => [newNotification, ...prev].slice(0, 50));
-      
-      // Also show toast for permanent notifications
+      eventId,
+      {
+        link,
+        data,
+        forAdmin,
+        forStaff,
+        eventTimestamp
+      }
+    );
+    
+    // Only show toast for NEW notifications AND when showToast is true
+    if (showToast && notificationId) {
       setToast({ message, type });
-      
-      // Auto-hide toast after 4 seconds
       setTimeout(() => setToast(null), 4000);
     }
-  }, [userRole]);
+    
+    return notificationId;
+  }, [storedNotifications]);
 
-  // For toast-only notifications that don't go to the Notification Center
   const showToastOnly = useCallback((
     message: string, 
-    type: NotificationType = 'error'
+    type: NotificationType = 'error',
+    _title?: string
   ) => {
-    // Only show toast, don't add to notifications list
     setToast({ message, type });
-    
-    // Auto-hide toast after 3 seconds (shorter for error toasts)
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  const markAsRead = useCallback((id: string) => {
-    setNotifications(prev =>
-      prev.map(notif =>
-        notif.id === id ? { ...notif, read: true } : notif
-      )
-    );
+  const markAsRead = useCallback(async (id: string) => {
+    await notificationService.markAsRead(id);
   }, []);
 
-  const markAllAsRead = useCallback(() => {
-    setNotifications(prev =>
-      prev.map(notif => ({ ...notif, read: true }))
-    );
+  const markAllAsRead = useCallback(async () => {
+    await notificationService.markAllAsRead();
   }, []);
 
-  const clearNotification = useCallback((id: string) => {
-    setNotifications(prev => prev.filter(notif => notif.id !== id));
+  const clearNotification = useCallback(async (id: string) => {
+    await notificationService.deleteNotification(id);
   }, []);
 
-  // Filter notifications based on user role
-  const filteredNotifications = notifications.filter(notif => 
-    (notif.forAdmin && userRole === 'admin') || 
-    (notif.forStaff && userRole === 'staff') ||
-    (!notif.forAdmin && !notif.forStaff)
-  );
+  const resolveNotification = useCallback(async (triggerEventId: string) => {
+    await notificationService.resolveNotification(triggerEventId);
+  }, []);
 
-  const unreadCount = filteredNotifications.filter(n => !n.read).length;
+  // Show loading indicator while fetching notifications
+  if (isLoading) {
+    return <>{children}</>;
+  }
 
   return (
     <NotificationContext.Provider value={{ 
@@ -232,11 +281,11 @@ export default function NotificationProvider({ children }: { children: ReactNode
       clearNotification,
       unreadCount,
       userRole,
-      setUserRole
+      setUserRole,
+      resolveNotification
     }}>
       {children}
       
-      {/* GLOBAL TOAST UI */}
       <AnimatePresence>
         {toast && (
           <motion.div 
