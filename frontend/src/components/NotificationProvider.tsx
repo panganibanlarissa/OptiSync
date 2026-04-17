@@ -213,9 +213,14 @@ export default function NotificationProvider({ children }: { children: ReactNode
       try {
         await notificationMigration.runMigrationIfNeeded();
         
+        // Immediately fetch notifications to show them right away
+        const initialNotifications = await notificationService.fetchNotifications();
+        setStoredNotifications(initialNotifications);
+        setIsLoading(false);
+        
+        // Setup real-time listener for live updates
         unsubscribe = notificationService.subscribe((notifications: StoredNotification[]) => {
           setStoredNotifications(notifications);
-          setIsLoading(false);
         });
 
         notificationService.cleanupOldNotifications();

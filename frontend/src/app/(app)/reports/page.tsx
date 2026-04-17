@@ -469,17 +469,28 @@ export default function ReportsPage() {
       doc.text("No deadstock items identified.", 14, secondTableY + 10);
     }
 
-    const summaryY = liquidationItems.length > 0 ? (doc as any).lastAutoTable.finalY + 15 : secondTableY + 25;
-    if (summaryY < pageHeight - 40) {
-      doc.setFontSize(10);
-      doc.setTextColor(0, 0, 0);
-      doc.text("Executive Summary:", 14, summaryY);
-      doc.setFontSize(9);
-      doc.setTextColor(40, 40, 40);
-      doc.text(`• Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
-      doc.text(`• Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
-      doc.text(`• Potential capital recovery from liquidation: PHP ${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
+    let summaryY = liquidationItems.length > 0 ? (doc as any).lastAutoTable.finalY + 15 : secondTableY + 25;
+    
+    // Add new page if not enough space for summary
+    if (summaryY + 40 > pageHeight - 20) {
+      doc.addPage();
+      summaryY = 40;
     }
+    
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Executive Summary", 14, summaryY);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`• Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
+    doc.text(`• Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
+    doc.text(`• Potential capital recovery from liquidation: PHP ${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
+    doc.text(`• Overall stock accuracy rate: ${stockAccuracyRate.toFixed(1)}% of inventory actively moving in sales.`, 14, summaryY + 22);
+    
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Recommendation: Prioritize restocking critical items while liquidating deadstock to optimize capital efficiency and warehouse utilization.", 14, summaryY + 30);
 
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {

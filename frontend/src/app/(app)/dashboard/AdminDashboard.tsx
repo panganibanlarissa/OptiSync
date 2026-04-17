@@ -816,9 +816,9 @@ export default function AdminDashboard() {
           variants={itemVariants}
           className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
         >
-          <div className="flex items-center justify-between mb-4 shrink-0">
+          <div className="flex flex-col gap-3 mb-4 shrink-0">
             <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
+              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg flex-shrink-0">
                 <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <div>
@@ -832,7 +832,7 @@ export default function AdminDashboard() {
             </div>
             
             {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
-              <div className="flex items-center bg-gray-50 p-0.5 rounded-lg">
+              <div className="flex items-center bg-gray-50 p-0.5 rounded-lg w-fit">
                 {[30, 60, 90].map((period: number) => (
                   <button
                     key={period}
@@ -1053,17 +1053,26 @@ function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastD
       transition={{ duration: 0.5 }}
       className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-100"
     >
-      <div className="flex justify-between items-start mb-2">
-        <h3 className="font-semibold text-gray-800 text-xs sm:text-sm truncate pr-2">
-          {data.name}
-        </h3>
-        {data.trend === "up" ? (
-          <ArrowUpRight size={14} className="text-[#0B3C8A] sm:w-4 sm:h-4" />
-        ) : data.trend === "down" ? (
-          <ArrowDownRight size={14} className="text-orange-500 sm:w-4 sm:h-4" />
-        ) : (
-          <div className="w-4 h-4 rounded-full bg-gray-400" />
-        )}
+      <div className="flex justify-between items-start gap-2 mb-3">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          {data.trend === "up" ? (
+            <ArrowUpRight size={14} className="text-[#0B3C8A] sm:w-4 sm:h-4 flex-shrink-0" />
+          ) : data.trend === "down" ? (
+            <ArrowDownRight size={14} className="text-orange-500 sm:w-4 sm:h-4 flex-shrink-0" />
+          ) : (
+            <div className="w-4 h-4 rounded-full bg-gray-400 flex-shrink-0" />
+          )}
+          <h3 className="font-semibold text-gray-800 text-xs sm:text-sm break-words">
+            {data.name}
+          </h3>
+        </div>
+        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded flex-shrink-0 w-fit ${
+          data.priority === 'high' ? 'bg-red-100 text-red-700' :
+          data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+          'bg-blue-100 text-blue-700'
+        }`}>
+          {data.priority.toUpperCase()}
+        </span>
       </div>
       
       <div className="grid grid-cols-3 gap-2 mb-3">
@@ -1092,13 +1101,6 @@ function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastD
           <Package size={12} />
           {needsReorder ? `Order ${orderQuantity} Units` : "Stock Sufficient"}
         </div>
-        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded ${
-          data.priority === 'high' ? 'bg-red-100 text-red-700' :
-          data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
-          'bg-blue-100 text-blue-700'
-        }`}>
-          {data.priority.toUpperCase()}
-        </span>
       </div>
     </motion.div>
   );

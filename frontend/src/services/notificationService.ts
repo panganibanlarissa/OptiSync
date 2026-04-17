@@ -70,6 +70,35 @@ class NotificationService {
     };
   }
 
+  async fetchNotifications(): Promise<StoredNotification[]> {
+    try {
+      const notificationsRef = collection(db, `clinics/${CLINIC_ID}/notifications`);
+      const q = query(
+        notificationsRef,
+        orderBy('eventTimestamp', 'desc'),
+        limit(100)
+      );
+      
+      const snapshot = await getDocs(q);
+      const notifications: StoredNotification[] = [];
+      
+      snapshot.forEach((doc: DocumentSnapshot) => {
+        const data = doc.data();
+        if (data) {
+          notifications.push({
+            id: doc.id,
+            ...data
+          } as StoredNotification);
+        }
+      });
+      
+      return notifications;
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      return [];
+    }
+  }
+
   private startListening() {
     try {
       const notificationsRef = collection(db, `clinics/${CLINIC_ID}/notifications`);

@@ -1014,14 +1014,14 @@ function ForecastItem({ data }: { data: ForecastDisplayData }) {
       transition={{ duration: 0.5 }}
       className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-100"
     >
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex items-center gap-1.5">
+      <div className="flex justify-between items-start gap-2 mb-2">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {getTrendIcon()}
-          <h3 className="font-semibold text-gray-800 text-xs sm:text-sm truncate pr-2">
+          <h3 className="font-semibold text-gray-800 text-xs sm:text-sm break-words">
             {data.name}
           </h3>
         </div>
-        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded ${
+        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded flex-shrink-0 w-fit ${
           data.priority === 'high' ? 'bg-red-100 text-red-700' :
           data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
           'bg-blue-100 text-blue-700'
