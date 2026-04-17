@@ -29,7 +29,8 @@ import {
   Download,
   TrendingUp,
   TrendingDown,
-  Minus
+  Minus,
+  PieChart
 } from "lucide-react";
 
 const IMAGE_COLORS = [
@@ -61,19 +62,10 @@ interface ForecastDisplayData {
   priority: 'high' | 'medium' | 'low';
 }
 
-interface ChartDataPoint {
-  label: string;
-  actual: number;
-  forecast: number;
-  lower?: number;
-  upper?: number;
-  date: Date;
-}
-
-interface HeatmapData {
-  category: string;
-  profit: number;
-  volume: number;
+interface CategoryStockData {
+  name: string;
+  stock: number;
+  percentage: number;
   color: string;
 }
 
@@ -113,16 +105,15 @@ const itemVariants: Variants = {
   },
 };
 
-const CURRENT_PERIOD = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const MIN_TRANSACTIONS_FOR_ML = 10;
 
 const CATEGORY_COLORS: Record<string, string> = {
-  'Frames': 'bg-emerald-500',
-  'Lenses': 'bg-blue-500',
-  'Contact Lenses': 'bg-indigo-500',
-  'Solutions': 'bg-amber-500',
-  'Accessories': 'bg-purple-500',
-  'Unknown': 'bg-gray-500'
+  'Frames': '#0B3C8A',      // Deep blue
+  'Lenses': '#10B981',       // Emerald green
+  'Contact Lenses': '#8B5CF6', // Purple
+  'Solutions': '#F59E0B',     // Amber
+  'Accessories': '#EF4444',    // Red
+  'Unknown': '#6B7280'        // Gray
 };
 
 const modalVariants: Variants = { 
@@ -132,20 +123,17 @@ const modalVariants: Variants = {
 };
 
 export default function StaffDashboard() {
-  const [activeTab, setActiveTab] = useState<"weekly" | "monthly">("weekly");
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [scanMode, setScanMode] = useState<'in' | 'out'>('in');
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [newProduct, setNewProduct] = useState<ProductFormData | null>(null);
   const [createdProductId, setCreatedProductId] = useState<string | null>(null);
-  const [hoveredBar, setHoveredBar] = useState<{ label: string; actual: number } | null>(null);
   
   const { products, transactions, addProduct, adjustStock, userRole, userName, userId } = useFirebase();
   const { loading, recommendations, usingML, dataLoaded } = useMLForecasting();
   const { showNotification } = useNotification();
 
   const handleOpenAddProduct = () => {
-    // Generate SKU based on category count
     const categoryDefaults: Record<string, string> = {
       "Frames": "FRM",
       "Lenses": "LNS",
@@ -196,11 +184,11 @@ export default function StaffDashboard() {
         stock: Number(formData.stock),
         lastMovedDaysAgo: 0,
         imageColor: formData.imageColor || IMAGE_COLORS[Math.floor(Math.random() * IMAGE_COLORS.length)],
-        image: formData.image || null, // This should now contain the Cloudinary URL
+        image: formData.image || null,
         leadTimeDays: Number(formData.leadTimeDays) || 7,
         reorderPoint: Number(formData.reorderPoint) || 10,
         expiryDate: formData.expiryDate || null,
-        createdAt: new Date().toISOString() // Add creation timestamp for reference
+        createdAt: new Date().toISOString()
       };
       
       const newProductId = await addProduct(productToSave);
@@ -217,7 +205,6 @@ export default function StaffDashboard() {
       showNotification("Failed to add new product. Please try again.", "error", "Error");
     }
   };
-
 
   const completedTransactions = useMemo(() => {
     return transactions.filter(t => t.status === 'completed');
@@ -251,84 +238,14 @@ export default function StaffDashboard() {
     }).length;
   }, [completedTransactions]);
 
-  // Calculate weekly sales data from real transactions
-  const weeklySalesData = useMemo(() => {
-    const today = new Date();
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const result: ChartDataPoint[] = [];
-    
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      
-      const nextDate = new Date(date);
-      nextDate.setDate(date.getDate() + 1);
-      
-      const daySales = completedTransactions
-        .filter(t => {
-          const transDate = new Date(t.date);
-          return transDate >= date && transDate < nextDate;
-        })
-        .reduce((sum, t) => sum + t.total, 0);
-      
-      result.push({
-        label: weekDays[date.getDay()],
-        actual: daySales,
-        forecast: 0,
-        date: date
-      });
-    }
-    
-    return result;
-  }, [completedTransactions]);
-
-  // Calculate monthly sales data from real transactions
-  const monthlySalesData = useMemo(() => {
-    const year = new Date().getFullYear();
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const result: ChartDataPoint[] = [];
-    
-    for (let month = 0; month < 12; month++) {
-      const monthStart = new Date(year, month, 1);
-      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
-      
-      const monthlySales = completedTransactions
-        .filter(t => {
-          const transDate = new Date(t.date);
-          return transDate >= monthStart && transDate <= monthEnd;
-        })
-        .reduce((sum, t) => sum + t.total, 0);
-      
-      result.push({
-        label: monthNames[month],
-        actual: monthlySales,
-        forecast: 0,
-        date: monthStart
-      });
-    }
-    
-    return result;
-  }, [completedTransactions]);
-
-  const chartData = activeTab === "weekly" ? weeklySalesData : monthlySalesData;
-  const chartMaxValue = useMemo(() => {
-    if (!chartData || chartData.length === 0) return 10000;
-    const max = Math.max(...chartData.map(d => d.actual));
-    return Math.ceil(max / 10000) * 10000 || 10000;
-  }, [chartData]);
-
-  // Calculate low stock count from real data
   const lowStockCount = useMemo(() => {
     return products.filter(p => p.stock <= p.reorderPoint && p.stock > 0).length;
   }, [products]);
 
-  // Calculate total inventory count from real data
   const totalInventoryCount = useMemo(() => {
     return products.reduce((sum, p) => sum + p.stock, 0);
   }, [products]);
 
-  // Calculate previous period sales for trend comparison
   const previousPeriodSales = useMemo(() => {
     const now = new Date();
     const yesterday = new Date(now);
@@ -350,6 +267,74 @@ export default function StaffDashboard() {
     const percentChange = ((todaySales - previousPeriodSales) / previousPeriodSales) * 100;
     return `${percentChange >= 0 ? '+' : ''}${Math.round(percentChange)}%`;
   }, [todaySales, previousPeriodSales]);
+
+  // Calculate category stock distribution for pie chart
+  const categoryStockData = useMemo(() => {
+    const categoryMap = new Map<string, number>();
+    
+    products.forEach(product => {
+      if (product.stock > 0) {
+        const current = categoryMap.get(product.category) || 0;
+        categoryMap.set(product.category, current + product.stock);
+      }
+    });
+    
+    const totalStock = Array.from(categoryMap.values()).reduce((sum, val) => sum + val, 0);
+    
+    const data: CategoryStockData[] = Array.from(categoryMap.entries())
+      .map(([name, stock]) => ({
+        name,
+        stock,
+        percentage: totalStock > 0 ? (stock / totalStock) * 100 : 0,
+        color: CATEGORY_COLORS[name] || CATEGORY_COLORS['Unknown']
+      }))
+      .sort((a, b) => b.stock - a.stock);
+    
+    return { data, totalStock };
+  }, [products]);
+
+  // Generate pie chart SVG path
+  const generatePieSlice = (startAngle: number, endAngle: number, radius: number, center: number) => {
+    const startX = center + radius * Math.cos(startAngle);
+    const startY = center + radius * Math.sin(startAngle);
+    const endX = center + radius * Math.cos(endAngle);
+    const endY = center + radius * Math.sin(endAngle);
+    const largeArcFlag = endAngle - startAngle > Math.PI ? 1 : 0;
+    
+    return `M ${center} ${center} L ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
+  };
+
+  const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
+    if (hasEnoughDataForML && recommendations.length > 0) {
+      return recommendations.slice(0, 3).map(r => ({
+        name: r.productName,
+        currentStock: r.currentStock,
+        predictedDemand: r.predictedDemand30d,
+        trend: r.trend,
+        priority: r.confidence
+      }));
+    }
+    return [];
+  }, [hasEnoughDataForML, recommendations]);
+
+  const RECENTLY_ADDED: RecentlyAddedItem[] = useMemo(() => {
+    return products
+      .sort((a, b) => {
+        const aTime = a.createdAt ? (typeof a.createdAt === 'number' ? a.createdAt : a.createdAt.toMillis?.() || 0) : 0;
+        const bTime = b.createdAt ? (typeof b.createdAt === 'number' ? b.createdAt : b.createdAt.toMillis?.() || 0) : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 8)
+      .map(p => ({
+        id: p.sku || p.id.slice(0, 8),
+        name: p.name,
+        category: p.category,
+        quantity: p.stock,
+        price: p.markupPrice,
+        dateAdded: p.createdAt ? (p.createdAt instanceof Date ? p.createdAt : new Date(p.createdAt.toMillis?.() || 0)) : new Date(),
+        status: p.stock <= 0 ? 'low_stock' : p.stock <= p.reorderPoint ? 'low_stock' : 'in_stock'
+      }));
+  }, [products]);
 
   const STATS_DATA: StatData[] = useMemo(() => {
     return [
@@ -384,84 +369,6 @@ export default function StaffDashboard() {
     ];
   }, [todaySales, todayTransactionCount, lowStockCount, totalInventoryCount, salesTrend]);
 
-  // Format recommendations for display
-  const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
-  if (hasEnoughDataForML && recommendations.length > 0) {
-    return recommendations.slice(0, 3).map(r => ({
-      name: r.productName,
-      currentStock: r.currentStock,
-      predictedDemand: r.predictedDemand30d,  // Changed from r.predictedDemand to r.predictedDemand30d
-      trend: r.trend,
-      priority: r.confidence
-    }));
-  }
-  return [];
-}, [hasEnoughDataForML, recommendations]);
-
-  // Calculate heatmap data from real products
-  const HEATMAP_DATA: HeatmapData[] = useMemo(() => {
-    const categoryStats = products.reduce((acc, product) => {
-      if (!acc[product.category]) {
-        acc[product.category] = {
-          totalProfit: 0,
-          totalVolume: 0,
-          count: 0
-        };
-      }
-      const profitPerUnit = product.markupPrice - product.baseCost;
-      acc[product.category].totalProfit += profitPerUnit * product.stock;
-      acc[product.category].totalVolume += product.stock;
-      acc[product.category].count++;
-      return acc;
-    }, {} as Record<string, { totalProfit: number; totalVolume: number; count: number }>);
-
-    const maxProfit = Math.max(...Object.values(categoryStats).map(c => c.totalProfit), 1);
-    const maxVolume = Math.max(...Object.values(categoryStats).map(c => c.totalVolume), 1);
-
-    return Object.entries(categoryStats).map(([category, data]) => ({
-      category,
-      profit: maxProfit > 0 ? Math.round((data.totalProfit / maxProfit) * 100) : 0,
-      volume: maxVolume > 0 ? Math.round((data.totalVolume / maxVolume) * 100) : 0,
-      color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Unknown']
-    }));
-  }, [products]);
-
-  // Get recently added stock from real data (products sorted by most recent)
-  const RECENTLY_ADDED: RecentlyAddedItem[] = useMemo(() => {
-    return products
-      .sort((a, b) => {
-        const aTime = a.createdAt ? (typeof a.createdAt === 'number' ? a.createdAt : a.createdAt.toMillis?.() || 0) : 0;
-        const bTime = b.createdAt ? (typeof b.createdAt === 'number' ? b.createdAt : b.createdAt.toMillis?.() || 0) : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 8)
-      .map(p => ({
-        id: p.sku || p.id.slice(0, 8),
-        name: p.name,
-        category: p.category,
-        quantity: p.stock,
-        price: p.markupPrice,
-        dateAdded: p.createdAt ? (p.createdAt instanceof Date ? p.createdAt : new Date(p.createdAt.toMillis?.() || 0)) : new Date(),
-        status: p.stock <= 0 ? 'low_stock' : p.stock <= p.reorderPoint ? 'low_stock' : 'in_stock'
-      }));
-  }, [products]);
-
-  const handleBarHover = (label: string, actual: number) => {
-    setHoveredBar({ label, actual });
-  };
-
-  const handleBarLeave = () => {
-    setHoveredBar(null);
-  };
-
-  if (loading && !dataLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
-      </div>
-    );
-  }
-
   const handleProductFound = async (productId: string) => {
     const product = products.find(p => p.id === productId);
     if (product) {
@@ -487,6 +394,19 @@ export default function StaffDashboard() {
       }
     }
   };
+
+  if (loading && !dataLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
+      </div>
+    );
+  }
+
+  // Pie chart dimensions
+  let currentAngle = -Math.PI / 2;
+  const pieRadius = 100;
+  const pieCenter = 120;
 
   return (
     <motion.div
@@ -575,111 +495,132 @@ export default function StaffDashboard() {
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* PIE CHART SECTION - Enhanced with no hover effects */}
         <motion.div
           variants={itemVariants}
           className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
         >
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-2 sm:gap-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <div className="p-1.5 sm:p-2 bg-[#0B3C8A] rounded-lg">
-                  <Activity className="text-white w-4 h-4 sm:w-5 sm:h-5" />
+                  <PieChart className="text-white w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Sales Velocity
+                  Inventory by Category
                 </h2>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-500 ml-1">
-                <Calendar size={10} className="sm:w-3 sm:h-3" />
-                <span>Period: {CURRENT_PERIOD}</span>
+                <Package size={10} className="sm:w-3 sm:h-3" />
+                <span>Total Stock: {categoryStockData.totalStock.toLocaleString()} units</span>
               </div>
-            </div>
-
-            <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
-              <button
-                onClick={() => setActiveTab("weekly")}
-                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                  activeTab === "weekly"
-                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                Weekly Sales
-              </button>
-              <button
-                onClick={() => setActiveTab("monthly")}
-                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                  activeTab === "monthly"
-                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                Monthly Sales
-              </button>
             </div>
           </div>
 
-          <div className="relative min-h-57.5">
-            {chartData && chartData.length > 0 ? (
-              <div>
-                <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
-                  <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                    <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.25 / 1000)}k</span>
-                    <span>0</span>
-                  </div>
-
-                  <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[300px] sm:min-w-0">
-                    {chartData.slice(0, activeTab === "weekly" ? 7 : 12).map((data, idx) => (
-                      <StaffChartBarGroup
-                        key={`${activeTab}-${idx}`}
-                        label={data.label}
-                        actual={data.actual}
-                        maxVal={chartMaxValue}
-                        delay={idx * 0.1}
-                        isWide={activeTab === "monthly"}
-                        onHover={() => handleBarHover(data.label, data.actual)}
-                        onLeave={handleBarLeave}
-                      />
-                    ))}
+          <div className="relative">
+            {categoryStockData.data.length > 0 ? (
+              <div className="flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-12">
+                {/* Pie Chart */}
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-full blur-md opacity-20 bg-gray-800 transform translate-y-1"></div>
+                  
+                  <svg width="240" height="240" viewBox="0 0 240 240" className="mx-auto relative z-10">
+                    {categoryStockData.data.map((category) => {
+                      const angle = (category.percentage / 100) * Math.PI * 2;
+                      const startAngle = currentAngle;
+                      const endAngle = startAngle + angle;
+                      const path = generatePieSlice(startAngle, endAngle, pieRadius, pieCenter);
+                      currentAngle = endAngle;
+                      
+                      return (
+                        <path
+                          key={category.name}
+                          d={path}
+                          fill={category.color}
+                          stroke="white"
+                          strokeWidth="2.5"
+                        />
+                      );
+                    })}
+                    {(() => { currentAngle = -Math.PI / 2; return null; })()}
+                  </svg>
+                  
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <div className="bg-white/90 rounded-full w-28 h-28 flex flex-col items-center justify-center shadow-sm">
+                      <span className="text-2xl font-bold text-gray-800">
+                        {categoryStockData.totalStock.toLocaleString()}
+                      </span>
+                      <span className="text-[9px] text-gray-500">Total Units</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Hover Tooltip Display */}
-                {hoveredBar && (
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
-                    <div className="font-bold mb-1 text-center">{hoveredBar.label}</div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400">Sales:</span>
-                      <span className="font-bold text-emerald-400">₱{hoveredBar.actual.toLocaleString()}</span>
-                    </div>
+                {/* Category Breakdown Legend */}
+                <div className="flex-1 space-y-3 w-full max-w-sm">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4 border-b border-gray-100 pb-2">
+                    Category Breakdown
+                  </h3>
+                  <div className="space-y-3">
+                    {categoryStockData.data.map((category) => (
+                      <div
+                        key={category.name}
+                        className="flex items-center justify-between p-2 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-3.5 h-3.5 rounded-full shadow-sm"
+                            style={{ backgroundColor: category.color }}
+                          />
+                          <span className="text-sm font-medium text-gray-700">
+                            {category.name}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-gray-800">
+                            {category.stock.toLocaleString()}
+                          </span>
+                          <span className="text-[11px] text-gray-500 ml-1.5">
+                            ({category.percentage.toFixed(1)}%)
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                )}
-
-                <div className="flex flex-col items-center mt-3 sm:mt-6">
-                  <div className="flex justify-center items-center gap-3 sm:gap-6 text-xs sm:text-sm bg-gray-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-100">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-[#0B3C8A]"></span>
-                      <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                        Clinic Sales
-                      </span>
+                  
+                  {/* Visual summary bar with extra bottom spacing */}
+                  <div className="mt-8 pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between text-[10px] text-gray-500 mb-2">
+                      <span>Category Distribution</span>
+                      <span>100%</span>
+                    </div>
+                    <div className="flex h-2 rounded-full overflow-hidden shadow-inner">
+                      {categoryStockData.data.map((category) => (
+                        <div
+                          key={`bar-${category.name}`}
+                          className="h-full"
+                          style={{ 
+                            width: `${category.percentage}%`,
+                            backgroundColor: category.color
+                          }}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                <Database size={48} className="mb-3 opacity-20" />
-                <p className="text-sm font-medium">No transaction data available</p>
-                <p className="text-xs mt-1 text-center max-w-xs">
-                  Complete sales transactions to see sales velocity.
-                  Current: {completedTransactions.length} transaction{completedTransactions.length !== 1 ? 's' : ''}
+              <div className="flex flex-col items-center justify-center h-80 text-gray-400">
+                <Database size={64} className="mb-4 opacity-20" />
+                <p className="text-sm font-medium">No inventory data available</p>
+                <p className="text-xs mt-2 text-center max-w-xs">
+                  Add products to see category distribution.
                 </p>
               </div>
             )}
           </div>
+          
+          {/* Extra bottom spacing to match the top spacing */}
+          <div className="mt-8"></div>
         </motion.div>
 
         <motion.div
@@ -747,31 +688,59 @@ export default function StaffDashboard() {
           </p>
 
           <div className="space-y-3 sm:space-y-5">
-            {HEATMAP_DATA.length > 0 ? (
-              HEATMAP_DATA.map((item, idx) => (
-                <div key={idx} className="space-y-1 sm:space-y-1.5">
-                  <div className="flex justify-between text-xs sm:text-sm">
-                    <span className="font-semibold text-gray-700 text-[10px] sm:text-sm">
-                      {item.category}
-                    </span>
+            {(() => {
+              const categoryStats = products.reduce((acc, product) => {
+                if (!acc[product.category]) {
+                  acc[product.category] = {
+                    totalProfit: 0,
+                    totalVolume: 0,
+                    count: 0
+                  };
+                }
+                const profitPerUnit = product.markupPrice - product.baseCost;
+                acc[product.category].totalProfit += profitPerUnit * product.stock;
+                acc[product.category].totalVolume += product.stock;
+                acc[product.category].count++;
+                return acc;
+              }, {} as Record<string, { totalProfit: number; totalVolume: number; count: number }>);
+
+              const maxProfit = Math.max(...Object.values(categoryStats).map(c => c.totalProfit), 1);
+              const maxVolume = Math.max(...Object.values(categoryStats).map(c => c.totalVolume), 1);
+
+              const heatmapData = Object.entries(categoryStats).map(([category, data]) => ({
+                category,
+                profit: maxProfit > 0 ? Math.round((data.totalProfit / maxProfit) * 100) : 0,
+                volume: maxVolume > 0 ? Math.round((data.totalVolume / maxVolume) * 100) : 0,
+                color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Unknown']
+              }));
+
+              return heatmapData.length > 0 ? (
+                heatmapData.map((item, idx) => (
+                  <div key={idx} className="space-y-1 sm:space-y-1.5">
+                    <div className="flex justify-between text-xs sm:text-sm">
+                      <span className="font-semibold text-gray-700 text-[10px] sm:text-sm">
+                        {item.category}
+                      </span>
+                    </div>
+                    <div className="relative h-5 sm:h-6 bg-gray-100 rounded-md overflow-hidden flex">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${item.profit}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className={`h-full flex items-center px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
+                        style={{ backgroundColor: item.color }}
+                      >
+                        Profit {item.profit}%
+                      </motion.div>
+                    </div>
                   </div>
-                  <div className="relative h-5 sm:h-6 bg-gray-100 rounded-md overflow-hidden flex">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${item.profit}%` }}
-                      transition={{ duration: 1, ease: "easeOut" }}
-                      className={`${item.color} h-full flex items-center px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
-                    >
-                      Profit {item.profit}%
-                    </motion.div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-4">
-                No product data available.
-              </p>
-            )}
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  No product data available.
+                </p>
+              );
+            })()}
           </div>
         </motion.div>
 
@@ -1126,46 +1095,5 @@ function RecentlyAddedRow({ data }: { data: RecentlyAddedItem }) {
         {formatDate(data.dateAdded)}
       </td>
     </tr>
-  );
-}
-
-function StaffChartBarGroup({
-  label,
-  actual,
-  maxVal,
-  delay,
-  isWide = false,
-  onHover,
-  onLeave,
-}: {
-  label: string;
-  actual: number;
-  maxVal: number;
-  delay: number;
-  isWide?: boolean;
-  onHover: () => void;
-  onLeave: () => void;
-}) {
-  const actualHeight = `${Math.min((actual / maxVal) * 100, 100)}%`;
-  const barWidthClass = isWide ? "w-3 sm:w-10" : "w-2 sm:w-6";
-
-  return (
-    <div 
-      className="flex flex-col items-center gap-1 sm:gap-2 flex-1 group relative cursor-pointer h-full justify-end"
-      onMouseEnter={onHover}
-      onMouseLeave={onLeave}
-    >
-      <div className="flex items-end gap-0.5 sm:gap-1 w-full justify-center h-full">
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: actualHeight }}
-          transition={{ duration: 0.5, delay: delay, ease: "easeOut" }}
-          className={`${barWidthClass} bg-[#0B3C8A] rounded-t-sm origin-bottom opacity-90 group-hover:opacity-100 shadow-sm transition-opacity`}
-        ></motion.div>
-      </div>
-      <span className="text-[10px] sm:text-xs font-medium text-gray-400 group-hover:text-gray-700 transition-colors">
-        {label}
-      </span>
-    </div>
   );
 }

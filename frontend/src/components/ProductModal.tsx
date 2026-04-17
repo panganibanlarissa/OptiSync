@@ -1,4 +1,3 @@
-// src/components/ProductModal.tsx
 "use client";
 
 import React, { useState, useRef } from "react";
@@ -70,8 +69,8 @@ export default function ProductModal({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     
-    // Auto-generate SKU when category changes in 'add' mode
-    if (name === 'category' && mode === 'add') {
+    // Auto-generate SKU when category changes (Works for both add and edit modes)
+    if (name === 'category') {
       const categoryDefaults: Record<string, string> = {
         "Frames": "FRM",
         "Lenses": "LNS",
@@ -80,6 +79,7 @@ export default function ProductModal({
         "Accessories": "ACC"
       };
       const prefix = categoryDefaults[value] || "ITM";
+      // Filter existing products of the same category to determine the count
       const count = products.filter((p: any) => p.category === value).length + 1;
       const generatedSku = `${prefix}-${count.toString().padStart(2, '0')}`;
       
@@ -214,7 +214,7 @@ export default function ProductModal({
                   onChange={handleChange} 
                   type="number" 
                   min="0" 
-                  className={`w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-1 ${THEME_RING} focus:outline-none text-gray-700`} 
+                  className="w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" 
                 />
               </div>
               <div>
@@ -225,7 +225,7 @@ export default function ProductModal({
                   name="adjustmentReason" 
                   value={formData.adjustmentReason || "Manual Count"} 
                   onChange={handleChange} 
-                  className={`w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none text-gray-700`}
+                  className="w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700"
                 >
                   <option>Manual Count / Audit</option>
                   <option>Damaged Item</option>
@@ -239,7 +239,7 @@ export default function ProductModal({
             <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100">
               Cancel
             </button>
-            <button type="submit" form="stock-form" className={`flex-1 px-3 py-1.5 rounded-md ${THEME_BG} text-white text-[11px] sm:text-sm font-medium ${THEME_HOVER}`}>
+            <button type="submit" form="stock-form" className="flex-1 px-3 py-1.5 rounded-md bg-[#0B3C8A] text-white text-[11px] sm:text-sm font-medium hover:bg-[#082F6E]">
               Update Stock
             </button>
           </div>
@@ -317,11 +317,11 @@ export default function ProductModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Item Name</label>
-                <input required name="name" value={formData.name} onChange={handleChange} type="text" className={`w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input required name="name" value={formData.name} onChange={handleChange} type="text" className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Category</label>
-                <select required name="category" value={formData.category} onChange={handleChange} className={`w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 ${THEME_RING} focus:outline-none text-gray-700`}>
+                <select required name="category" value={formData.category} onChange={handleChange} className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700">
                   <option>Frames</option>
                   <option>Lenses</option>
                   <option>Contact Lenses</option>
@@ -334,41 +334,41 @@ export default function ProductModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">SKU</label>
-                <input name="sku" value={formData.sku} onChange={handleChange} type="text" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 font-mono text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} readOnly={mode === 'add'} />
+                <input name="sku" value={formData.sku} onChange={handleChange} type="text" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 font-mono text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" readOnly={mode === 'add'} />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Specifications</label>
-                <input name="specifications" value={formData.specifications} onChange={handleChange} type="text" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input name="specifications" value={formData.specifications} onChange={handleChange} type="text" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Cost (₱)</label>
-                <input required name="baseCost" value={formData.baseCost || ''} onChange={handleChange} type="number" min="0" step="0.01" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input required name="baseCost" value={formData.baseCost || ''} onChange={handleChange} type="number" min="0" step="0.01" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Price (₱)</label>
-                <input required name="markupPrice" value={formData.markupPrice || ''} onChange={handleChange} type="number" min="0" step="0.01" disabled={mode === 'edit' && userRole !== 'admin'} className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input required name="markupPrice" value={formData.markupPrice || ''} onChange={handleChange} type="number" min="0" step="0.01" disabled={mode === 'edit' && userRole !== 'admin'} className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Stock</label>
-                <input required name="stock" value={formData.stock || ''} onChange={handleChange} type="number" min="0" disabled={mode === 'edit'} className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input required name="stock" value={formData.stock || ''} onChange={handleChange} type="number" min="0" disabled={mode === 'edit'} className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Reorder Point</label>
-                <input name="reorderPoint" value={formData.reorderPoint || 10} onChange={handleChange} type="number" min="1" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input name="reorderPoint" value={formData.reorderPoint || 10} onChange={handleChange} type="number" min="1" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Lead Time (Days)</label>
-                <input name="leadTimeDays" value={formData.leadTimeDays || 7} onChange={handleChange} type="number" min="1" className={`w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 ${THEME_RING} focus:outline-none text-gray-700`} />
+                <input name="leadTimeDays" value={formData.leadTimeDays || 7} onChange={handleChange} type="number" min="1" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
               </div>
             </div>
 
-            {/* Batch Number Field */}
+            {/* Batch Number Field - Fixed font color */}
             <div>
               <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
                 <PackageIcon size={12} className="inline mr-1" /> Batch Number
@@ -379,11 +379,11 @@ export default function ProductModal({
                 onChange={handleChange} 
                 type="text" 
                 placeholder="e.g., BATCH-2024-001"
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none"
+                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-900 placeholder-gray-400 bg-white"
               />
             </div>
 
-            {/* Expiry Date - Only for perishable items */}
+            {/* Expiry Date - Only for perishable items - Fixed font color */}
             {isPerishable && (
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
@@ -396,7 +396,7 @@ export default function ProductModal({
                   onChange={handleChange} 
                   type="date" 
                   min={new Date().toISOString().split('T')[0]}
-                  className={`w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:ring-2 ${THEME_RING} focus:outline-none`} 
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-900 bg-white" 
                 />
                 <p className="text-[9px] text-gray-400 mt-1">
                   Products will appear in expiry alerts 30 days before expiry
@@ -419,7 +419,7 @@ export default function ProductModal({
             type="submit" 
             form="product-form" 
             disabled={uploading} 
-            className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400 cursor-wait' : THEME_BG + ' ' + THEME_HOVER} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2 transition-colors`}
+            className={`flex-1 px-3 py-1.5 rounded-lg ${uploading ? 'bg-blue-400 cursor-wait' : 'bg-[#0B3C8A] hover:bg-[#082F6E]'} text-white text-[11px] sm:text-sm font-medium flex justify-center items-center gap-2 transition-colors`}
           >
             {uploading ? (
               <>Uploading...</>

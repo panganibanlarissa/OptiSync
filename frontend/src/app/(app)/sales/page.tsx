@@ -145,7 +145,6 @@ export default function SalesPage() {
     });
   }, [firebaseTransactions, filterDate, viewByMonth]);
 
-  // Calculate available stock based on actual stock minus reserved items in cart
   const productsWithAvailableStock = useMemo(() => {
     return (firebaseProducts as Product[]).map(product => ({
       ...product,
@@ -169,7 +168,6 @@ export default function SalesPage() {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const total = subtotal;
 
-  // FIXED: Add to cart function
   const addToCart = (product: Product) => {
     const currentReserved = tempReservedStock.get(product.id) || 0;
     const actualStock = product.stock;
@@ -183,7 +181,6 @@ export default function SalesPage() {
       return;
     }
 
-    // Update reserved stock
     setTempReservedStock(prev => {
       const newMap = new Map(prev);
       newMap.set(product.id, (prev.get(product.id) || 0) + 1);
@@ -210,7 +207,6 @@ export default function SalesPage() {
     });
   };
 
-  // FIXED: Update quantity function
   const updateQuantity = (id: string, delta: number) => {
     setCart(prevCart => {
       const item = prevCart.find(i => i.id === id);
@@ -218,19 +214,15 @@ export default function SalesPage() {
 
       const newQty = item.quantity + delta;
       
-      // Don't allow quantity less than 1
       if (newQty < 1) return prevCart;
       
-      // Find the actual product
       const product = (firebaseProducts as Product[]).find(p => p.id === id);
       if (!product) return prevCart;
       
-      // Calculate current reserved stock from cart (excluding current item)
       const currentReservedForOthers = prevCart
         .filter(i => i.id !== id)
         .reduce((sum, i) => sum + i.quantity, 0);
       
-      // Check if new total reserved exceeds actual stock
       if (delta > 0 && (currentReservedForOthers + newQty) > product.stock) {
         showToastOnly(
           `Cannot exceed available stock! Only ${product.stock - currentReservedForOthers} left`,
@@ -239,7 +231,6 @@ export default function SalesPage() {
         return prevCart;
       }
       
-      // Update tempReservedStock
       setTempReservedStock(prevMap => {
         const newMap = new Map(prevMap);
         if (newQty === 0) {
@@ -250,14 +241,12 @@ export default function SalesPage() {
         return newMap;
       });
       
-      // Update cart
       return prevCart.map(cartItem =>
         cartItem.id === id ? { ...cartItem, quantity: newQty } : cartItem
       );
     });
   };
 
-  // FIXED: Remove from cart function
   const removeFromCart = (id: string) => {
     setTempReservedStock(prev => {
       const newMap = new Map(prev);
@@ -268,7 +257,6 @@ export default function SalesPage() {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
-  // FIXED: Clear cart function
   const clearCart = () => {
     setCart([]);
     setTempReservedStock(new Map());
@@ -283,20 +271,23 @@ export default function SalesPage() {
       return;
     }
 
+    let parsedAmountGiven: number | undefined = undefined;
+    let calculatedChange: number | undefined = undefined;
+
     if (paymentMethod === "cash") {
       if (!amountGiven.trim()) {
         showToastOnly("Please enter the amount given", "error");
         return;
       }
 
-      const amount = parseFloat(amountGiven);
-      if (isNaN(amount) || amount < total) {
+      parsedAmountGiven = parseFloat(amountGiven);
+      if (isNaN(parsedAmountGiven) || parsedAmountGiven < total) {
         showToastOnly("Amount given must be at least ₱" + total.toLocaleString(), "error");
         return;
       }
+      calculatedChange = parsedAmountGiven - total;
     }
 
-    // Prevent double submission
     if (isProcessingCheckout) {
       return;
     }
@@ -312,7 +303,33 @@ export default function SalesPage() {
 
       const productsBecomingOutOfStock: Array<{ name: string; id: string }> = [];
 
-      // Update product stocks
+      // Create the transaction object dynamically to avoid undefined fields
+      const newTransactionData: any = {
+        patientName: patientName || "Walk-in Patient",
+        items: cart,
+        total: total,
+        date: new Date(),
+        status: "completed" as const,
+        synced: isOnline,
+        staffName: currentUser.name,
+        staffId: currentUser.id,
+        paymentMethod: paymentMethod,
+      };
+
+      // Only add cash-related fields if they are defined
+      if (paymentMethod === "cash") {
+        newTransactionData.amountGiven = parsedAmountGiven;
+        newTransactionData.change = calculatedChange;
+      }
+
+      // Add transaction FIRST to prevent stock deduction if DB write fails
+      const transactionId = await addTransaction(newTransactionData);
+
+      if (!transactionId) {
+        throw new Error("Failed to create transaction - no ID returned");
+      }
+
+      // NOW update product stocks
       for (const cartItem of cart) {
         const product = (firebaseProducts as Product[]).find(p => p.id === cartItem.id);
         if (product) {
@@ -349,30 +366,6 @@ export default function SalesPage() {
         }
       }
 
-      const change = paymentMethod === "cash" ? parseFloat(amountGiven) - total : undefined;
-
-      const newTransactionData = {
-        patientName: patientName || "Walk-in Patient",
-        items: cart,
-        total: total,
-        date: new Date(),
-        status: "completed" as const,
-        synced: isOnline,
-        staffName: currentUser.name,
-        staffId: currentUser.id,
-        paymentMethod: paymentMethod,
-        amountGiven: paymentMethod === "cash" ? parseFloat(amountGiven) : undefined,
-        change: change
-      };
-
-      // Add transaction and get the returned ID
-      const transactionId = await addTransaction(newTransactionData as any);
-
-      // Verify transactionId exists before proceeding
-      if (!transactionId) {
-        throw new Error("Failed to create transaction - no ID returned");
-      }
-
       const newTransaction: Transaction = {
         id: transactionId,
         ...newTransactionData
@@ -380,7 +373,6 @@ export default function SalesPage() {
 
       const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
       
-      // Show success notification
       showNotification(
         `Order completed: ${itemCount} item${itemCount !== 1 ? 's' : ''} for ₱${total.toLocaleString()}`, 
         "success", 
@@ -420,7 +412,6 @@ export default function SalesPage() {
         );
       }
 
-      // Show out of stock alerts
       for (const outOfStockProduct of productsBecomingOutOfStock) {
         showNotification(
           `❌ ${outOfStockProduct.name} is now out of stock`,
@@ -437,13 +428,8 @@ export default function SalesPage() {
         );
       }
       
-      // Set the transaction for receipt modal
       setLastTransaction(newTransaction);
-      
-      // Clear cart and form
       clearCart();
-      
-      // Show the checkout modal
       setShowCheckoutModal(true);
       
     } catch (error) {
@@ -467,9 +453,7 @@ export default function SalesPage() {
   };
 
   const generateReceipt = (trx: Transaction) => {
-    // Safely handle transaction ID
     const receiptId = trx.id ? trx.id.slice(-8).toUpperCase() : 'UNKNOWN';
-    
     const itemCount = trx.items.length;
     const estimatedHeight = 80 + (itemCount * 10);
     const doc = new jsPDF('p', 'mm', [80, Math.max(150, estimatedHeight)]);
@@ -683,7 +667,7 @@ export default function SalesPage() {
       {activeTab === "pos" ? (
         <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
-            <div className="shrink-0 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
+            <div className="shrink-0 p-2 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
               <div className="flex gap-2 sm:gap-3">
                 <div className="relative group flex-1">
                   <Search className={`absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:${THEME_TEXT}`} size={16} />
@@ -894,7 +878,6 @@ export default function SalesPage() {
                 <AnimatePresence>
                   {cart.map(item => {
                     const product = productsWithAvailableStock.find(p => p.id === item.id);
-                    // Calculate the actual available stock including current cart quantity
                     const actualStock = product?.stock || 0;
                     const reservedForOthers = cart
                       .filter(i => i.id !== item.id)
