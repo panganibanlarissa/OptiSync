@@ -1,4 +1,3 @@
-// frontend/src/components/NotificationProvider.tsx
 "use client";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from "react";
@@ -6,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, AlertTriangle, X, Info } from "lucide-react";
 import { notificationService, StoredNotification } from "@/services/notificationService";
 import { notificationMigration } from "@/services/notificationMigration";
+import { useFirebase } from "@/context/FirebaseContext";
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
@@ -95,6 +95,7 @@ export default function NotificationProvider({ children }: { children: ReactNode
   const [toast, setToast] = useState<{ message: string; type: NotificationType } | null>(null);
   const [userRole, setUserRole] = useState<'admin' | 'staff'>('staff');
   const [isLoading, setIsLoading] = useState(true);
+  const { user, appUser, loading: authLoading } = useFirebase();
 
   const getDefaultTitle = (type: NotificationType): string => {
     switch (type) {
@@ -156,44 +157,79 @@ export default function NotificationProvider({ children }: { children: ReactNode
     };
   };
 
-  // Filter notifications based on user role - SHOW ALL for staff that are forStaff=true
+  // Logic to filter notifications visible in the bell
   const filteredNotifications = storedNotifications
     .filter(notif => !notif.isResolved)
     .filter(notif => {
-      // If user is admin, show admin and staff notifications
-      if (userRole === 'admin') {
-        return true;
-      }
-      // If user is staff, only show notifications marked for staff
-      return notif.forStaff === true;
+      // 1. ALWAYS BLOCK AUTH ERRORS FROM THE BELL
+      const msg = notif.message.toLowerCase();
+      const blockedKeywords = [
+        "login failed",
+        "check your credentials",
+        "firebase",
+        "email-already-in-use",
+        "auth/"
+      ];
+      
+      const isAuthError = blockedKeywords.some(keyword => msg.includes(keyword));
+      if (isAuthError) return false;
+
+      // 2. ADMIN VIEW
+      if (userRole === 'admin') return true;
+
+      // 3. STAFF VIEW (Specific Categories)
+      const title = notif.title.toLowerCase();
+      const staffKeywords = [
+        'low stock', 'deadstock', 'liquidation', 'adjusted stock', 
+        'qr', 'product update', 'edit product', 'scan in', 
+        'scan out', 'catalog', 'expiring', 'pos', 'sale', 'transaction'
+      ];
+
+      const matchesStaffCategory = staffKeywords.some(keyword => title.includes(keyword));
+      return notif.forStaff === true || matchesStaffCategory;
     })
     .map(convertToNotification);
 
   const unreadCount = filteredNotifications.filter(n => !n.read).length;
 
   useEffect(() => {
+    if (appUser?.role) {
+      const role = appUser.role.toLowerCase();
+      if (role === 'admin' || role === 'staff') {
+        setUserRole(role as 'admin' | 'staff');
+      }
+    }
+  }, [appUser]);
+
+  useEffect(() => {
+    if (authLoading || !user) {
+      setStoredNotifications([]);
+      return;
+    }
+
+    let unsubscribe: (() => void) | null = null;
+
     const initialize = async () => {
       try {
         await notificationMigration.runMigrationIfNeeded();
+        
+        unsubscribe = notificationService.subscribe((notifications: StoredNotification[]) => {
+          setStoredNotifications(notifications);
+          setIsLoading(false);
+        });
+
+        notificationService.cleanupOldNotifications();
       } catch (error) {
-        console.error('Migration error:', error);
+        console.error('Initialization error:', error);
       }
-      
-      const unsubscribe = notificationService.subscribe((notifications: StoredNotification[]) => {
-        console.log(`📢 Received ${notifications.length} notifications from Firestore`);
-        setStoredNotifications(notifications);
-        setIsLoading(false);
-      });
-
-      notificationService.cleanupOldNotifications();
-
-      return () => {
-        unsubscribe();
-      };
     };
     
     initialize();
-  }, []);
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user, authLoading]);
 
   const showNotification = useCallback(async (
     message: string, 
@@ -201,51 +237,48 @@ export default function NotificationProvider({ children }: { children: ReactNode
     title?: string,
     link?: string,
     data?: NotificationData,
-    forAdmin: boolean = true,  // Changed to true by default for admin
-    forStaff: boolean = true,   // Changed to true by default for staff
+    forAdmin: boolean = true,
+    forStaff: boolean = true,
     triggerEventId?: string,
     eventTimestamp?: Date,
     showToast: boolean = true
   ): Promise<string | null> => {
+    
+    // Check if it's an auth error to prevent saving to DB
+    const blockedKeywords = ["login failed", "check your credentials", "firebase", "auth/"];
+    const isBlocked = blockedKeywords.some(keyword => message.toLowerCase().includes(keyword));
+
+    if (isBlocked) {
+      if (showToast) {
+        setToast({ message, type: 'error' });
+        setTimeout(() => setToast(null), 4000);
+      }
+      return null; // Stop here, do not create Firestore document
+    }
+
     const eventId = triggerEventId || `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const notificationTitle = title || getDefaultTitle(type);
-    
-    // Check if notification already exists in current state
+
     const existingNotification = storedNotifications.find(n => n.triggerEventId === eventId && !n.isResolved);
-    
-    if (existingNotification) {
-      console.log(`Notification already exists: ${eventId}`);
-      return existingNotification.id;
-    }
-    
+    if (existingNotification) return existingNotification.id;
+
     const notificationId = await notificationService.createNotification(
       notificationTitle,
       message,
       type,
       eventId,
-      {
-        link,
-        data,
-        forAdmin,
-        forStaff,
-        eventTimestamp
-      }
+      { link, data, forAdmin, forStaff, eventTimestamp }
     );
-    
-    // Only show toast for NEW notifications AND when showToast is true
+
     if (showToast && notificationId) {
       setToast({ message, type });
       setTimeout(() => setToast(null), 4000);
     }
-    
+
     return notificationId;
   }, [storedNotifications]);
 
-  const showToastOnly = useCallback((
-    message: string, 
-    type: NotificationType = 'error',
-    _title?: string
-  ) => {
+  const showToastOnly = useCallback((message: string, type: NotificationType = 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
@@ -255,8 +288,11 @@ export default function NotificationProvider({ children }: { children: ReactNode
   }, []);
 
   const markAllAsRead = useCallback(async () => {
-    await notificationService.markAllAsRead();
-  }, []);
+    const idsToMark = filteredNotifications.filter(n => !n.read).map(n => n.id);
+    for (const id of idsToMark) {
+      await notificationService.markAsRead(id);
+    }
+  }, [filteredNotifications]);
 
   const clearNotification = useCallback(async (id: string) => {
     await notificationService.deleteNotification(id);
@@ -265,11 +301,6 @@ export default function NotificationProvider({ children }: { children: ReactNode
   const resolveNotification = useCallback(async (triggerEventId: string) => {
     await notificationService.resolveNotification(triggerEventId);
   }, []);
-
-  // Show loading indicator while fetching notifications
-  if (isLoading) {
-    return <>{children}</>;
-  }
 
   return (
     <NotificationContext.Provider value={{ 
@@ -285,7 +316,7 @@ export default function NotificationProvider({ children }: { children: ReactNode
       resolveNotification
     }}>
       {children}
-      
+
       <AnimatePresence>
         {toast && (
           <motion.div 
@@ -300,7 +331,7 @@ export default function NotificationProvider({ children }: { children: ReactNode
               {getToastIcon(toast.type)}
             </div>
             <div className="text-sm font-medium pr-2 max-w-xs">{toast.message}</div>
-            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+            <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600">
               <X size={16} />
             </button>
           </motion.div>
