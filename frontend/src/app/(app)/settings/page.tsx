@@ -1,3 +1,5 @@
+// src/app/(app)/settings/page.tsx
+
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -15,12 +17,12 @@ import {
   Key,
   AlertCircle,
   CheckCircle2,
-  Clock,
   Ban,
   UserCheck,
   Eye,
   EyeOff,
-  RefreshCw
+  RefreshCw,
+  Clock
 } from "lucide-react";
 
 // --- THEME CONSTANTS ---
@@ -102,7 +104,7 @@ function evaluatePassword(password: string): PasswordStrength {
 }
 
 export default function SettingsPage() {
-  // Data State
+  // Data State - ALL HOOKS MUST BE CALLED AT THE TOP LEVEL, BEFORE ANY CONDITIONAL RETURNS
   const { 
     staffUsers, 
     fetchStaffUsers, 
@@ -116,6 +118,8 @@ export default function SettingsPage() {
     resetStaffPassword,
     loading: firebaseLoading
   } = useFirebase();
+  
+  const { showNotification, showToastOnly } = useNotification();
   
   // Use staffUsers directly from context - no local state duplication
   const users = staffUsers;
@@ -145,8 +149,6 @@ export default function SettingsPage() {
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { showNotification, showToastOnly } = useNotification();
-
   // Password strength — computed live as the user types
   const passwordStrength = useMemo(
     () => evaluatePassword(userForm.password),
@@ -163,7 +165,7 @@ export default function SettingsPage() {
       }
     };
     loadUsers();
-  }, [userRole, fetchStaffUsers]);
+  }, [userRole, fetchStaffUsers, staffUsers.length]);
 
   // Manual refresh function
   const handleRefresh = async () => {
@@ -175,28 +177,55 @@ export default function SettingsPage() {
     showToastOnly("Staff list refreshed", "success");
   };
 
-  // Check if current user is admin
-  if (userRole !== 'admin') {
-    return (
-      <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md text-center">
-          <Shield className="w-12 h-12 text-red-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-gray-800 mb-2">Access Denied</h2>
-          <p className="text-sm text-gray-600">
-            You need administrator privileges to access this page.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Helper function to get last login display with icon and color
+  const getLastLoginDisplay = (user: StaffUser) => {
+    if (user.lastLogin === "Never" || !user.lastLogin) {
+      return {
+        text: "Never logged in",
+        icon: <Clock size={12} className="text-gray-400" />,
+        color: "text-gray-400"
+      };
+    }
+    
+    // Check if the login was recent (within last hour)
+    if (user.lastLoginTimestamp) {
+      const now = new Date();
+      const diffMs = now.getTime() - user.lastLoginTimestamp.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      
+      if (diffMins < 60) {
+        return {
+          text: user.lastLogin,
+          icon: <Clock size={12} className="text-green-500" />,
+          color: "text-green-600"
+        };
+      }
+    }
+    
+    return {
+      text: user.lastLogin,
+      icon: <Clock size={12} className="text-blue-500" />,
+      color: "text-blue-600"
+    };
+  };
 
-  if (loading && !refreshing) {
-    return (
-      <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
-      </div>
-    );
-  }
+  // Sort users by last login (most recent first)
+  const sortedUsers = useMemo(() => {
+    return [...users].sort((a, b) => {
+      // Current user first
+      if (a.uid === userId) return -1;
+      if (b.uid === userId) return 1;
+      
+      // Then sort by last login timestamp (most recent first)
+      const aTime = a.lastLoginTimestamp?.getTime() || 0;
+      const bTime = b.lastLoginTimestamp?.getTime() || 0;
+      return bTime - aTime;
+    });
+  }, [users, userId]);
+
+  // Count active and inactive users
+  const activeCount = users.filter(u => u.status === 'Active').length;
+  const inactiveCount = users.filter(u => u.status === 'Inactive').length;
 
   // --- HANDLERS ---
 
@@ -409,15 +438,28 @@ export default function SettingsPage() {
     }
   };
 
-  // Format last login for display
-  const formatLastLogin = (lastLogin: string | undefined) => {
-    if (!lastLogin || lastLogin === "Never") return "Never";
-    return lastLogin;
-  };
+  // EARLY RETURN AFTER ALL HOOKS ARE DECLARED
+  if (userRole !== 'admin') {
+    return (
+      <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md text-center">
+          <Shield className="w-12 h-12 text-red-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-gray-800 mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-600">
+            You need administrator privileges to access this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-  // Count active and inactive users
-  const activeCount = users.filter(u => u.status === 'Active').length;
-  const inactiveCount = users.filter(u => u.status === 'Inactive').length;
+  if (loading && !refreshing) {
+    return (
+      <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20">
@@ -467,7 +509,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="p-0 sm:p-2 overflow-x-auto">
-            <table className="w-full text-left text-xs sm:text-sm whitespace-nowrap min-w-[800px]">
+            <table className="w-full text-left text-xs sm:text-sm whitespace-nowrap min-w-[700px]">
               <thead className="text-gray-400 font-bold border-b border-gray-100 uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="p-4 sm:p-5">User Info</th>
@@ -478,7 +520,7 @@ export default function SettingsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {users.length === 0 ? (
+                {sortedUsers.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-8 text-center text-gray-400">
                       No staff members found. Click "Add Staff Member" to create one.
@@ -486,109 +528,114 @@ export default function SettingsPage() {
                   </tr>
                 ) : (
                   <AnimatePresence>
-                    {users.map((user) => (
-                      <motion.tr 
-                        key={user.uid} 
-                        variants={itemVariants} 
-                        layout 
-                        initial={{ opacity: 0 }} 
-                        animate={{ opacity: 1 }} 
-                        exit={{ opacity: 0 }} 
-                        className={`hover:bg-slate-50 transition-colors group ${
-                          user.status === 'Inactive' ? 'opacity-60 bg-red-50/30' : ''
-                        }`}
-                      >
-                        <td className="p-4 sm:p-5">
-                          <div className="font-bold text-gray-800 flex items-center gap-2">
-                            {user.uid === userId && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">
-                                YOU
-                              </span>
-                            )}
-                            {user.name}
-                          </div>
-                          <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                            <Mail size={10} className="opacity-50" />
-                            {user.email}
-                          </div>
-                        </td>
-                        <td className="p-4 sm:p-5">
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
-                            user.role === 'admin' 
-                              ? 'bg-purple-100 text-purple-700 border border-purple-200' 
-                              : 'bg-blue-50 text-blue-700 border border-blue-200'
-                          }`}>
-                            {user.role === 'admin' ? 'Admin' : 'Staff'}
-                          </span>
-                        </td>
-                        <td className="p-4 sm:p-5">
-                          <div className="flex items-center gap-1.5">
-                            <div className={`w-2 h-2 rounded-full ${
-                              user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'
-                            }`}></div>
-                            <span className={`font-medium text-xs ${
-                              user.status === 'Active' ? 'text-emerald-700' : 'text-red-700'
+                    {sortedUsers.map((user) => {
+                      const lastLoginDisplay = getLastLoginDisplay(user);
+                      return (
+                        <motion.tr 
+                          key={user.uid} 
+                          variants={itemVariants} 
+                          layout 
+                          initial={{ opacity: 0 }} 
+                          animate={{ opacity: 1 }} 
+                          exit={{ opacity: 0 }} 
+                          className={`hover:bg-slate-50 transition-colors group ${
+                            user.status === 'Inactive' ? 'opacity-60 bg-red-50/30' : ''
+                          }`}
+                        >
+                          <td className="p-4 sm:p-5">
+                            <div className="font-bold text-gray-800 flex items-center gap-2">
+                              {user.uid === userId && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                  YOU
+                                </span>
+                              )}
+                              {user.name}
+                            </div>
+                            <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                              <Mail size={10} className="opacity-50" />
+                              {user.email}
+                            </div>
+                          </td>
+                          <td className="p-4 sm:p-5">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
+                              user.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-700 border border-purple-200' 
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
                             }`}>
-                              {user.status}
+                              {user.role === 'admin' ? 'Admin' : 'Staff'}
                             </span>
-                          </div>
-                        </td>
-                        <td className="p-4 sm:p-5">
-                          <div className="flex items-center gap-1 text-xs text-gray-500">
-                            <Clock size={12} className="opacity-50" />
-                            {formatLastLogin(user.lastLogin)}
-                          </div>
-                        </td>
-                        <td className="p-4 sm:p-5 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {user.uid !== userId && (
-                              <>
-                                <button 
-                                  onClick={() => handleResetPassword(user.email)}
-                                  className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Send Password Reset"
-                                >
-                                  <Key size={16}/>
-                                </button>
-                                <button 
-                                  onClick={() => openEditUserModal(user)}
-                                  className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Edit User"
-                                >
-                                  <Edit3 size={16}/>
-                                </button>
-                                {user.status === 'Active' ? (
+                          </td>
+                          <td className="p-4 sm:p-5">
+                            <div className="flex items-center gap-1.5">
+                              <div className={`w-2 h-2 rounded-full ${
+                                user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'
+                              }`}></div>
+                              <span className={`font-medium text-xs ${
+                                user.status === 'Active' ? 'text-emerald-700' : 'text-red-700'
+                              }`}>
+                                {user.status}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-4 sm:p-5">
+                            <div className="flex items-center gap-1.5">
+                              {lastLoginDisplay.icon}
+                              <span className={`text-xs ${lastLoginDisplay.color}`}>
+                                {lastLoginDisplay.text}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-4 sm:p-5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {user.uid !== userId && (
+                                <>
                                   <button 
-                                    onClick={() => openDeactivateModal(user)}
-                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
-                                    title="Deactivate User"
+                                    onClick={() => handleResetPassword(user.email)}
+                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Send Password Reset"
                                   >
-                                    <Ban size={16}/>
+                                    <Key size={16}/>
                                   </button>
-                                ) : (
-                                  <>
+                                  <button 
+                                    onClick={() => openEditUserModal(user)}
+                                    className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Edit User"
+                                  >
+                                    <Edit3 size={16}/>
+                                  </button>
+                                  {user.status === 'Active' ? (
                                     <button 
-                                      onClick={() => handleReactivateUser(user)}
-                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                      title="Reactivate User"
+                                      onClick={() => openDeactivateModal(user)}
+                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                      title="Deactivate User"
                                     >
-                                      <UserCheck size={16}/>
+                                      <Ban size={16}/>
                                     </button>
-                                    <button 
-                                      onClick={() => openDeleteModal(user)}
-                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                      title="Permanently Delete User"
-                                    >
-                                      <Trash2 size={16}/>
-                                    </button>
-                                  </>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </motion.tr>
-                    ))}
+                                  ) : (
+                                    <>
+                                      <button 
+                                        onClick={() => handleReactivateUser(user)}
+                                        className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                        title="Reactivate User"
+                                      >
+                                        <UserCheck size={16}/>
+                                      </button>
+                                      <button 
+                                        onClick={() => openDeleteModal(user)}
+                                        className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                        title="Permanently Delete User"
+                                      >
+                                        <Trash2 size={16}/>
+                                      </button>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
                   </AnimatePresence>
                 )}
               </tbody>
@@ -604,6 +651,9 @@ export default function SettingsPage() {
             </div>
             <div className="flex items-center gap-1">
               <Trash2 size={12} className="text-red-500" /> Permanently deleted accounts cannot be restored
+            </div>
+            <div className="flex items-center gap-1">
+              <Clock size={12} className="text-blue-500" /> Last login shows when user last accessed the system
             </div>
           </div>
         </motion.div>

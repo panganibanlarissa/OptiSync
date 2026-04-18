@@ -107,6 +107,7 @@ export interface StaffUser {
   role: "admin" | "staff";
   status: "Active" | "Inactive" | "Deleted";
   lastLogin: string;
+  lastLoginTimestamp?: Date | null;
 }
 
 export interface AppUser {
@@ -182,6 +183,29 @@ const formatLastLogin = (date: Date): string => {
   });
 };
 
+// Helper function to create or update user document
+const ensureUserDocument = async (uid: string, email: string | null, name?: string) => {
+  const userRef = doc(db, "users", uid);
+  const userSnap = await getDoc(userRef);
+  
+  if (!userSnap.exists()) {
+    // Create user document if it doesn't exist
+    await setDoc(userRef, {
+      email: email || "",
+      name: name || email?.split('@')[0] || "User",
+      role: "staff",
+      status: "Active",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastLogin: "Never",
+      lastLoginAt: null
+    });
+    console.log("Created new user document for:", uid);
+  }
+  
+  return userRef;
+};
+
 // ================= PROVIDER =================
 
 export function FirebaseProvider({ children }: { children: ReactNode }) {
@@ -227,6 +251,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId(u.uid);
         setUserEmail(u.email || "");
 
+        // Ensure user document exists
+        await ensureUserDocument(u.uid, u.email);
+        
         const ref = doc(db, "users", u.uid);
         const snap = await getDoc(ref);
 
@@ -244,13 +271,15 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             status: data.status || "Active"
           });
         } else {
+          // This should not happen after ensureUserDocument, but fallback just in case
           setUserRole("staff");
           setUserName("Staff");
           setAppUser({
             uid: u.uid,
             email: u.email,
             role: "staff",
-            name: "Staff"
+            name: "Staff",
+            status: "Active"
           });
         }
       } else {
@@ -304,7 +333,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       console.log("Fetching products from Firestore...");
       const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
-      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50)); // Reduced from 100 to 50 for quota
+      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50));
       
       const snap = await getDocs(q);
 
@@ -345,7 +374,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       console.log("Fetching transactions from Firestore...");
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(500)); // Increased to 500 to get all historical transactions
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(500));
       
       const snap = await getDocs(q);
 
@@ -399,11 +428,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       const snap = await getDocs(q);
 
-      const fetchedUsers = snap.docs.map((d) => ({
-        uid: d.id,
-        ...d.data(),
-        lastLogin: d.data().lastLogin || "Never"
-      })) as StaffUser[];
+      const fetchedUsers = snap.docs.map((d) => {
+        const data = d.data();
+        const lastLoginTimestamp = data.lastLoginAt?.toDate() || null;
+        
+        return {
+          uid: d.id,
+          ...data,
+          lastLogin: lastLoginTimestamp ? formatLastLogin(lastLoginTimestamp) : (data.lastLogin || "Never"),
+          lastLoginTimestamp: lastLoginTimestamp,
+        };
+      }) as StaffUser[];
 
       setStaffUsers(fetchedUsers);
       setHasFetchedUsers(true);
@@ -469,7 +504,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     
     try {
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(500)); // Increased to 500 for full history
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(500));
       
       const unsubscribe = onSnapshot(q, (snap) => {
         const fetchedTransactions = snap.docs.map((d) => ({
@@ -498,7 +533,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     if (user && userRole === "admin" && !hasFetchedUsers && !isFetchingUsers) {
       const timer = setTimeout(() => {
         fetchStaffUsers(false);
-      }, 500); // Longer delay for staff users fetch
+      }, 500);
       
       return () => clearTimeout(timer);
     }
@@ -511,7 +546,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const loggedInUser = userCredential.user;
       
-      const userRef = doc(db, "users", loggedInUser.uid);
+      // Ensure user document exists before checking status
+      const userRef = await ensureUserDocument(loggedInUser.uid, loggedInUser.email);
       const userSnap = await getDoc(userRef);
       
       if (userSnap.exists()) {
@@ -529,15 +565,18 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const now = new Date();
       const formattedLastLogin = formatLastLogin(now);
       
-      // Update lastLogin - don't await to avoid blocking
-      updateDoc(userRef, {
+      // Update lastLogin - use setDoc with merge to ensure document exists
+      await setDoc(userRef, {
         lastLogin: formattedLastLogin,
-        lastLoginAt: serverTimestamp(),
-        lastActive: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }).catch((error) => {
-        console.warn("Could not update lastLogin:", error);
-      });
+        lastLoginAt: Timestamp.fromDate(now),
+        lastActive: Timestamp.fromDate(now),
+        updatedAt: Timestamp.fromDate(now)
+      }, { merge: true });
+      
+      // Immediately refresh staff users list to show updated last login
+      if (userRole === "admin") {
+        await fetchStaffUsers(true);
+      }
       
       // Reset cache flags on successful login
       setHasFetchedProducts(false);
@@ -592,7 +631,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      const now = new Date();
       const newProduct: Product = { 
         ...data, 
         id: docRef.id,
@@ -600,7 +638,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         updatedAt: Timestamp.now()
       };
       
-      // Update local state with the Timestamp object for proper sorting
       setProducts((prev) => [newProduct, ...prev]);
       
       return docRef.id;
@@ -721,12 +758,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         status: "Active",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        lastLogin: "Never"
+        lastLogin: "Never",
+        lastLoginAt: null
       });
       
       await updateProfile(userCredential.user, { displayName: name });
       
-      // Invalidate cache to force refresh
       setHasFetchedUsers(false);
       lastUsersFetchRef.current = 0;
       await fetchStaffUsers(true);
