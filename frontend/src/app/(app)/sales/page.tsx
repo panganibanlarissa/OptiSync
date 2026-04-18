@@ -127,20 +127,31 @@ export default function SalesPage() {
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
-      const transactionDate = new Date(transaction.date);
+      // Ensure date is a Date object
+      let transactionDate: Date;
+      if (transaction.date instanceof Date) {
+        transactionDate = transaction.date;
+      } else if (typeof transaction.date === 'string') {
+        transactionDate = new Date(transaction.date);
+      } else if (transaction.date && typeof transaction.date === 'object' && 'toDate' in transaction.date) {
+        // Handle Firestore Timestamp object (edge case)
+        transactionDate = (transaction.date as any).toDate();
+      } else {
+        return false; // Skip invalid dates
+      }
+      
+      // Format date in ISO format (YYYY-MM-DD) to avoid timezone issues
+      const year = transactionDate.getFullYear();
+      const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
+      const day = String(transactionDate.getDate()).padStart(2, '0');
+      const transactionDateStr = `${year}-${month}-${day}`;
       
       if (viewByMonth) {
-        const year = transactionDate.getFullYear();
-        const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
-        const transactionMonth = `${year}-${month}`;
+        const transactionMonth = transactionDateStr.slice(0, 7);
         const filterMonth = filterDate.slice(0, 7);
         return transactionMonth === filterMonth;
       } else {
-        const year = transactionDate.getFullYear();
-        const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
-        const day = String(transactionDate.getDate()).padStart(2, '0');
-        const transactionDay = `${year}-${month}-${day}`;
-        return transactionDay === filterDate;
+        return transactionDateStr === filterDate;
       }
     });
   }, [firebaseTransactions, filterDate, viewByMonth]);

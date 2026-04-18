@@ -345,15 +345,20 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       console.log("Fetching transactions from Firestore...");
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(50)); // Reduced to 50
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(500)); // Increased to 500 to get all historical transactions
       
       const snap = await getDocs(q);
 
-      const fetchedTransactions = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        date: d.data().date?.toDate() || new Date()
-      })) as Transaction[];
+      const fetchedTransactions = snap.docs.map((d) => {
+        const rawData = d.data();
+        return {
+          id: d.id,
+          ...rawData,
+          date: rawData.date?.toDate() || new Date()
+        };
+      }) as Transaction[];
+
+      console.log(`Fetched ${fetchedTransactions.length} transactions`);
 
       setTransactions(fetchedTransactions);
       setHasFetchedTransactions(true);
@@ -464,7 +469,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     
     try {
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(50));
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(500)); // Increased to 500 for full history
       
       const unsubscribe = onSnapshot(q, (snap) => {
         const fetchedTransactions = snap.docs.map((d) => ({
