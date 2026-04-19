@@ -50,11 +50,11 @@ const modalVariants: Variants = {
 
 // --- PASSWORD STRENGTH UTILITIES ---
 interface PasswordStrength {
-  score: number;        // 0–4
+  score: number;
   label: "Too Short" | "Weak" | "Fair" | "Good" | "Strong";
-  color: string;        // Tailwind bg class
-  textColor: string;    // Tailwind text class
-  barWidth: string;     // Tailwind w- class
+  color: string;
+  textColor: string;
+  barWidth: string;
   checks: {
     length: boolean;
     uppercase: boolean;
@@ -104,7 +104,6 @@ function evaluatePassword(password: string): PasswordStrength {
 }
 
 export default function SettingsPage() {
-  // Data State - ALL HOOKS MUST BE CALLED AT THE TOP LEVEL, BEFORE ANY CONDITIONAL RETURNS
   const { 
     staffUsers, 
     fetchStaffUsers, 
@@ -116,21 +115,19 @@ export default function SettingsPage() {
     deactivateStaffUser,
     reactivateStaffUser,
     resetStaffPassword,
+    resendVerificationEmail,
     loading: firebaseLoading
   } = useFirebase();
   
   const { showNotification, showToastOnly } = useNotification();
   
-  // Use staffUsers directly from context - no local state duplication
   const users = staffUsers;
   const loading = firebaseLoading;
   const [refreshing, setRefreshing] = useState(false);
 
-  // Modal State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   
-  // Controlled form state
   const [userForm, setUserForm] = useState({
     uid: "",
     name: "",
@@ -140,7 +137,6 @@ export default function SettingsPage() {
     status: "Active" as "Active" | "Inactive"
   });
 
-  // Password visibility toggle
   const [showPassword, setShowPassword] = useState(false);
   
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
@@ -148,36 +144,29 @@ export default function SettingsPage() {
   const [userToAction, setUserToAction] = useState<StaffUser | null>(null);
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState<string | null>(null);
 
-  // Password strength — computed live as the user types
   const passwordStrength = useMemo(
     () => evaluatePassword(userForm.password),
     [userForm.password]
   );
 
-  // Load users when component mounts or when userRole changes
   useEffect(() => {
     const loadUsers = async () => {
       if (userRole === 'admin') {
-        console.log("🔄 Loading staff users...");
         await fetchStaffUsers();
-        console.log("✅ Staff users loaded:", staffUsers.length);
       }
     };
     loadUsers();
-  }, [userRole, fetchStaffUsers, staffUsers.length]);
+  }, [userRole, fetchStaffUsers]);
 
-  // Manual refresh function
   const handleRefresh = async () => {
     setRefreshing(true);
-    console.log("🔄 Manually refreshing staff users...");
     await fetchStaffUsers();
-    console.log("✅ Staff users refreshed:", staffUsers.length);
     setRefreshing(false);
     showToastOnly("Staff list refreshed", "success");
   };
 
-  // Helper function to get last login display with icon and color
   const getLastLoginDisplay = (user: StaffUser) => {
     if (user.lastLogin === "Never" || !user.lastLogin) {
       return {
@@ -187,7 +176,6 @@ export default function SettingsPage() {
       };
     }
     
-    // Check if the login was recent (within last hour)
     if (user.lastLoginTimestamp) {
       const now = new Date();
       const diffMs = now.getTime() - user.lastLoginTimestamp.getTime();
@@ -209,30 +197,24 @@ export default function SettingsPage() {
     };
   };
 
-  // Sort users by last login (most recent first)
   const sortedUsers = useMemo(() => {
     return [...users].sort((a, b) => {
-      // Current user first
       if (a.uid === userId) return -1;
       if (b.uid === userId) return 1;
       
-      // Then sort by last login timestamp (most recent first)
       const aTime = a.lastLoginTimestamp?.getTime() || 0;
       const bTime = b.lastLoginTimestamp?.getTime() || 0;
       return bTime - aTime;
     });
   }, [users, userId]);
 
-  // Count active and inactive users
   const activeCount = users.filter(u => u.status === 'Active').length;
+  const pendingCount = users.filter(u => u.status === 'PendingVerification').length;
   const inactiveCount = users.filter(u => u.status === 'Inactive').length;
-
-  // --- HANDLERS ---
 
   const handleUserFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setUserForm({ ...userForm, [name]: value });
-    // Clear error for this field on change
     if (formErrors[name]) {
       setFormErrors(prev => {
         const newErrors = { ...prev };
@@ -279,13 +261,14 @@ export default function SettingsPage() {
 
   const openEditUserModal = (user: StaffUser) => {
     setModalMode("edit");
+    const displayStatus = user.status === "PendingVerification" ? "Active" : user.status;
     setUserForm({ 
       uid: user.uid,
       name: user.name, 
       email: user.email, 
       password: "",
       role: user.role === "admin" ? "Admin" : "Staff", 
-      status: user.status === "Active" ? "Active" : "Inactive"
+      status: displayStatus === "Active" ? "Active" : "Inactive"
     });
     setFormErrors({});
     setShowPassword(false);
@@ -320,11 +303,10 @@ export default function SettingsPage() {
           userForm.role.toLowerCase() as "admin" | "staff"
         );
         showNotification(
-          `${userForm.name} has been added as ${userForm.role}.`, 
+          `✅ ${userForm.name} has been added as ${userForm.role}. A verification email has been sent to ${userForm.email}.`, 
           "success",
-          "User Created"
+          "User Created - Verification Required"
         );
-        // Refresh the staff list after adding
         await fetchStaffUsers();
       } else if (modalMode === "edit") {
         await updateStaffUser(userForm.uid, {
@@ -338,18 +320,13 @@ export default function SettingsPage() {
           "success",
           "User Updated"
         );
-        // Refresh the staff list after updating
         await fetchStaffUsers();
       }
       setIsUserModalOpen(false);
     } catch (error: unknown) {
       console.error("Error saving user:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to save user. Please try again.";
-      showNotification(
-        errorMessage, 
-        "error",
-        "Error"
-      );
+      showNotification(errorMessage, "error", "Error");
     } finally {
       setIsSubmitting(false);
     }
@@ -358,18 +335,31 @@ export default function SettingsPage() {
   const handleResetPassword = async (email: string) => {
     try {
       await resetStaffPassword(email);
-      showNotification(
-        `Password reset email sent to ${email}`,
-        "success",
-        "Reset Email Sent"
-      );
+      showNotification(`Password reset email sent to ${email}`, "success", "Reset Email Sent");
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Failed to send reset email.";
-      showNotification(
-        errorMessage,
-        "error",
-        "Error"
-      );
+      showNotification(errorMessage, "error", "Error");
+    }
+  };
+
+  const handleResendVerification = async (email: string) => {
+    setResendingEmail(email);
+    try {
+      await resendVerificationEmail(email);
+      showNotification(`✅ Verification email sent to ${email}`, "success", "Email Verification Sent");
+    } catch (error: unknown) {
+      console.error("Error resending verification:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to send verification email.";
+      
+      // If the error says email already verified, show success instead
+      if (errorMessage.includes("already verified")) {
+        showNotification(`✅ Email already verified! Status updated to Active.`, "success", "Email Verified");
+        await fetchStaffUsers();
+      } else {
+        showNotification(errorMessage, "error", "Error");
+      }
+    } finally {
+      setResendingEmail(null);
     }
   };
 
@@ -379,19 +369,11 @@ export default function SettingsPage() {
         await deactivateStaffUser(userToAction.uid);
         setIsDeactivateModalOpen(false);
         setUserToAction(null);
-        showNotification(
-          `${userToAction.name} has been deactivated. They can be reactivated later.`, 
-          "warning",
-          "User Deactivated"
-        );
+        showNotification(`${userToAction.name} has been deactivated.`, "warning", "User Deactivated");
         await fetchStaffUsers();
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "Failed to deactivate user.";
-        showNotification(
-          errorMessage,
-          "error",
-          "Error"
-        );
+        showNotification(errorMessage, "error", "Error");
       }
     }
   };
@@ -402,19 +384,11 @@ export default function SettingsPage() {
         await deleteStaffUser(userToAction.uid);
         setIsDeleteModalOpen(false);
         setUserToAction(null);
-        showNotification(
-          `${userToAction.name} has been permanently deleted from the system.`, 
-          "info",
-          "User Deleted Permanently"
-        );
+        showNotification(`${userToAction.name} has been permanently deleted.`, "info", "User Deleted");
         await fetchStaffUsers();
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "Failed to delete user.";
-        showNotification(
-          errorMessage,
-          "error",
-          "Error"
-        );
+        showNotification(errorMessage, "error", "Error");
       }
     }
   };
@@ -422,23 +396,19 @@ export default function SettingsPage() {
   const handleReactivateUser = async (user: StaffUser) => {
     try {
       await reactivateStaffUser(user.uid);
+      const newStatus = user.emailVerified === false ? "PendingVerification" : "Active";
       showNotification(
-        `${user.name} has been reactivated. They can now log in again.`,
-        "success",
+        `${user.name} has been reactivated.`, 
+        "success", 
         "User Reactivated"
       );
       await fetchStaffUsers();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Failed to reactivate user.";
-      showNotification(
-        errorMessage,
-        "error",
-        "Error"
-      );
+      showNotification(errorMessage, "error", "Error");
     }
   };
 
-  // EARLY RETURN AFTER ALL HOOKS ARE DECLARED
   if (userRole !== 'admin') {
     return (
       <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
@@ -465,7 +435,6 @@ export default function SettingsPage() {
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20">
       <div className="w-full">
         
-        {/* HEADER */}
         <motion.div variants={containerVariants} initial="hidden" animate="visible" className="mb-6 sm:mb-8">
           <div className="flex justify-between items-start">
             <div>
@@ -495,7 +464,7 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-lg font-bold text-gray-800">Staff Accounts</h2>
               <p className="text-xs text-gray-500 mt-1">
-                {activeCount} active, {inactiveCount} inactive
+                {activeCount} active, {pendingCount} pending, {inactiveCount} inactive
               </p>
             </div>
             <button 
@@ -530,6 +499,12 @@ export default function SettingsPage() {
                   <AnimatePresence>
                     {sortedUsers.map((user) => {
                       const lastLoginDisplay = getLastLoginDisplay(user);
+                      const isPendingVerification = user.status === "PendingVerification" || user.emailVerified === false;
+                      const isInactive = user.status === "Inactive";
+                      const isActive = user.status === "Active";
+                      const isDeleted = user.status === "Deleted";
+                      const isResending = resendingEmail === user.email;
+                      
                       return (
                         <motion.tr 
                           key={user.uid} 
@@ -539,8 +514,8 @@ export default function SettingsPage() {
                           animate={{ opacity: 1 }} 
                           exit={{ opacity: 0 }} 
                           className={`hover:bg-slate-50 transition-colors group ${
-                            user.status === 'Inactive' ? 'opacity-60 bg-red-50/30' : ''
-                          }`}
+                            isInactive ? 'opacity-60 bg-red-50/30' : ''
+                          } ${isPendingVerification ? 'bg-yellow-50/30' : ''}`}
                         >
                           <td className="p-4 sm:p-5">
                             <div className="font-bold text-gray-800 flex items-center gap-2">
@@ -550,12 +525,17 @@ export default function SettingsPage() {
                                 </span>
                               )}
                               {user.name}
+                              {isPendingVerification && (
+                                <span className="text-[8px] font-bold px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded flex items-center gap-1">
+                                  <Clock size={10} /> Pending
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-1">
                               <Mail size={10} className="opacity-50" />
                               {user.email}
                             </div>
-                          </td>
+                           </td>
                           <td className="p-4 sm:p-5">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
                               user.role === 'admin' 
@@ -564,19 +544,23 @@ export default function SettingsPage() {
                             }`}>
                               {user.role === 'admin' ? 'Admin' : 'Staff'}
                             </span>
-                          </td>
+                           </td>
                           <td className="p-4 sm:p-5">
                             <div className="flex items-center gap-1.5">
                               <div className={`w-2 h-2 rounded-full ${
-                                user.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'
+                                isDeleted ? 'bg-gray-500' :
+                                isPendingVerification ? 'bg-yellow-500' :
+                                isActive ? 'bg-emerald-500' : 'bg-red-500'
                               }`}></div>
                               <span className={`font-medium text-xs ${
-                                user.status === 'Active' ? 'text-emerald-700' : 'text-red-700'
+                                isDeleted ? 'text-gray-500' :
+                                isPendingVerification ? 'text-yellow-700' :
+                                isActive ? 'text-emerald-700' : 'text-red-700'
                               }`}>
                                 {user.status}
                               </span>
                             </div>
-                          </td>
+                           </td>
                           <td className="p-4 sm:p-5">
                             <div className="flex items-center gap-1.5">
                               {lastLoginDisplay.icon}
@@ -584,10 +568,10 @@ export default function SettingsPage() {
                                 {lastLoginDisplay.text}
                               </span>
                             </div>
-                          </td>
+                           </td>
                           <td className="p-4 sm:p-5 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              {user.uid !== userId && (
+                              {user.uid !== userId && !isDeleted && (
                                 <>
                                   <button 
                                     onClick={() => handleResetPassword(user.email)}
@@ -596,6 +580,16 @@ export default function SettingsPage() {
                                   >
                                     <Key size={16}/>
                                   </button>
+                                  {isPendingVerification && (
+                                    <button 
+                                      onClick={() => handleResendVerification(user.email)}
+                                      disabled={isResending}
+                                      className={`p-1.5 sm:p-2 text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors ${isResending ? 'animate-spin' : ''}`}
+                                      title="Resend Verification Email"
+                                    >
+                                      <RefreshCw size={16}/>
+                                    </button>
+                                  )}
                                   <button 
                                     onClick={() => openEditUserModal(user)}
                                     className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
@@ -603,7 +597,7 @@ export default function SettingsPage() {
                                   >
                                     <Edit3 size={16}/>
                                   </button>
-                                  {user.status === 'Active' ? (
+                                  {user.status === 'Active' || user.status === 'PendingVerification' ? (
                                     <button 
                                       onClick={() => openDeactivateModal(user)}
                                       className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
@@ -612,27 +606,18 @@ export default function SettingsPage() {
                                       <Ban size={16}/>
                                     </button>
                                   ) : (
-                                    <>
-                                      <button 
-                                        onClick={() => handleReactivateUser(user)}
-                                        className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                        title="Reactivate User"
-                                      >
-                                        <UserCheck size={16}/>
-                                      </button>
-                                      <button 
-                                        onClick={() => openDeleteModal(user)}
-                                        className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                        title="Permanently Delete User"
-                                      >
-                                        <Trash2 size={16}/>
-                                      </button>
-                                    </>
+                                    <button 
+                                      onClick={() => handleReactivateUser(user)}
+                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                      title="Reactivate User"
+                                    >
+                                      <UserCheck size={16}/>
+                                    </button>
                                   )}
                                 </>
                               )}
                             </div>
-                          </td>
+                           </td>
                         </motion.tr>
                       );
                     })}
@@ -647,13 +632,13 @@ export default function SettingsPage() {
               <CheckCircle2 size={12} className="text-emerald-500" /> Active accounts can log in
             </div>
             <div className="flex items-center gap-1">
+              <Clock size={12} className="text-yellow-500" /> Pending verification requires email confirmation
+            </div>
+            <div className="flex items-center gap-1">
               <AlertCircle size={12} className="text-orange-500" /> Deactivated accounts are locked out
             </div>
             <div className="flex items-center gap-1">
               <Trash2 size={12} className="text-red-500" /> Permanently deleted accounts cannot be restored
-            </div>
-            <div className="flex items-center gap-1">
-              <Clock size={12} className="text-blue-500" /> Last login shows when user last accessed the system
             </div>
           </div>
         </motion.div>
@@ -678,7 +663,6 @@ export default function SettingsPage() {
               </div>
               
               <form id="user-form" onSubmit={handleSaveUser} className="p-5 sm:p-6 space-y-4">
-                {/* Full Name */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Full Name <span className="text-red-500">*</span>
@@ -698,7 +682,6 @@ export default function SettingsPage() {
                   )}
                 </div>
                 
-                {/* Email Address */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     Email Address <span className="text-red-500">*</span>
@@ -718,14 +701,12 @@ export default function SettingsPage() {
                   )}
                 </div>
                  
-                {/* Password (add mode only) */}
                 {modalMode === "add" && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
                       Password <span className="text-red-500">*</span>
                     </label>
 
-                    {/* Input with show/hide toggle */}
                     <div className="relative">
                       <input 
                         required 
@@ -748,10 +729,8 @@ export default function SettingsPage() {
                       </button>
                     </div>
 
-                    {/* Strength bar — only shown when the user has started typing */}
                     {userForm.password.length > 0 && (
                       <div className="mt-2 space-y-1.5">
-                        {/* Bar */}
                         <div className="flex items-center gap-2">
                           <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                             <div
@@ -763,7 +742,6 @@ export default function SettingsPage() {
                           </span>
                         </div>
 
-                        {/* Requirement checklist */}
                         <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                           {[
                             { key: "length",    label: "8+ characters" },
@@ -790,7 +768,6 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* Account Status (edit mode only) */}
                 {modalMode === "edit" && (
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1.5">
@@ -811,7 +788,6 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* System Role */}
                 <div>
                   <label className="block text-xs font-bold text-gray-700 mb-1.5">
                     System Role
@@ -829,10 +805,10 @@ export default function SettingsPage() {
                 </div>
 
                 {modalMode === "add" && (
-                  <p className="text-[10px] text-gray-500 bg-blue-50 p-2 rounded-lg">
-                    <AlertCircle size={12} className="inline mr-1 text-blue-500" />
-                    The new account will be stored immediately. The staff member can log in using the credentials you set.
-                  </p>
+                  <div className="text-[10px] text-gray-500 bg-yellow-50 p-2 rounded-lg border border-yellow-200">
+                    <AlertCircle size={12} className="inline mr-1 text-yellow-600" />
+                    <span className="font-semibold text-yellow-800">Email verification required.</span> The staff member will receive a verification email and must verify before logging in.
+                  </div>
                 )}
               </form>
 
@@ -879,7 +855,7 @@ export default function SettingsPage() {
               </h3>
               <p className="text-sm text-gray-500 mb-6 leading-relaxed">
                 Are you sure you want to deactivate <span className="font-bold text-gray-800">{userToAction.name}</span>? 
-                They will immediately lose access to the system and will not be able to log in until reactivated.
+                They will immediately lose access to the system.
               </p>
               <div className="flex gap-3">
                 <button 
@@ -913,8 +889,7 @@ export default function SettingsPage() {
               </h3>
               <p className="text-sm text-gray-500 mb-6 leading-relaxed">
                 ⚠️ <span className="font-bold text-red-600">This action is irreversible!</span><br/><br/>
-                Are you sure you want to permanently delete <span className="font-bold text-gray-800">{userToAction.name}</span>&apos;s account? 
-                They will be completely removed from the system and cannot be restored.
+                Are you sure you want to permanently delete <span className="font-bold text-gray-800">{userToAction.name}</span>&apos;s account?
               </p>
               <div className="flex gap-3">
                 <button 

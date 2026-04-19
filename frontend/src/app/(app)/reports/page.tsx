@@ -1,4 +1,5 @@
 // src/app/(app)/reports/page.tsx
+
 "use client";
 
 import React, { useState, useMemo } from "react";
@@ -29,7 +30,7 @@ interface TransactionType {
   id: string;
   patientName: string;
   staffName?: string;
-  items: Array<{ name: string; quantity: number; price: number }>;
+  items: Array<{ id: string; name: string; quantity: number; price: number }>;
   total: number;
   date: Date;
   status: "completed" | "voided";
@@ -70,17 +71,37 @@ const getLocalDateStamp = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Helper function to calculate days since product was added (for never-sold products)
-const getDaysSinceCreation = (product: any, today: Date): number => {
-  const createdDate = getDateFromTimestamp(product.createdAt);
+// FIXED: Calculate days since last sale using product ID matching (not name)
+// This ensures accuracy with AdminDashboard
+const getDaysSinceLastSale = (product: any, transactions: TransactionType[], today: Date): { days: number; lastSaleDate: Date | null; hasSales: boolean } => {
+  const completedTransactions = transactions.filter(t => t.status === 'completed');
   
-  if (createdDate) {
-    createdDate.setHours(0, 0, 0, 0);
-    return Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+  // CRITICAL FIX: Match by product ID, not by name
+  const salesForProduct = completedTransactions
+    .filter(t => t.items.some(item => item.id === product.id))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  
+  const lastSale = salesForProduct[0];
+  
+  if (lastSale) {
+    const lastSaleDate = new Date(lastSale.date);
+    lastSaleDate.setHours(0, 0, 0, 0);
+    const days = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+    return { days, lastSaleDate, hasSales: true };
+  } else {
+    // Never sold - use creation date or lastMovedDaysAgo
+    const createdDate = getDateFromTimestamp(product.createdAt);
+    
+    let days = 0;
+    if (createdDate) {
+      createdDate.setHours(0, 0, 0, 0);
+      days = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+    } else {
+      days = product.lastMovedDaysAgo || 0;
+    }
+    
+    return { days, lastSaleDate: null, hasSales: false };
   }
-  
-  // If no creation date, use lastMovedDaysAgo or default to 0 (assume new product)
-  return product.lastMovedDaysAgo || 0;
 };
 
 export default function ReportsPage() {
@@ -331,16 +352,12 @@ export default function ReportsPage() {
 
     let fileNameStamp = "";
     if (selectedDay !== "all") {
-      // Format: YYYY-MM-DD
       fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
     } else if (selectedMonth !== "all") {
-      // Format: YYYY-MM
       fileNameStamp = selectedMonth;
     } else if (selectedYear !== 0) {
-      // Format: YYYY
       fileNameStamp = String(selectedYear);
     } else {
-      // All Time
       fileNameStamp = "All_Time";
     }
     doc.save(`Sales_Ledger_${fileNameStamp}.pdf`);
@@ -359,7 +376,7 @@ export default function ReportsPage() {
     today.setHours(0, 0, 0, 0);
 
     // Calculate stock accuracy
-    const movingItems = products.filter(p => transactions.some(t => t.items.some(i => i.name === p.name)));
+    const movingItems = products.filter(p => transactions.some(t => t.items.some(i => i.id === p.id)));
     const stockAccuracyRate = products.length > 0 ? (movingItems.length / products.length) * 100 : 100;
 
     // Get priority needs from ML recommendations (using the 30-day forecast)
@@ -374,29 +391,12 @@ export default function ReportsPage() {
         priority: item.confidence
       }));
 
-    // Calculate deadstock items (30+ days without sales) - FIXED
+    // FIXED: Calculate deadstock items using product ID matching
     const liquidationItems = products
       .filter(p => p.stock > 0)
       .map(p => {
-        const salesForProduct = transactions
-          .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        
-        const lastSale = salesForProduct[0];
-        let daysSinceSale = 0;
-        let lastSaleDate: Date | null = null;
-        
-        if (lastSale) {
-          lastSaleDate = new Date(lastSale.date);
-          lastSaleDate.setHours(0, 0, 0, 0);
-          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
-        } else {
-          // FIXED: Use proper date parsing helper
-          daysSinceSale = getDaysSinceCreation(p, today);
-          lastSaleDate = null;
-        }
-
-        return { ...p, daysSinceSale, lastSaleDate };
+        const { days, lastSaleDate, hasSales } = getDaysSinceLastSale(p, transactions, today);
+        return { ...p, daysSinceSale: days, lastSaleDate, hasSales };
       })
       .filter(p => p.daysSinceSale >= 30)
       .sort((a, b) => b.daysSinceSale - a.daysSinceSale);
@@ -452,12 +452,13 @@ export default function ReportsPage() {
       autoTable(doc, {
         startY: secondTableY + 4,
         margin: { left: 14, right: 14 },
-        head: [['Aging Product', 'Category', 'Stock', 'Days Idle', 'Value (PHP)']],
+        head: [['Aging Product', 'Category', 'Stock', 'Days Idle', 'Status', 'Value (PHP)']],
         body: liquidationItems.map(p => [
           p.name,
           p.category,
           p.stock,
           p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
+          p.hasSales ? 'Unsold' : 'Never Sold',
           (p.stock * p.markupPrice).toLocaleString()
         ]),
         headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
@@ -471,7 +472,6 @@ export default function ReportsPage() {
 
     let summaryY = liquidationItems.length > 0 ? (doc as any).lastAutoTable.finalY + 15 : secondTableY + 25;
     
-    // Add new page if not enough space for summary
     if (summaryY + 40 > pageHeight - 20) {
       doc.addPage();
       summaryY = 40;
@@ -504,21 +504,18 @@ export default function ReportsPage() {
 
     let fileNameStamp = "";
     if (selectedDay !== "all") {
-      // Format: YYYY-MM-DD
       fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
     } else if (selectedMonth !== "all") {
-      // Format: YYYY-MM
       fileNameStamp = selectedMonth;
     } else if (selectedYear !== 0) {
-      // Format: YYYY
       fileNameStamp = String(selectedYear);
     } else {
-      // All Time
       fileNameStamp = getLocalDateStamp(today);
     }
     doc.save(`Inventory_Optimization_${fileNameStamp}.pdf`);
   };
 
+  // FIXED: Aging Report with correct deadstock calculation using product ID matching
   const exportAgingReport = () => {
     if (products.length === 0) {
       showNotification("No products found to generate aging report.", "error");
@@ -531,58 +528,99 @@ export default function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const agingData = products
+    // Calculate aging data for ALL products first, then filter
+    const allProductsData = products
       .filter(p => p.stock > 0)
       .map(p => {
-        const salesForProduct = transactions
-          .filter(t => t.status === 'completed' && t.items.some(item => item.name === p.name))
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const { days, lastSaleDate, hasSales } = getDaysSinceLastSale(p, transactions, today);
         
-        const lastSale = salesForProduct[0];
-        let daysSinceSale = 0;
-        let lastSaleDate: Date | null = null;
-        
-        if (lastSale) {
-          lastSaleDate = new Date(lastSale.date);
-          lastSaleDate.setHours(0, 0, 0, 0);
-          daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
-        } else {
-          // FIXED: Use proper date parsing helper
-          daysSinceSale = getDaysSinceCreation(p, today);
-          lastSaleDate = null;
-        }
-
         const deadCapital = p.stock * p.markupPrice;
-
+        
+        let daysIdleDisplay = `${days} days`;
+        if (days >= 365) {
+          daysIdleDisplay = `>1 Year (${days} days)`;
+        } else if (days >= 90) {
+          daysIdleDisplay = `${days} days (3+ months)`;
+        }
+        
         return {
+          id: p.id,
           name: p.name,
           category: p.category,
           stock: p.stock,
           unitPrice: p.markupPrice,
-          daysSinceSale,
+          daysSinceSale: days,
+          daysIdleDisplay,
           deadCapital,
-          lastSaleDate
+          lastSaleDate,
+          hasSales
         };
+      });
+    
+    // Debug: Log what we found
+    console.log('===== AGING REPORT CALCULATION =====');
+    console.log(`Total products with stock: ${allProductsData.length}`);
+    console.log(`Products with 30+ days unsold: ${allProductsData.filter(p => p.daysSinceSale >= 30).length}`);
+    
+    // Log products that have sales but are being incorrectly flagged
+    const productsWithSalesButHighDays = allProductsData.filter(p => p.hasSales && p.daysSinceSale >= 30);
+    if (productsWithSalesButHighDays.length > 0) {
+      console.log('⚠️ Products with sales but showing 30+ days idle:');
+      productsWithSalesButHighDays.forEach(p => {
+        console.log(`   - ${p.name}: ${p.daysSinceSale} days, last sale: ${p.lastSaleDate?.toLocaleDateString() || 'unknown'}`);
+      });
+    }
+    
+    // FIXED: Only include products that are TRULY 30+ days unsold
+    // A product is deadstock if:
+    // 1. It has sales history AND last sale was 30+ days ago, OR
+    // 2. It has NO sales history AND was created 30+ days ago
+    const agingData = allProductsData
+      .filter(item => {
+        // Must have stock
+        if (item.stock <= 0) return false;
+        
+        // Only include if daysSinceSale >= 30
+        if (item.daysSinceSale < 30) return false;
+        
+        // Double-check: If it has sales, make sure daysSinceSale is accurate
+        if (item.hasSales && item.lastSaleDate) {
+          const calculatedDays = Math.floor((today.getTime() - item.lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (calculatedDays < 30) {
+            console.log(`   → Excluding ${item.name}: calculated days (${calculatedDays}) < 30`);
+            return false;
+          }
+        }
+        
+        return true;
       })
-      .filter(item => item.daysSinceSale >= 30)
       .sort((a, b) => b.deadCapital - a.deadCapital);
 
+    console.log(`Final deadstock count: ${agingData.length}`);
+    console.log('=====================================');
+
     if (agingData.length === 0) {
-      showNotification("No aging inventory (30+ days unsold) identified.", "success");
+      showNotification("No aging inventory (30+ days unsold) identified.", "info");
       return;
     }
 
     const totalDeadCapital = agingData.reduce((sum, item) => sum + item.deadCapital, 0);
+    
+    // Calculate items by aging category
+    const itemsOver90Days = agingData.filter(i => i.daysSinceSale >= 90).length;
+    const itemsOver60Days = agingData.filter(i => i.daysSinceSale >= 60 && i.daysSinceSale < 90).length;
+    const itemsOver30Days = agingData.filter(i => i.daysSinceSale >= 30 && i.daysSinceSale < 60).length;
 
     autoTable(doc, {
       startY: 40,
       margin: { top: 40, right: 14, left: 14, bottom: 20 },
-      head: [['Product Name', 'Category', 'Stock', 'Days Idle', 'Value (PHP)']],
+      head: [['Product Name', 'Category', 'Stock', 'Days Idle', 'Status', 'Value (PHP)']],
       body: agingData.map(item => [
         item.name,
         item.category,
         item.stock,
-        item.daysSinceSale >= 365 ? ">1 Year" : `${item.daysSinceSale} Days`,
+        item.daysIdleDisplay,
+        item.hasSales ? 'Unsold' : 'Never Sold',
         item.deadCapital.toLocaleString()
       ]),
       theme: 'grid',
@@ -609,7 +647,7 @@ export default function ReportsPage() {
     const finalY = (doc as any).lastAutoTable?.finalY || 40;
     let summaryStartY = finalY + 15;
     
-    if (summaryStartY + 40 > pageHeight - 20) {
+    if (summaryStartY + 60 > pageHeight - 20) {
       doc.addPage();
       summaryStartY = 40;
     }
@@ -620,15 +658,33 @@ export default function ReportsPage() {
     
     doc.setFontSize(10);
     doc.setTextColor(40, 40, 40);
-    doc.text(`Total Aging Items: ${agingData.length}`, 14, summaryStartY + 8);
-    
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text(`Total Dead Capital: PHP ${totalDeadCapital.toLocaleString()}`, 14, summaryStartY + 18);
+    doc.text(`Total Aging Items (30+ days unsold): ${agingData.length}`, 14, summaryStartY + 8);
     
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text("* Dead capital represents the locked value of inventory that has not moved in 30+ days.", 14, summaryStartY + 28);
+    doc.text(`  • 90+ days unsold: ${itemsOver90Days} items`, 14, summaryStartY + 16);
+    doc.text(`  • 60-89 days unsold: ${itemsOver60Days} items`, 14, summaryStartY + 21);
+    doc.text(`  • 30-59 days unsold: ${itemsOver30Days} items`, 14, summaryStartY + 26);
+    
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total Dead Capital: PHP ${totalDeadCapital.toLocaleString()}`, 14, summaryStartY + 36);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text("* Dead capital represents the locked value of inventory that has not moved in 30+ days.", 14, summaryStartY + 46);
+    
+    // Add recommendation based on aging data
+    if (itemsOver90Days > 0) {
+      doc.setTextColor(200, 0, 0);
+      doc.text(`⚠️ URGENT: ${itemsOver90Days} item(s) have been unsold for 90+ days. Immediate liquidation recommended.`, 14, summaryStartY + 56);
+    } else if (itemsOver60Days > 0) {
+      doc.setTextColor(200, 100, 0);
+      doc.text(`⚠️ WARNING: ${itemsOver60Days} item(s) have been unsold for 60+ days. Consider markdown strategy.`, 14, summaryStartY + 56);
+    } else if (itemsOver30Days > 0) {
+      doc.setTextColor(0, 100, 150);
+      doc.text(`ℹ️ INFO: ${itemsOver30Days} item(s) have been unsold for 30+ days. Consider promotion or markdown.`, 14, summaryStartY + 56);
+    }
 
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
@@ -647,16 +703,12 @@ export default function ReportsPage() {
 
     let fileNameStamp = "";
     if (selectedDay !== "all") {
-      // Format: YYYY-MM-DD
       fileNameStamp = `${selectedMonth}-${String(selectedDay).padStart(2, '0')}`;
     } else if (selectedMonth !== "all") {
-      // Format: YYYY-MM
       fileNameStamp = selectedMonth;
     } else if (selectedYear !== 0) {
-      // Format: YYYY
       fileNameStamp = String(selectedYear);
     } else {
-      // All Time
       fileNameStamp = getLocalDateStamp(today);
     }
     doc.save(`Aging_Report_${fileNameStamp}.pdf`);

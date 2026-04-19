@@ -19,11 +19,11 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  fetchSignInMethodsForEmail,
   initializeAuth,
   browserLocalPersistence,
   getAuth,
-  updateProfile
+  updateProfile,
+  sendEmailVerification
 } from "firebase/auth";
 
 import {
@@ -39,10 +39,7 @@ import {
   Timestamp,
   getDoc,
   setDoc,
-  where,
   limit,
-  startAfter,
-  DocumentSnapshot,
   onSnapshot
 } from "firebase/firestore";
 
@@ -53,7 +50,7 @@ import { initializeApp, getApps } from "firebase/app";
 const CLINIC_ID =
   process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
-// 🔐 SECONDARY AUTH
+// 🔐 SECONDARY AUTH - Used for creating users without affecting main auth
 const getSecondaryAuth = () => {
   const name = "secondary-auth-app";
   const existing = getApps().find((app) => app.name === name);
@@ -105,9 +102,11 @@ export interface StaffUser {
   email: string;
   name: string;
   role: "admin" | "staff";
-  status: "Active" | "Inactive" | "Deleted";
+  status: "Active" | "Inactive" | "Deleted" | "PendingVerification";
   lastLogin: string;
   lastLoginTimestamp?: Date | null;
+  emailVerified?: boolean;
+  createdAt?: Timestamp;
 }
 
 export interface AppUser {
@@ -116,6 +115,7 @@ export interface AppUser {
   role: "admin" | "staff";
   name?: string;
   status?: string;
+  emailVerified?: boolean;
 }
 
 // ================= CONTEXT =================
@@ -139,7 +139,7 @@ interface FirebaseContextType {
   voidTransaction: (id: string) => Promise<void>;
 
   staffUsers: StaffUser[];
-  fetchStaffUsers: () => Promise<void>;
+  fetchStaffUsers: (forceRefresh?: boolean) => Promise<void>;
 
   createStaffUser: (email: string, password: string, name: string, role: "admin" | "staff") => Promise<string>;
   updateStaffUser: (uid: string, data: Partial<StaffUser>) => Promise<void>;
@@ -147,6 +147,7 @@ interface FirebaseContextType {
   deactivateStaffUser: (uid: string) => Promise<void>;
   reactivateStaffUser: (uid: string) => Promise<void>;
   resetStaffPassword: (email: string) => Promise<void>;
+  resendVerificationEmail: (email: string, password?: string) => Promise<void>;
 
   getLowStockProducts: () => Product[];
   getDeadstockProducts: () => Product[];
@@ -183,13 +184,14 @@ const formatLastLogin = (date: Date): string => {
   });
 };
 
-// Helper function to create or update user document
+// Helper function to create or update user document - ONLY for existing accounts
 const ensureUserDocument = async (uid: string, email: string | null, name?: string) => {
   const userRef = doc(db, "users", uid);
   const userSnap = await getDoc(userRef);
   
   if (!userSnap.exists()) {
-    // Create user document if it doesn't exist
+    // This is an EXISTING account without a Firestore document (legacy)
+    // Mark as Active and verified since it's an existing account
     await setDoc(userRef, {
       email: email || "",
       name: name || email?.split('@')[0] || "User",
@@ -198,9 +200,11 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       lastLogin: "Never",
-      lastLoginAt: null
+      lastLoginAt: null,
+      emailVerified: true, // Existing accounts are considered verified
+      isLegacyAccount: true // Flag to identify legacy accounts
     });
-    console.log("Created new user document for:", uid);
+    console.log("Created user document for existing account:", uid);
   }
   
   return userRef;
@@ -224,22 +228,30 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const [isOnline, setIsOnline] = useState(true);
 
-  // 🔥 CACHE FLAGS WITH TIMESTAMPS FOR QUOTA MANAGEMENT
-  const [hasFetchedProducts, setHasFetchedProducts] = useState(false);
-  const [hasFetchedTransactions, setHasFetchedTransactions] = useState(false);
-  const [hasFetchedUsers, setHasFetchedUsers] = useState(false);
+  // Cache flags to prevent excessive reads
+  const hasFetchedProductsRef = useRef(false);
+  const hasFetchedTransactionsRef = useRef(false);
+  const hasFetchedUsersRef = useRef(false);
   
-  const [isFetchingProducts, setIsFetchingProducts] = useState(false);
-  const [isFetchingTransactions, setIsFetchingTransactions] = useState(false);
-  const [isFetchingUsers, setIsFetchingUsers] = useState(false);
+  const isFetchingProductsRef = useRef(false);
+  const isFetchingTransactionsRef = useRef(false);
+  const isFetchingUsersRef = useRef(false);
   
-  // Track last fetch times to prevent excessive reads (quota management)
   const lastProductsFetchRef = useRef<number>(0);
   const lastTransactionsFetchRef = useRef<number>(0);
   const lastUsersFetchRef = useRef<number>(0);
   
-  // Cache invalidation time (5 minutes)
-  const CACHE_TTL = 5 * 60 * 1000;
+  // Cache TTL: 10 minutes
+  const CACHE_TTL = 10 * 60 * 1000;
+
+  // Store temporary passwords for resend verification (in memory only)
+  const pendingUserPasswords = useRef<Map<string, string>>(new Map());
+
+  // Track if listeners are already set up
+  const listenersSetupRef = useRef(false);
+  
+  // Track if initial staff users fetch has been done
+  const initialStaffFetchDoneRef = useRef(false);
 
   // ================= AUTH =================
 
@@ -251,7 +263,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId(u.uid);
         setUserEmail(u.email || "");
 
-        // Ensure user document exists
+        // Only ensure document exists, don't modify existing data
         await ensureUserDocument(u.uid, u.email);
         
         const ref = doc(db, "users", u.uid);
@@ -259,7 +271,13 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
         if (snap.exists()) {
           const data = snap.data();
-
+          const isLegacy = data.isLegacyAccount === true;
+          
+          // Determine if email verification is required
+          const createdAt = data.createdAt?.toDate?.() || new Date(0);
+          const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+          const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
+          
           setUserRole(data.role || "staff");
           setUserName(data.name || "Staff");
 
@@ -268,10 +286,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             email: u.email,
             role: data.role,
             name: data.name,
-            status: data.status || "Active"
+            status: data.status || "Active",
+            emailVerified: isNewAccount ? false : true
           });
         } else {
-          // This should not happen after ensureUserDocument, but fallback just in case
           setUserRole("staff");
           setUserName("Staff");
           setAppUser({
@@ -279,7 +297,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             email: u.email,
             role: "staff",
             name: "Staff",
-            status: "Active"
+            status: "Active",
+            emailVerified: true
           });
         }
       } else {
@@ -289,9 +308,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId("");
         setUserEmail("");
         setStaffUsers([]);
-        setHasFetchedProducts(false);
-        setHasFetchedTransactions(false);
-        setHasFetchedUsers(false);
+        hasFetchedProductsRef.current = false;
+        hasFetchedTransactionsRef.current = false;
+        hasFetchedUsersRef.current = false;
+        listenersSetupRef.current = false;
+        initialStaffFetchDoneRef.current = false;
       }
 
       setLoading(false);
@@ -315,25 +336,85 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ================= FETCH PRODUCTS (OPTIMIZED) =================
+  // ================= FETCH STAFF USERS - FIXED =================
+
+  const fetchStaffUsers = useCallback(async (forceRefresh = false) => {
+    // Don't fetch if not admin
+    if (userRole !== "admin") {
+      return;
+    }
+    
+    const now = Date.now();
+    
+    // Check cache - don't fetch if we have data and it's fresh (unless forced)
+    if (!forceRefresh && hasFetchedUsersRef.current && (now - lastUsersFetchRef.current) < CACHE_TTL) {
+      return;
+    }
+    
+    // Prevent concurrent fetches
+    if (isFetchingUsersRef.current) return;
+    
+    isFetchingUsersRef.current = true;
+
+    try {
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, orderBy("createdAt", "desc"), limit(50));
+      
+      const snap = await getDocs(q);
+
+      const fetchedUsers = snap.docs.map((d) => {
+        const data = d.data();
+        const lastLoginTimestamp = data.lastLoginAt?.toDate() || null;
+        const createdAt = data.createdAt?.toDate?.() || new Date(0);
+        const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+        const isLegacy = data.isLegacyAccount === true;
+        
+        let displayStatus = data.status;
+        const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
+        
+        if (isNewAccount && displayStatus !== "Inactive" && displayStatus !== "Deleted") {
+          displayStatus = "PendingVerification";
+        } else if (!isNewAccount && displayStatus === "PendingVerification") {
+          displayStatus = "Active";
+        }
+        
+        return {
+          uid: d.id,
+          ...data,
+          status: displayStatus,
+          lastLogin: lastLoginTimestamp ? formatLastLogin(lastLoginTimestamp) : (data.lastLogin || "Never"),
+          lastLoginTimestamp: lastLoginTimestamp,
+          emailVerified: isNewAccount ? false : true,
+          createdAt: data.createdAt
+        };
+      }) as StaffUser[];
+
+      setStaffUsers(fetchedUsers);
+      hasFetchedUsersRef.current = true;
+      lastUsersFetchRef.current = now;
+    } catch (error) {
+      console.error("Error fetching staff users:", error);
+    } finally {
+      isFetchingUsersRef.current = false;
+    }
+  }, [userRole]); // Only depend on userRole, which changes infrequently
+
+  // ================= FETCH PRODUCTS =================
 
   const fetchProducts = useCallback(async (forceRefresh = false) => {
     const now = Date.now();
     
-    // Check cache TTL - don't fetch if we fetched recently and not forcing refresh
-    if (!forceRefresh && hasFetchedProducts && (now - lastProductsFetchRef.current) < CACHE_TTL) {
-      console.log("Using cached products data, last fetch:", new Date(lastProductsFetchRef.current).toLocaleTimeString());
+    if (!forceRefresh && hasFetchedProductsRef.current && (now - lastProductsFetchRef.current) < CACHE_TTL) {
       return;
     }
     
-    if (isFetchingProducts) return;
+    if (isFetchingProductsRef.current) return;
+    
+    isFetchingProductsRef.current = true;
     
     try {
-      setIsFetchingProducts(true);
-      
-      console.log("Fetching products from Firestore...");
       const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
-      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50));
+      const q = query(productsRef, orderBy("createdAt", "desc"), limit(100));
       
       const snap = await getDocs(q);
 
@@ -343,38 +424,33 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       })) as Product[];
 
       setProducts(fetchedProducts);
-      setHasFetchedProducts(true);
+      hasFetchedProductsRef.current = true;
       lastProductsFetchRef.current = now;
-      
-      console.log(`Fetched ${fetchedProducts.length} products`);
     } catch (error) {
       console.error("Error fetching products:", error);
     } finally {
-      setIsFetchingProducts(false);
+      isFetchingProductsRef.current = false;
     }
-  }, [hasFetchedProducts, isFetchingProducts]);
+  }, []);
 
-  // ================= FETCH TRANSACTIONS (OPTIMIZED) =================
+  // ================= FETCH TRANSACTIONS =================
 
   const fetchTransactions = useCallback(async (forceRefresh = false) => {
     if (!user) return;
     
     const now = Date.now();
     
-    // Check cache TTL
-    if (!forceRefresh && hasFetchedTransactions && (now - lastTransactionsFetchRef.current) < CACHE_TTL) {
-      console.log("Using cached transactions data");
+    if (!forceRefresh && hasFetchedTransactionsRef.current && (now - lastTransactionsFetchRef.current) < CACHE_TTL) {
       return;
     }
     
-    if (isFetchingTransactions) return;
+    if (isFetchingTransactionsRef.current) return;
+
+    isFetchingTransactionsRef.current = true;
 
     try {
-      setIsFetchingTransactions(true);
-      
-      console.log("Fetching transactions from Firestore...");
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(500));
+      const q = query(transactionsRef, orderBy("date", "desc"), limit(200));
       
       const snap = await getDocs(q);
 
@@ -387,210 +463,245 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         };
       }) as Transaction[];
 
-      console.log(`Fetched ${fetchedTransactions.length} transactions`);
-
       setTransactions(fetchedTransactions);
-      setHasFetchedTransactions(true);
+      hasFetchedTransactionsRef.current = true;
       lastTransactionsFetchRef.current = now;
-      
-      console.log(`Fetched ${fetchedTransactions.length} transactions`);
     } catch (error) {
       console.error("Error fetching transactions:", error);
     } finally {
-      setIsFetchingTransactions(false);
+      isFetchingTransactionsRef.current = false;
     }
-  }, [user, hasFetchedTransactions, isFetchingTransactions]);
+  }, [user]);
 
-  // ================= FETCH STAFF USERS (OPTIMIZED) =================
-
-  const fetchStaffUsers = useCallback(async (forceRefresh = false) => {
-    if (!user || userRole !== "admin") {
-      console.log("Skipping staff users fetch - not admin or not logged in");
-      return;
-    }
+  // ================= SINGLE REAL-TIME LISTENER FOR ALL DATA =================
+  useEffect(() => {
+    if (!user || listenersSetupRef.current) return;
     
-    const now = Date.now();
+    listenersSetupRef.current = true;
     
-    // Check cache TTL - admin users can refresh more frequently if needed
-    if (!forceRefresh && hasFetchedUsers && (now - lastUsersFetchRef.current) < CACHE_TTL) {
-      console.log("Using cached staff users data");
-      return;
-    }
+    // Products listener
+    const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
+    const productsQuery = query(productsRef, orderBy("createdAt", "desc"), limit(100));
     
-    if (isFetchingUsers) return;
+    const unsubProducts = onSnapshot(productsQuery, (snap) => {
+      const fetchedProducts = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data()
+      })) as Product[];
 
-    try {
-      setIsFetchingUsers(true);
-      
-      console.log("Fetching staff users from Firestore...");
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, orderBy("createdAt", "desc"), limit(50));
-      
-      const snap = await getDocs(q);
+      setProducts(fetchedProducts);
+      hasFetchedProductsRef.current = true;
+      lastProductsFetchRef.current = Date.now();
+    }, (error) => {
+      console.error("Error in products listener:", error);
+    });
 
+    // Transactions listener
+    const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
+    const transactionsQuery = query(transactionsRef, orderBy("date", "desc"), limit(200));
+    
+    const unsubTransactions = onSnapshot(transactionsQuery, (snap) => {
+      const fetchedTransactions = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        date: d.data().date?.toDate() || new Date()
+      })) as Transaction[];
+
+      setTransactions(fetchedTransactions);
+      hasFetchedTransactionsRef.current = true;
+      lastTransactionsFetchRef.current = Date.now();
+    }, (error) => {
+      console.error("Error in transactions listener:", error);
+    });
+
+    return () => {
+      unsubProducts();
+      unsubTransactions();
+      listenersSetupRef.current = false;
+    };
+  }, [user]);
+
+  // ================= STAFF USERS REAL-TIME LISTENER =================
+  useEffect(() => {
+    if (!user || userRole !== "admin") return;
+    
+    const usersRef = collection(db, "users");
+    const usersQuery = query(usersRef, orderBy("createdAt", "desc"), limit(50));
+    
+    const unsubscribe = onSnapshot(usersQuery, (snap) => {
       const fetchedUsers = snap.docs.map((d) => {
         const data = d.data();
         const lastLoginTimestamp = data.lastLoginAt?.toDate() || null;
+        const createdAt = data.createdAt?.toDate?.() || new Date(0);
+        const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+        const isLegacy = data.isLegacyAccount === true;
+        
+        let displayStatus = data.status;
+        const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
+        
+        if (isNewAccount && displayStatus !== "Inactive" && displayStatus !== "Deleted") {
+          displayStatus = "PendingVerification";
+        } else if (!isNewAccount && displayStatus === "PendingVerification") {
+          displayStatus = "Active";
+        }
         
         return {
           uid: d.id,
           ...data,
+          status: displayStatus,
           lastLogin: lastLoginTimestamp ? formatLastLogin(lastLoginTimestamp) : (data.lastLogin || "Never"),
           lastLoginTimestamp: lastLoginTimestamp,
+          emailVerified: isNewAccount ? false : true
         };
       }) as StaffUser[];
 
       setStaffUsers(fetchedUsers);
-      setHasFetchedUsers(true);
-      lastUsersFetchRef.current = now;
-      
-      console.log(`Fetched ${fetchedUsers.length} staff users`);
-    } catch (error) {
-      console.error("Error fetching staff users:", error);
-    } finally {
-      setIsFetchingUsers(false);
-    }
-  }, [user, userRole, hasFetchedUsers, isFetchingUsers]);
+      hasFetchedUsersRef.current = true;
+      lastUsersFetchRef.current = Date.now();
+    }, (error) => {
+      console.error("Error in users listener:", error);
+    });
 
-  // Initial data fetch on login (only once, not on every render)
+    return () => unsubscribe();
+  }, [user, userRole]);
+
+  // Initial data fetch on login - only once
   useEffect(() => {
-    if (user) {
-      // Use a small delay to prevent race conditions
-      const timer = setTimeout(() => {
-        fetchProducts(false);
-        fetchTransactions(false);
-      }, 100);
-      
-      return () => clearTimeout(timer);
+    if (user && !hasFetchedProductsRef.current && !isFetchingProductsRef.current) {
+      fetchProducts(false);
     }
-  }, [user, fetchProducts, fetchTransactions]);
+  }, [user, fetchProducts]);
 
-  // ================= REAL-TIME LISTENER FOR PRODUCTS =================
   useEffect(() => {
-    if (!user) return;
-
-    console.log("Setting up real-time listener for products...");
-    
-    try {
-      const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
-      const q = query(productsRef, orderBy("createdAt", "desc"), limit(50));
-      
-      const unsubscribe = onSnapshot(q, (snap) => {
-        const fetchedProducts = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data()
-        })) as Product[];
-
-        setProducts(fetchedProducts);
-        setHasFetchedProducts(true);
-        lastProductsFetchRef.current = Date.now();
-        
-        console.log(`Real-time update: ${fetchedProducts.length} products`);
-      }, (error) => {
-        console.error("Error in products listener:", error);
-      });
-
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Error setting up products listener:", error);
+    if (user && !hasFetchedTransactionsRef.current && !isFetchingTransactionsRef.current) {
+      fetchTransactions(false);
     }
-  }, [user]);
+  }, [user, fetchTransactions]);
 
-  // ================= REAL-TIME LISTENER FOR TRANSACTIONS =================
+  // Fetch staff users only once on admin login
   useEffect(() => {
-    if (!user) return;
-
-    console.log("Setting up real-time listener for transactions...");
-    
-    try {
-      const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
-      const q = query(transactionsRef, orderBy("date", "desc"), limit(500));
-      
-      const unsubscribe = onSnapshot(q, (snap) => {
-        const fetchedTransactions = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-          date: d.data().date?.toDate() || new Date()
-        })) as Transaction[];
-
-        setTransactions(fetchedTransactions);
-        setHasFetchedTransactions(true);
-        lastTransactionsFetchRef.current = Date.now();
-        
-        console.log(`Real-time update: ${fetchedTransactions.length} transactions`);
-      }, (error) => {
-        console.error("Error in transactions listener:", error);
-      });
-
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Error setting up transactions listener:", error);
-    }
-  }, [user]);
-
-  // Fetch staff users only when admin role is detected and after initial load
-  useEffect(() => {
-    if (user && userRole === "admin" && !hasFetchedUsers && !isFetchingUsers) {
+    if (user && userRole === "admin" && !initialStaffFetchDoneRef.current) {
+      initialStaffFetchDoneRef.current = true;
+      // Small delay to avoid race conditions
       const timer = setTimeout(() => {
         fetchStaffUsers(false);
       }, 500);
       
       return () => clearTimeout(timer);
     }
-  }, [user, userRole, hasFetchedUsers, isFetchingUsers, fetchStaffUsers]);
+  }, [user, userRole, fetchStaffUsers]);
 
   // ================= AUTH ACTIONS =================
 
   const login = async (email: string, password: string) => {
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const loggedInUser = userCredential.user;
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const loggedInUser = userCredential.user;
+    
+    console.log('🔐 User logged in:', loggedInUser.email);
+    console.log('🔐 Firebase Auth emailVerified:', loggedInUser.emailVerified);
+    
+    const userRef = doc(db, "users", loggedInUser.uid);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
       
-      // Ensure user document exists before checking status
-      const userRef = await ensureUserDocument(loggedInUser.uid, loggedInUser.email);
-      const userSnap = await getDoc(userRef);
+      console.log('🔐 Firestore user data:', {
+        status: userData.status,
+        emailVerified: userData.emailVerified,
+        isLegacyAccount: userData.isLegacyAccount
+      });
       
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        if (userData.status === "Inactive") {
-          await signOut(auth);
-          throw new Error("This account has been deactivated. Please contact an administrator.");
-        }
-        if (userData.status === "Deleted") {
-          await signOut(auth);
-          throw new Error("This account has been deleted. Please contact an administrator.");
-        }
+      // Check if account is deactivated or deleted
+      if (userData.status === "Inactive") {
+        await signOut(auth);
+        throw new Error("This account has been deactivated. Please contact an administrator.");
+      }
+      if (userData.status === "Deleted") {
+        await signOut(auth);
+        throw new Error("This account has been deleted. Please contact an administrator.");
       }
       
-      const now = new Date();
-      const formattedLastLogin = formatLastLogin(now);
+      // CRITICAL FIX: Update Firestore if email is verified in Firebase Auth but not in Firestore
+      if (userData.emailVerified === false && loggedInUser.emailVerified === true) {
+        console.log('🔐 Updating Firestore: email verified!');
+        await setDoc(userRef, { 
+          emailVerified: true, 
+          status: "Active",
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        
+        // Also update local appUser state
+        setAppUser(prev => prev ? {
+          ...prev,
+          emailVerified: true,
+          status: "Active"
+        } : prev);
+      }
       
-      // Update lastLogin - use setDoc with merge to ensure document exists
+      // Check if this is a NEW account that requires verification
+      const isLegacy = userData.isLegacyAccount === true;
+      const createdAt = userData.createdAt?.toDate?.() || new Date(0);
+      const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      
+      // Only block if it's a new account (not legacy) AND email is NOT verified in Firebase Auth
+      const requiresVerification = !isLegacy && 
+                                    userData.emailVerified === false && 
+                                    loggedInUser.emailVerified === false && 
+                                    daysSinceCreation < 30;
+      
+      if (requiresVerification) {
+        console.log('🔐 Email verification required, logging out');
+        await signOut(auth);
+        throw new Error("EMAIL_VERIFICATION_REQUIRED");
+      }
+      
+    } else {
+      // User document doesn't exist - this is a legacy account, create it
+      console.log('🔐 Creating user document for legacy account');
       await setDoc(userRef, {
-        lastLogin: formattedLastLogin,
-        lastLoginAt: Timestamp.fromDate(now),
-        lastActive: Timestamp.fromDate(now),
-        updatedAt: Timestamp.fromDate(now)
-      }, { merge: true });
-      
-      // Immediately refresh staff users list to show updated last login
-      if (userRole === "admin") {
-        await fetchStaffUsers(true);
-      }
-      
-      // Reset cache flags on successful login
-      setHasFetchedProducts(false);
-      setHasFetchedTransactions(false);
-      setHasFetchedUsers(false);
-      lastProductsFetchRef.current = 0;
-      lastTransactionsFetchRef.current = 0;
-      lastUsersFetchRef.current = 0;
-      
-    } catch (error) {
-      console.error("Login error:", error);
-      throw error;
+        email: loggedInUser.email || email,
+        name: loggedInUser.displayName || email.split('@')[0],
+        role: "staff",
+        status: "Active",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        lastLogin: "Never",
+        lastLoginAt: null,
+        emailVerified: loggedInUser.emailVerified || true,
+        isLegacyAccount: true
+      });
     }
-  };
+    
+    // Update last login timestamp
+    const now = new Date();
+    const formattedLastLogin = formatLastLogin(now);
+    
+    await setDoc(userRef, {
+      lastLogin: formattedLastLogin,
+      lastLoginAt: Timestamp.fromDate(now),
+      lastActive: Timestamp.fromDate(now),
+      updatedAt: Timestamp.fromDate(now)
+    }, { merge: true });
+    
+    // Reset flags for fresh data on next navigation
+    hasFetchedProductsRef.current = false;
+    hasFetchedTransactionsRef.current = false;
+    hasFetchedUsersRef.current = false;
+    lastProductsFetchRef.current = 0;
+    lastTransactionsFetchRef.current = 0;
+    lastUsersFetchRef.current = 0;
+    listenersSetupRef.current = false;
+    initialStaffFetchDoneRef.current = false;
+    
+    console.log('🔐 Login successful, user will be redirected');
+    
+  } catch (error) {
+    console.error("Login error:", error);
+    throw error;
+  }
+};
 
   const logout = async () => {
     try {
@@ -603,15 +714,18 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setUserId("");
       setUserEmail("");
       setAppUser(null);
-      setHasFetchedProducts(false);
-      setHasFetchedTransactions(false);
-      setHasFetchedUsers(false);
-      setIsFetchingProducts(false);
-      setIsFetchingTransactions(false);
-      setIsFetchingUsers(false);
+      hasFetchedProductsRef.current = false;
+      hasFetchedTransactionsRef.current = false;
+      hasFetchedUsersRef.current = false;
+      isFetchingProductsRef.current = false;
+      isFetchingTransactionsRef.current = false;
+      isFetchingUsersRef.current = false;
       lastProductsFetchRef.current = 0;
       lastTransactionsFetchRef.current = 0;
       lastUsersFetchRef.current = 0;
+      listenersSetupRef.current = false;
+      initialStaffFetchDoneRef.current = false;
+      pendingUserPasswords.current.clear();
     } catch (error) {
       console.error("Logout error:", error);
       throw error;
@@ -749,26 +863,35 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const createStaffUser = async (email: string, password: string, name: string, role: "admin" | "staff") => {
     try {
       const secondaryAuth = getSecondaryAuth();
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
       
-      await setDoc(doc(db, "users", userCredential.user.uid), {
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      const newUser = userCredential.user;
+      
+      pendingUserPasswords.current.set(email, password);
+      
+      await sendEmailVerification(newUser);
+      console.log("✅ Verification email sent to:", email);
+      
+      await signOut(secondaryAuth);
+      
+      await setDoc(doc(db, "users", newUser.uid), {
         email,
         name,
         role,
-        status: "Active",
+        status: "PendingVerification",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         lastLogin: "Never",
-        lastLoginAt: null
+        lastLoginAt: null,
+        emailVerified: false,
+        isLegacyAccount: false
       });
       
-      await updateProfile(userCredential.user, { displayName: name });
+      await updateProfile(newUser, { displayName: name });
       
-      setHasFetchedUsers(false);
-      lastUsersFetchRef.current = 0;
-      await fetchStaffUsers(true);
+      // The real-time listener will automatically update the UI
       
-      return userCredential.user.uid;
+      return newUser.uid;
     } catch (error) {
       console.error("Error creating staff user:", error);
       throw error;
@@ -777,8 +900,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const updateStaffUser = async (uid: string, data: Partial<StaffUser>) => {
     try {
+      const updateData: any = { ...data };
+      
       await updateDoc(doc(db, "users", uid), {
-        ...data,
+        ...updateData,
         updatedAt: serverTimestamp()
       });
       
@@ -825,13 +950,20 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const reactivateStaffUser = async (uid: string) => {
     try {
-      await updateDoc(doc(db, "users", uid), {
-        status: "Active",
+      const userRef = doc(db, "users", uid);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
+      
+      const isLegacy = userData?.isLegacyAccount === true;
+      const newStatus = (!isLegacy && userData?.emailVerified === false) ? "PendingVerification" : "Active";
+      
+      await updateDoc(userRef, {
+        status: newStatus,
         updatedAt: serverTimestamp()
       });
       
       setStaffUsers((prev) =>
-        prev.map((u) => (u.uid === uid ? { ...u, status: "Active" } : u))
+        prev.map((u) => (u.uid === uid ? { ...u, status: newStatus } : u))
       );
     } catch (error) {
       console.error("Error reactivating staff user:", error);
@@ -845,6 +977,43 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       await sendPasswordResetEmail(secondaryAuth, email);
     } catch (error) {
       console.error("Error resetting password:", error);
+      throw error;
+    }
+  };
+
+  const resendVerificationEmail = async (email: string, providedPassword?: string) => {
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      
+      const password = providedPassword || pendingUserPasswords.current.get(email);
+      
+      if (!password) {
+        throw new Error("Cannot resend verification email. Please contact support or create a new account.");
+      }
+      
+      const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+      const user = userCredential.user;
+      
+      await sendEmailVerification(user);
+      console.log("✅ Verification email resent to:", email);
+      
+      await signOut(secondaryAuth);
+      
+    } catch (error: any) {
+      console.error("Error resending verification email:", error);
+      
+      if (error.code === 'auth/email-already-verified' || error.message?.includes('verified')) {
+        const userToUpdate = staffUsers.find(u => u.email === email);
+        if (userToUpdate) {
+          await updateDoc(doc(db, "users", userToUpdate.uid), {
+            emailVerified: true,
+            status: "Active",
+            updatedAt: serverTimestamp()
+          });
+        }
+        throw new Error("Email already verified. Status has been updated to Active.");
+      }
+      
       throw error;
     }
   };
@@ -877,7 +1046,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     voidTransaction,
 
     staffUsers,
-    fetchStaffUsers: () => fetchStaffUsers(true),
+    fetchStaffUsers: async (forceRefresh = false) => {
+      await fetchStaffUsers(forceRefresh);
+    },
 
     createStaffUser,
     updateStaffUser,
@@ -885,6 +1056,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     deactivateStaffUser,
     reactivateStaffUser,
     resetStaffPassword,
+    resendVerificationEmail,
 
     getLowStockProducts,
     getDeadstockProducts,

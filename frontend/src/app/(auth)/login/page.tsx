@@ -2,20 +2,20 @@
 "use client";
 
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
 import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase } from "@/context/FirebaseContext";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { 
-  User, 
   Lock, 
   Eye, 
   EyeOff, 
   CheckCircle, 
   Mail, 
   FileText,
-  Shield
+  Shield,
+  AlertCircle
 } from "lucide-react";
 
 // --- ANIMATION VARIANTS ---
@@ -33,14 +33,19 @@ interface ErrorWithMessage {
   message: string;
 }
 
-export default function LoginPage() {
+// Inner component that uses useSearchParams
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login, user } = useFirebase();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Check for verification pending parameter
+  const verificationPending = searchParams?.get('verification') === 'pending';
   
   // Modal States
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
@@ -62,11 +67,11 @@ export default function LoginPage() {
     
     if (email && password) {
       setIsLoading(true);
-      setError(""); // Clear any previous errors
+      setError("");
       
       try {
         await login(email, password);
-        // Toast removed - no success message needed
+        // Success - user will be redirected by the useEffect above
       } catch (err: unknown) {
         console.error("Login error:", err);
         
@@ -75,6 +80,12 @@ export default function LoginPage() {
         if (error.message === "This account has been deactivated. Please contact an administrator.") {
           setError("This account has been deactivated. Please contact an administrator.");
           showNotification("Account deactivated. Contact admin.", "error");
+        } else if (error.message === "EMAIL_VERIFICATION_REQUIRED") {
+          setError("Please verify your email address before logging in. Check your inbox for the verification link.");
+          showNotification("Email verification required. Check your inbox.", "warning");
+        } else if (error.message.includes("verify your email")) {
+          setError("Please verify your email address before logging in. Check your inbox for the verification link.");
+          showNotification("Email verification required. Check your inbox.", "warning");
         } else {
           setError("Invalid username or password.");
           showNotification("Login failed. Please check your credentials.", "error");
@@ -97,8 +108,6 @@ export default function LoginPage() {
     setPassword(e.target.value);
     if (error) setError("");
   };
-
-
 
   const handlePrivacyAgree = () => {
     setIsPrivacyModalOpen(false);
@@ -147,7 +156,6 @@ export default function LoginPage() {
             className="flex flex-col items-center text-center md:items-start md:text-left md:flex-1 max-w-lg"
           >
             <motion.div variants={fadeIn} className="relative mb-8 group cursor-default">
-              {/* Optional: Add a subtle glow behind the logo */}
               <div className="absolute inset-0 bg-blue-400/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
               <Image
                 src="/logo.png"
@@ -180,6 +188,23 @@ export default function LoginPage() {
                 <h2 className="text-2xl font-bold text-gray-900">Welcome Back</h2>
                 <p className="text-sm text-gray-500 mt-2">Please enter your details to sign in.</p>
               </div>
+
+              {/* Verification Pending Message */}
+              {verificationPending && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2"
+                >
+                  <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-yellow-800">Email Verification Required</p>
+                    <p className="text-xs text-yellow-700 mt-0.5">
+                      Please check your inbox and click the verification link before logging in.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
 
               <form onSubmit={handleLogin} className="space-y-4">
                 {/* Email Input */}
@@ -353,6 +378,19 @@ export default function LoginPage() {
   );
 }
 
+// Main export wrapped in Suspense
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
 // --- REUSABLE LEGAL MODAL COMPONENT ---
 function LegalModal({
   title,
@@ -381,10 +419,8 @@ function LegalModal({
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[85vh]"
       >
-        {/* Decorative header bar */}
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#0B3C8A] to-blue-400" />
 
-        {/* Modal Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-100 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-[#0B3C8A]">
@@ -400,12 +436,10 @@ function LegalModal({
           </button>
         </div>
 
-        {/* Modal Body (Scrollable) */}
         <div className="p-6 overflow-y-auto text-sm text-gray-600 leading-relaxed custom-scrollbar">
           {children}
         </div>
 
-        {/* Modal Footer */}
         <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end shrink-0">
           <button
             onClick={onAgree}
