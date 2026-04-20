@@ -345,7 +345,7 @@ You will be directed to the Staff Dashboard with access to sales and product sea
 | Role | Email | Password | Dashboard |
 |------|-------|----------|-----------|
 | Admin | `admin@clinic.local` | `admin123` | Full Analytics & Management |
-| Staff | `staff.olasosync@gmail.com` | `staff_123` | POS & Sales Only |
+| Staff | `staff.olasosync@gmail.com` | `staff_123` | POS & Inventory Only |
 
 > **⚠️ Important:** These are development accounts only. In production, ensure all default credentials are changed and unique, strong passwords are set for all user accounts.
 
@@ -618,17 +618,6 @@ Edit `docker-compose.yml` and change port mappings
 - Check network tab in browser DevTools
 - Monitor API response times
 - Review backend server logs
-
----
-
-## 📄 License
-
-OptiSync is licensed under the MIT License. See LICENSE file for details.
-
----
-
-**Last Updated:** April 2026
-**Version:** 1.0.0
 
 ---
 
