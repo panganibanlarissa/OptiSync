@@ -439,7 +439,7 @@ The staff dashboard provides:
 | Feature | Admin | Staff |
 |---------|-------|-------|
 | Dashboard & Analytics | ✅ Full Access | ⚠️ Limited (Today's Sales) |
-| Inventory Management | ✅ CRUD | ❌ Read-Only |
+| Inventory Management | ✅ CRUD | ✅ CRUD |
 | QR Code Scanning | ✅ Yes | ✅ Yes |
 | Process Transactions | ✅ Yes | ✅ Yes |
 | Generate Receipts | ✅ Yes | ✅ Yes |
@@ -571,46 +571,15 @@ Edit `docker-compose.yml` and change port mappings
 
 ---
 
-## 🤝 Contributing
-
-We welcome contributions from the community! Please follow these guidelines:
-
-1. **Fork the repository**
-2. **Create a feature branch:** `git checkout -b feature/your-feature-name`
-3. **Commit changes:** `git commit -m "Add your feature description"`
-4. **Push to branch:** `git push origin feature/your-feature-name`
-5. **Submit a Pull Request** with detailed description
-
-### **Code Style Guidelines**
-
-- Use TypeScript for frontend, Python for backend
-- Follow existing code conventions
-- Add comments for complex logic
-- Write unit tests for new features
-- Update documentation for API changes
-
----
-
 ## 📄 License
 
 OptiSync is licensed under the MIT License. See LICENSE file for details.
 
 ---
 
-## 📞 Support
-
-For issues, questions, or feature requests:
-- Open an issue on GitHub
-- Check existing documentation
-- Review troubleshooting section above
-- Contact the development team
-
----
-
 **Last Updated:** April 2026
 **Version:** 1.0.0
-pip install -r requirements.txt
-python app.py
+
 ```
 
 ---
