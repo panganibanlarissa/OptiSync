@@ -328,16 +328,20 @@ function LoginContent() {
             <h4 className="font-bold text-gray-900 mt-4 mb-2">2. Information We Collect</h4>
             <ul className="list-disc pl-5 space-y-1">
               <li><strong>User Credentials:</strong> Usernames, passwords, and staff roles for system access authentication.</li>
-              <li><strong>Activity Logs:</strong> System usage, inventory modifications, and transaction records for auditing purposes.</li>
-              <li><strong>Patient Information:</strong> Names and optical prescriptions entered during transactions or inventory allocation.</li>
+              <li><strong>Activity Logs:</strong> System usage, inventory modifications, and transaction records for auditing and compliance purposes.</li>
+              <li><strong>Clinic Operational Data:</strong> Inventory records, sales transactions, and system performance metrics for clinic operations and forecasting.</li>
             </ul>
             <h4 className="font-bold text-gray-900 mt-4 mb-2">3. How We Use Your Information</h4>
             <p>
-              The collected data is exclusively used to facilitate clinic operations, manage inventory levels, track sales, and authenticate authorized personnel. We do not sell or share personal or clinic data with third-party entities without explicit consent, unless required by Philippine law.
+              The collected data is exclusively used to facilitate clinic operations, manage inventory levels, track sales, generate performance reports, and authenticate authorized personnel. We do not store sensitive patient medical data or prescriptions, nor do we sell or share operational or staff data with third-party entities without explicit consent, unless required by Philippine law.
             </p>
             <h4 className="font-bold text-gray-900 mt-4 mb-2">4. Data Security & Storage</h4>
             <p>
-              We implement industry-standard security measures, including encryption and restricted role-based access, to protect data against unauthorized access, alteration, disclosure, or destruction.
+              We implement industry-standard security measures, including encryption, secure authentication protocols, and restricted role-based access controls, to protect data against unauthorized access, alteration, disclosure, or destruction. All data is stored securely with regular backup and recovery procedures in place.
+            </p>
+            <h4 className="font-bold text-gray-900 mt-4 mb-2">5. Data Retention & Deletion</h4>
+            <p>
+              Activity logs and transaction records are retained for audit and compliance purposes. Users have the right to request access to or deletion of their personal data in accordance with RA 10173. Requests should be submitted to the clinic administrator.
             </p>
           </LegalModal>
         )}
@@ -356,19 +360,27 @@ function LoginContent() {
             </p>
             <h4 className="font-bold text-gray-900 mt-4 mb-2">1. Authorized Access Only</h4>
             <p>
-              Access to this system is strictly limited to authorized personnel of M.T. Olaso Optical Clinic. You are responsible for maintaining the confidentiality of your login credentials. Sharing accounts or unauthorized access attempts will result in disciplinary action.
+              Access to this system is strictly limited to authorized personnel of M.T. Olaso Optical Clinic. You are responsible for maintaining the confidentiality of your login credentials. Sharing accounts or unauthorized access attempts will result in disciplinary action and may be reported to clinic management.
             </p>
             <h4 className="font-bold text-gray-900 mt-4 mb-2">2. Acceptable Use</h4>
             <p>
-              You agree to use the system solely for legitimate clinic operations, including inventory tracking, sales recording, and forecasting. You must not use the system to input falsified data, disrupt clinic operations, or extract data for personal gain.
+              You agree to use the system solely for legitimate clinic operations, including inventory tracking, sales recording, staff management, and forecasting. You must not use the system to input falsified data, disrupt clinic operations, breach system security, or extract data for personal gain or unauthorized purposes.
             </p>
-            <h4 className="font-bold text-gray-900 mt-4 mb-2">3. Data Confidentiality (RA 10173)</h4>
+            <h4 className="font-bold text-gray-900 mt-4 mb-2">3. Data Confidentiality & Privacy Protection (RA 10173)</h4>
             <p>
-              As a user of this system, you may have access to sensitive clinic data and patient records. In accordance with the <strong>Data Privacy Act of 2012 (RA 10173)</strong>, you are legally obligated to keep all patient data strictly confidential and must not disclose it to unauthorized parties.
+              As a user of this system, you may have access to sensitive clinic operational data and staff information. In accordance with the <strong>Data Privacy Act of 2012 (RA 10173)</strong>, you are legally obligated to keep all data strictly confidential and must not disclose it to unauthorized parties. You agree not to store, transmit, or request sensitive personal information that is not essential to clinic operations.
             </p>
-            <h4 className="font-bold text-gray-900 mt-4 mb-2">4. System Integrity</h4>
+            <h4 className="font-bold text-gray-900 mt-4 mb-2">4. System Integrity & Security</h4>
             <p>
-              We reserve the right to monitor system activity to ensure compliance with these terms. Any misuse, abuse, or unauthorized modification of the inventory system will lead to the immediate revocation of your access privileges.
+              We reserve the right to monitor system activity to ensure compliance with these terms and maintain system security. Any misuse, abuse, attempted hacking, or unauthorized modification of the inventory system will lead to the immediate revocation of your access privileges and potential legal action.
+            </p>
+            <h4 className="font-bold text-gray-900 mt-4 mb-2">5. Limitation of Liability</h4>
+            <p>
+              While we strive to maintain system availability and data integrity, OlasoSync is provided &quot;as is.&quot; The clinic is not liable for indirect, incidental, or consequential damages resulting from system use or downtime. Users are responsible for maintaining regular backups of critical data.
+            </p>
+            <h4 className="font-bold text-gray-900 mt-4 mb-2">6. Modification of Terms</h4>
+            <p>
+              We reserve the right to modify these Terms and Conditions at any time. Continued use of the system following notification of changes constitutes acceptance of the updated terms.
             </p>
           </LegalModal>
         )}

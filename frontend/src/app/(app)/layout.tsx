@@ -39,8 +39,8 @@ const getEventDate = (product: any, type: string): Date => {
       if (updatedDate) return updatedDate;
       break;
     case 'expiry':
-      if (product.expiryDate) return new Date(product.expiryDate);
-      break;
+      // Return today's date for expiry notifications (not the expiry date)
+      return today;
     case 'liquidation':
       const createdDate = getDateFromTimestamp(product.createdAt);
       if (createdDate) {
@@ -323,23 +323,27 @@ function AppContent({ children }: { children: React.ReactNode }) {
       // Process expiry notifications
       for (const product of expiryProducts) {
         const expiryDate = new Date(product.expiryDate!);
+        expiryDate.setHours(0, 0, 0, 0);
         const daysUntilExpiry = expiryCacheRef.current.get(product.id) || 0;
+        
+        // Format the expiry date without time (e.g., "May 20, 2026")
+        const expiryDateStr = expiryDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
         
         let message = '';
         let typeNotification: 'warning' | 'error' | 'info' = 'info';
         
         if (daysUntilExpiry <= 7) {
-          message = `${product.name} expires in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}. URGENT action required!`;
+          message = `${product.name} expires in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}. URGENT action required! (${expiryDateStr})`;
           typeNotification = 'error';
         } else if (daysUntilExpiry <= 14) {
-          message = `${product.name} expires in ${daysUntilExpiry} days. Plan clearance strategy.`;
+          message = `${product.name} expires in ${daysUntilExpiry} days. Plan clearance strategy. (${expiryDateStr})`;
           typeNotification = 'warning';
         } else {
-          message = `${product.name} expires in ${daysUntilExpiry} days. Monitor closely.`;
+          message = `${product.name} expires in ${daysUntilExpiry} days. Monitor closely. (${expiryDateStr})`;
           typeNotification = 'info';
         }
         
-        const eventDate = expiryDate;
+        const eventDate = getEventDate(product, 'expiry'); // Use today's date
         const eventId = generateEventId('expiry', product.id, eventDate);
         
         if (!processedEventsRef.current.has(eventId) && !notificationExists(product.id, 'expiry')) {

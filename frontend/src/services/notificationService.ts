@@ -75,7 +75,7 @@ class NotificationService {
       const notificationsRef = collection(db, `clinics/${CLINIC_ID}/notifications`);
       const q = query(
         notificationsRef,
-        orderBy('eventTimestamp', 'desc'),
+        orderBy('createdAt', 'desc'),
         limit(100)
       );
       
@@ -104,7 +104,7 @@ class NotificationService {
       const notificationsRef = collection(db, `clinics/${CLINIC_ID}/notifications`);
       const q = query(
         notificationsRef,
-        orderBy('eventTimestamp', 'desc'),
+        orderBy('createdAt', 'desc'),
         limit(100)
       );
 

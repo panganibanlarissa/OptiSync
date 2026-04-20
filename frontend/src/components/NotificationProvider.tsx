@@ -138,7 +138,7 @@ export default function NotificationProvider({ children }: { children: ReactNode
   };
 
   const convertToNotification = (stored: StoredNotification): Notification => {
-    const timestamp = stored.eventTimestamp?.toDate() || stored.createdAt?.toDate() || new Date();
+    const timestamp = stored.createdAt?.toDate() || stored.eventTimestamp?.toDate() || new Date();
     
     return {
       id: stored.id,
@@ -188,7 +188,35 @@ export default function NotificationProvider({ children }: { children: ReactNode
       const matchesStaffCategory = staffKeywords.some(keyword => title.includes(keyword));
       return notif.forStaff === true || matchesStaffCategory;
     })
-    .map(convertToNotification);
+    .map(convertToNotification)
+    .reduce((unique, notif) => {
+      // Deduplicate: keep only the most recent notification per product and type
+      const data = notif.data as any;
+      const productId = data?.productId;
+      const notifType = notif.title.toLowerCase();
+      
+      // Create a unique key for this notification
+      const key = productId && notifType ? `${productId}-${notifType}` : notif.id;
+      
+      // Find if we already have this notification type for this product
+      const existingIndex = unique.findIndex(n => {
+        const existingData = n.data as any;
+        const existingProductId = existingData?.productId;
+        const existingType = n.title.toLowerCase();
+        return existingProductId === productId && existingType === notifType;
+      });
+      
+      if (existingIndex === -1) {
+        // New notification, add it
+        unique.push(notif);
+      } else if (notif.timestamp > unique[existingIndex].timestamp) {
+        // Existing notification is older, replace it with the newer one
+        unique[existingIndex] = notif;
+      }
+      // Otherwise, keep the existing (newer) one
+      
+      return unique;
+    }, [] as Notification[]);
 
   const unreadCount = filteredNotifications.filter(n => !n.read).length;
 

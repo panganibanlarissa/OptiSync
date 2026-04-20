@@ -46,6 +46,17 @@ export default function ExpiryAlert() {
     setExpiringProducts(expiring);
   }, [products]);
 
+  // Auto-dismiss alerts after 5 seconds
+  useEffect(() => {
+    if (expiringProducts.length === 0) return;
+    
+    const timer = setTimeout(() => {
+      setDismissed(new Set(expiringProducts.map(p => p.id)));
+    }, 5000);
+    
+    return () => clearTimeout(timer);
+  }, [expiringProducts]);
+
   const dismissProduct = (id: string) => {
     setDismissed(prev => new Set([...prev, id]));
   };
