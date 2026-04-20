@@ -12,11 +12,10 @@
 - [Installation Guide](#-installation-guide)
 - [Configuration](#-configuration)
 - [Running the Application](#-running-the-application)
+- [Sample Accounts](#-sample-accounts)
 - [User Role Guides](#-user-role-guides)
 - [Project Structure](#-project-structure)
 - [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#license)
 
 ---
 
@@ -301,7 +300,58 @@ This will start both frontend (port 3000) and backend (port 5000) in containers.
 
 ---
 
-## 👥 User Role Guides
+## � Sample Accounts
+
+For development and testing purposes, use the following pre-configured accounts:
+
+### **Admin Account**
+
+| Field | Value |
+|-------|-------|
+| **Email** | `admin@clinic.local` |
+| **Password** | `admin123` |
+| **Role** | Administrator |
+| **Access** | Full system access |
+
+**Usage:**
+1. Navigate to `http://localhost:3000`
+2. Click **Login**
+3. Enter email: `admin@clinic.local`
+4. Enter password: `admin123`
+5. Click **Login**
+
+You will be directed to the Admin Dashboard with access to all features.
+
+### **Staff Account**
+
+| Field | Value |
+|-------|-------|
+| **Email** | `staff.olasosync@gmail.com` |
+| **Password** | `staff_123` |
+| **Role** | Staff Member |
+| **Access** | POS and inventory lookup only |
+
+**Usage:**
+1. Navigate to `http://localhost:3000`
+2. Click **Login**
+3. Enter email: `staff.olasosync@gmail.com`
+4. Enter password: `staff_123`
+5. Click **Login**
+
+You will be directed to the Staff Dashboard with access to sales and product search features.
+
+### **Testing Credentials**
+
+| Role | Email | Password | Dashboard |
+|------|-------|----------|-----------|
+| Admin | `admin@clinic.local` | `admin123` | Full Analytics & Management |
+| Staff | `staff.olasosync@gmail.com` | `staff_123` | POS & Sales Only |
+
+> **⚠️ Important:** These are development accounts only. In production, ensure all default credentials are changed and unique, strong passwords are set for all user accounts.
+
+---
+
+## �👥 User Role Guides
 
 OptiSync implements two primary user roles with distinct permissions and functionalities. This section provides comprehensive guides for each role.
 
