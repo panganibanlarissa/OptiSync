@@ -329,7 +329,7 @@ You will be directed to the Admin Dashboard with access to all features.
 | **Email** | `staff.olasosync@gmail.com` |
 | **Password** | `staff_123` |
 | **Role** | Staff Member |
-| **Access** | POS and inventory lookup only |
+| **Access** | POS and Inventory |
 
 **Usage:**
 1. Navigate to `http://localhost:3000`
@@ -425,7 +425,7 @@ The admin dashboard provides:
 - ✅ View inventory (Read-only for searching/scanning)
 - ✅ Generate receipts
 - ✅ View assigned reports
-- ❌ Cannot modify inventory
+- ✅ Modify inventory
 - ❌ Cannot access system settings
 - ❌ Cannot manage user accounts
 - ❌ Cannot view financial analytics
@@ -629,8 +629,6 @@ OptiSync is licensed under the MIT License. See LICENSE file for details.
 
 **Last Updated:** April 2026
 **Version:** 1.0.0
-
-```
 
 ---
 
