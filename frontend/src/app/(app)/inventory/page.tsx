@@ -23,6 +23,7 @@ import {
 import { Timestamp } from "firebase/firestore";
 import QRScannerModal from "@/components/QRScannerModal";
 import ProductModal, { ProductFormData } from "@/components/ProductModal";
+import InventoryReports from "@/components/InventoryReports";
 
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_HOVER = "hover:bg-[#082F6E]";
@@ -118,12 +119,20 @@ export default function InventoryPage() {
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [qrScanMode, setQRScanMode] = useState<'search' | 'adjust'>('search');
   const [createdProductId, setCreatedProductId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'catalog' | 'reports'>('catalog');
 
   const { showNotification, showToastOnly } = useNotification();
 
   useEffect(() => {
     setProducts(firebaseProducts);
   }, [firebaseProducts]);
+
+  // Reset to catalog tab if non-admin user (safety measure)
+  useEffect(() => {
+    if (userRole !== 'admin' && activeTab === 'reports') {
+      setActiveTab('catalog');
+    }
+  }, [userRole, activeTab]);
 
   // Get low stock alerts (products below reorder point)
   const lowStockAlerts = (getLowStockProducts?.() ?? []) as LowStockItem[];
@@ -366,8 +375,67 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
-      <div className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full">
+    <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border gap-0">
+      {/* TAB NAVIGATION - ADMIN ONLY */}
+      {userRole === 'admin' && (
+        <div className="flex gap-0 border-b-2 border-gray-200 sticky top-0 z-10">
+          <button
+            onClick={() => setActiveTab('catalog')}
+            className={`px-4 sm:px-6 py-3 sm:py-4 font-semibold text-sm sm:text-base transition-all relative ${
+              activeTab === 'catalog'
+                ? 'text-[#0B3C8A]'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Inventory Catalog
+            {activeTab === 'catalog' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#0B3C8A]"></div>
+            )}
+          </button>
+          {userRole === 'admin' && (
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`px-4 sm:px-6 py-3 sm:py-4 font-semibold text-sm sm:text-base transition-all relative ${
+                activeTab === 'reports'
+                  ? 'text-[#0B3C8A]'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              Inventory Reports
+              {activeTab === 'reports' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#0B3C8A]"></div>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* TAB CONTENT */}
+      <AnimatePresence mode="wait">
+        {/* For Admin: Show based on active tab */}
+        {userRole === 'admin' && activeTab === 'reports' && (
+          <motion.div
+            key="reports"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="pt-4 gap-2 sm:gap-3 lg:gap-4 w-full"
+          >
+            <InventoryReports products={products} />
+          </motion.div>
+        )}
+
+        {/* For Admin: Show catalog when tab is selected, or for Staff: Always show catalog */}
+        {(userRole !== 'admin' || activeTab === 'catalog') && (
+          <motion.div
+            key="catalog"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex flex-col lg:flex-row gap-2 sm:gap-3 lg:gap-4 w-full pt-4"
+          >
         {/* LEFT COLUMN - PRODUCT CATALOG */}
         <motion.div 
           initial={{ opacity: 0, y: 15 }} 
@@ -669,7 +737,9 @@ export default function InventoryPage() {
             </div>
           </motion.div>
         </aside>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* MODALS */}
       <AnimatePresence>
