@@ -78,14 +78,61 @@ export default function InventoryReports({
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
 }) {
+
+  const resetFilters = () => {
+  setFilters({
+    category: "All Categories",
+    stockStatus: "all",
+    priceRange: { min: 0, max: 999999 },
+    searchQuery: "",
+    dateRange: { 
+      startDate: "",  // Reset to empty (no date filter)
+      endDate: ""     // Reset to empty (no date filter)
+    },
+  });
+  
+  if (setSearchQuery) setSearchQuery("");
+  setMinPrice("0");
+  setMaxPrice("999999");
+};
+
+  const earliestProductDate = useMemo<string>(() => {
+    const parsedDates: Date[] = products.map((product) => {
+      try {
+        if (product.createdAt) {
+          if (typeof (product as any).createdAt.toDate === 'function') {
+            return (product as any).createdAt.toDate();
+          }
+          if (typeof product.createdAt === 'string') {
+            const d = new Date(product.createdAt);
+            if (!isNaN(d.getTime())) return d;
+          }
+          if (product.createdAt instanceof Date) {
+            return product.createdAt;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      return null as any;
+    }).filter(Boolean) as Date[];
+
+    if (parsedDates.length === 0) {
+      return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
+
+    const min = parsedDates.reduce((a, b) => (a < b ? a : b));
+    return min.toISOString().split('T')[0];
+  }, [products]);
+
   const [filters, setFilters] = useState<ReportFilters>({
     category: "All Categories",
     stockStatus: "all",
     priceRange: { min: 0, max: 999999 },
     searchQuery: "",
     dateRange: { 
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      endDate: new Date().toISOString().split('T')[0]
+      startDate:  "",
+      endDate:  ""
     },
   });
 
@@ -139,45 +186,48 @@ export default function InventoryReports({
         product.markupPrice >= filters.priceRange.min &&
         product.markupPrice <= filters.priceRange.max;
 
-      // Date range filter
-      let dateMatch = true;
-      if (filters.dateRange.startDate || filters.dateRange.endDate) {
-        let createdDate: string | null = null;
-        
-        if (product.createdAt) {
-          try {
-            let date: Date | null = null;
-            
-            // Handle Firestore Timestamp (has toDate method)
-            if (product.createdAt && typeof product.createdAt.toDate === 'function') {
-              date = product.createdAt.toDate();
+        // Date range filter
+        let dateMatch = true;
+        if (filters.dateRange.startDate || filters.dateRange.endDate) {
+          let createdDate: string | null = null;
+          
+          if (product.createdAt) {
+            try {
+              let date: Date | null = null;
+              
+              // Handle Firestore Timestamp (has toDate method)
+              if (product.createdAt && typeof product.createdAt.toDate === 'function') {
+                date = product.createdAt.toDate();
+              }
+              // Handle string dates
+              else if (typeof product.createdAt === 'string') {
+                date = new Date(product.createdAt);
+              }
+              // Handle Date objects
+              else if (product.createdAt instanceof Date) {
+                date = product.createdAt;
+              }
+              
+              if (date && !isNaN(date.getTime())) {
+                createdDate = date.toISOString().split('T')[0];
+              }
+            } catch (e) {
+              createdDate = null;
             }
-            // Handle string dates
-            else if (typeof product.createdAt === 'string') {
-              date = new Date(product.createdAt);
-            }
-            // Handle Date objects
-            else if (product.createdAt instanceof Date) {
-              date = product.createdAt;
-            }
-            
-            if (date && !isNaN(date.getTime())) {
-              createdDate = date.toISOString().split('T')[0];
-            }
-          } catch (e) {
-            createdDate = null;
           }
-        }
-        
-        // Only filter if we have a valid date from the product
-        if (createdDate) {
-          if (filters.dateRange.startDate) {
-            dateMatch = dateMatch && createdDate >= filters.dateRange.startDate;
+          
+          // Only filter if we have a valid date from the product AND date filters are applied
+          if (createdDate) {
+            if (filters.dateRange.startDate) {
+              dateMatch = dateMatch && createdDate >= filters.dateRange.startDate;
+            }
+            if (filters.dateRange.endDate) {
+              dateMatch = dateMatch && createdDate <= filters.dateRange.endDate;
+            }
+          } else if (filters.dateRange.startDate || filters.dateRange.endDate) {
+            // If product has no valid date but date filters are active, exclude it
+            dateMatch = false;
           }
-          if (filters.dateRange.endDate) {
-            dateMatch = dateMatch && createdDate <= filters.dateRange.endDate;
-          }
-        }
       }
 
       return categoryMatch && searchMatch && stockStatusMatch && priceMatch && dateMatch;
@@ -720,7 +770,7 @@ export default function InventoryReports({
                     {cat}
                   </option>
                 ))}
-              </select>
+                </select>
             </div>
 
             {/* Stock Status Filter */}
@@ -730,9 +780,7 @@ export default function InventoryReports({
               </label>
               <select
                 value={filters.stockStatus}
-                onChange={(e) =>
-                  handleFilterChange("stockStatus", e.target.value)
-                }
+                onChange={(e) => handleFilterChange("stockStatus", e.target.value)}
                 className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
               >
                 <option value="all">All Status</option>
@@ -810,21 +858,7 @@ export default function InventoryReports({
             {/* Reset Button */}
             <div className="flex items-end">
               <button
-                onClick={() => {
-                  setFilters({
-                    category: "All Categories",
-                    stockStatus: "all",
-                    priceRange: { min: 0, max: 999999 },
-                    searchQuery: "",
-                    dateRange: { 
-                      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                      endDate: new Date().toISOString().split('T')[0]
-                    },
-                  });
-                  if (setSearchQuery) setSearchQuery("");
-                  setMinPrice("0");
-                  setMaxPrice("999999");
-                }}
+                onClick={resetFilters}
                 className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
               >
                 Reset Filters
