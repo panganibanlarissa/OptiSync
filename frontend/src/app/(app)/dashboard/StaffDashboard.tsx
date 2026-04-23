@@ -370,30 +370,36 @@ export default function StaffDashboard() {
   }, [todaySales, todayTransactionCount, lowStockCount, totalInventoryCount, salesTrend]);
 
   const handleProductFound = async (productId: string) => {
-    const product = products.find(p => p.id === productId);
-    if (product) {
-      try {
-        const newStock = scanMode === 'in' 
-          ? product.stock + 1 
-          : Math.max(0, product.stock - 1);
-        
+  const product = products.find(p => p.id === productId);
+  if (product) {
+    try {
+      const newStock = scanMode === 'in' 
+        ? product.stock + 1 
+        : Math.max(0, product.stock - 1);
+      
+      // Only adjust if stock actually changes (prevents duplicate entries)
+      if (newStock !== product.stock) {
         const reason = scanMode === 'in' 
-          ? 'Stock received via QR Scan' 
-          : 'Stock dispatched via QR Scan';
+          ? 'Received via QR Scan' 
+          : 'Dispatched via QR Scan';
         
-        await adjustStock(productId, newStock, reason);
+        // Pass the current user's name and ID to properly log who performed the action
+        await adjustStock(productId, newStock, reason, userName || 'Staff', userId || 'system');
         
         const action = scanMode === 'in' ? '+1' : '-1';
         const message = `${action} unit - ${product.name}`;
         
         showNotification(message, 'success', `Stock ${scanMode === 'in' ? 'In' : 'Out'} ✓`);
-        setIsQRScannerOpen(false);
-      } catch (error) {
-        console.error("Error adjusting stock:", error);
-        showNotification(`Failed to adjust stock for "${product.name}"`, 'error', 'Error');
+      } else {
+        showNotification(`No change - ${product.name} already at ${product.stock} units`, 'info', 'Stock Unchanged');
       }
+      setIsQRScannerOpen(false);
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      showNotification(`Failed to adjust stock for "${product.name}"`, 'error', 'Error');
     }
-  };
+  }
+};
 
   if (loading && !dataLoaded) {
     return (

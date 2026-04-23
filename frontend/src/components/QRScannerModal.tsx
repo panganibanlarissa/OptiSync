@@ -1,13 +1,16 @@
+// src/components/QRScannerModal.tsx
+
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import jsQR from "jsqr";
+import { useFirebase } from "@/context/FirebaseContext";
 
 interface QRScannerModalProps {
   onClose: () => void;
-  products: Array<{ id: string; sku: string }>;
+  products: Array<{ id: string; sku: string; name?: string; stock?: number }>;
   onProductFound: (productId: string) => void;
   mode?: 'search' | 'adjust' | 'cart' | 'in' | 'out';
 }
@@ -30,6 +33,8 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
   const [manualInput, setManualInput] = useState("");
   const [foundProduct, setFoundProduct] = useState<string | null>(null);
   const scanningRef = useRef(false);
+  
+  const { userName, userId, adjustStock } = useFirebase();
 
   // Get context-aware messages based on mode
   const getInstructions = () => {
@@ -37,14 +42,14 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
       case 'search':
         return 'Point your camera at a product QR code to search for it';
       case 'adjust':
-        return 'Point your camera at a product QR code to add it to inventory';
+        return 'Point your camera at a product QR code to add to inventory';
       case 'in':
         return 'Point your camera at a product QR code to receive stock';
       case 'out':
         return 'Point your camera at a product QR code to dispatch stock';
       case 'cart':
       default:
-        return 'Point your camera at a product QR code to add it to cart';
+        return 'Point your camera at a product QR code to add to cart';
     }
   };
 
@@ -62,6 +67,34 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
       default:
         return '✓ Product found! Adding to cart...';
     }
+  };
+
+  const handleProductFoundAction = async (productId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    
+    // For adjust mode (in/out), use the adjustStock function with proper staff info
+    if (mode === 'in' || mode === 'out' || mode === 'adjust') {
+      const reason = mode === 'in' || mode === 'adjust'
+        ? 'Received via QR Scan' 
+        : 'Dispatched via QR Scan';
+      
+      // Get current product stock
+      const currentProduct = products.find(p => p.id === productId);
+      if (currentProduct && typeof (currentProduct as any).stock === 'number') {
+        const newStock = (mode === 'in' || mode === 'adjust')
+          ? (currentProduct as any).stock + 1 
+          : Math.max(0, (currentProduct as any).stock - 1);
+        
+        // Only adjust if stock actually changes (prevents duplicate entries)
+        if (newStock !== (currentProduct as any).stock) {
+          // Call adjustStock with staff info
+          await adjustStock(productId, newStock, reason, userName || 'Staff', userId || 'system');
+        }
+      }
+    }
+    
+    onProductFound(productId);
   };
 
   useEffect(() => {
@@ -129,7 +162,7 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
               scanningRef.current = false;
               setFoundProduct(productId);
               setTimeout(() => {
-                onProductFound(productId);
+                handleProductFoundAction(productId);
               }, 500);
               return;
             }
@@ -151,17 +184,17 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [isScanning, products, onProductFound]);
+  }, [isScanning, products]);
 
-  const handleManualInput = () => {
+  const handleManualInput = async () => {
     if (!manualInput.trim()) return;
 
     const product = products.find(p => p.id === manualInput || p.sku === manualInput);
     if (product) {
       setFoundProduct(product.id);
       setManualInput("");
-      setTimeout(() => {
-        onProductFound(product.id);
+      setTimeout(async () => {
+        await handleProductFoundAction(product.id);
       }, 300);
     } else {
       setError(`Product with ID/SKU "${manualInput}" not found`);
