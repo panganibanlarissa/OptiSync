@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import { motion, Variants } from "framer-motion";
 import { X, UploadCloud, Save, Trash2, Calendar, Package as PackageIcon } from "lucide-react";
+import { Archive } from "lucide-react";
 import Image from "next/image";
 import { uploadImage } from "@/services/cloudinary";
 import { useNotification } from "@/components/NotificationProvider";
@@ -29,6 +30,7 @@ export interface ProductFormData {
   expiryDate?: string;
   batchNumber?: string;
   adjustmentReason?: string;
+  archived?: boolean;
 }
 
 export interface ProductModalProps {
@@ -38,6 +40,7 @@ export interface ProductModalProps {
   onClose: () => void;
   onSave: (data: ProductFormData) => void;
   onDelete?: (id: string) => void;
+  onArchive?: (id: string, archived: boolean) => void;
   userRole?: string | null;
 }
 
@@ -54,6 +57,7 @@ export default function ProductModal({
   onClose, 
   onSave, 
   onDelete, 
+  onArchive,
   userRole 
 }: ProductModalProps) {
   const [formData, setFormData] = useState<ProductFormData>(product);
@@ -61,6 +65,7 @@ export default function ProductModal({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(product.image || null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showArchiveConfirmation, setShowArchiveConfirmation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showNotification, showToastOnly } = useNotification();
 
@@ -175,6 +180,15 @@ export default function ProductModal({
     if (previewUrl && previewUrl.startsWith('blob:')) {
       URL.revokeObjectURL(previewUrl);
     }
+    onClose();
+  };
+
+  const handleArchiveConfirm = () => {
+    if (!formData.id || !onArchive) return;
+    const nextArchivedState = !(formData.archived === true);
+    onArchive(formData.id, nextArchivedState);
+    setFormData((prev) => ({ ...prev, archived: nextArchivedState }));
+    setShowArchiveConfirmation(false);
     onClose();
   };
 
@@ -412,6 +426,11 @@ export default function ProductModal({
               <Trash2 size={16}/>
             </button>
           )}
+          {mode === 'edit' && formData.id && userRole === 'admin' && onArchive && (
+            <button type="button" onClick={() => setShowArchiveConfirmation(true)} className="p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+              <Archive size={16} />
+            </button>
+          )}
           <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors">
             Cancel
           </button>
@@ -429,6 +448,32 @@ export default function ProductModal({
           </button>
         </div>
       </motion.div>
+      {showArchiveConfirmation && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-4">
+            <h3 className="font-bold text-lg mb-2">
+              {formData.archived ? "Confirm Unarchive" : "Confirm Archive"}
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Are you sure you want to {formData.archived ? "unarchive" : "archive"} &quot;{formData.name}&quot;?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowArchiveConfirmation(false)}
+                className="px-3 py-1 rounded-md border border-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArchiveConfirm}
+                className="px-3 py-1 rounded-md bg-[#0B3C8A] text-white"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

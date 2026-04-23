@@ -84,6 +84,10 @@ export interface Product {
   batchNumber?: string;
   manufacturingDate?: Date;
   totalSold?: number;
+  beginningInventory?: number;
+  damageExchanged?: number;
+  deleted?: boolean;
+  archived?: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -133,6 +137,7 @@ interface FirebaseContextType {
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   adjustStock: (id: string, newStock: number, reason: string, staffName?: string, staffId?: string) => Promise<void>;
+  archiveProduct: (id: string, archived: boolean, reason?: string, markDeleted?: boolean) => Promise<void>;
 
   transactions: Transaction[];
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
@@ -861,6 +866,36 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const archiveProduct = async (id: string, archived: boolean, reason?: string, markDeleted = false) => {
+    try {
+      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, id);
+      await updateDoc(productRef, {
+        archived,
+        deleted: archived ? markDeleted : false,
+        updatedAt: serverTimestamp()
+      });
+
+      setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, archived, deleted: archived ? markDeleted : false } : p)));
+
+      try {
+        const archiveLogsRef = collection(db, `clinics/${CLINIC_ID}/archiveLogs`);
+        await addDoc(archiveLogsRef, {
+          productId: id,
+          action: archived ? 'archive' : 'unarchive',
+          staffId: userId || null,
+          staffName: userName || null,
+          reason: reason || null,
+          timestamp: serverTimestamp()
+        });
+      } catch (logErr) {
+        console.error('Failed to write archive log:', logErr);
+      }
+    } catch (error) {
+      console.error('Error archiving/unarchiving product:', error);
+      throw error;
+    }
+  };
+
   const deleteProduct = async (id: string) => {
     try {
       await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
@@ -873,40 +908,69 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const adjustStock = async (id: string, newStock: number, reason: string, staffName?: string, staffId?: string) => {
     try {
-      // Get current product to know old stock value and product name
-      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, id);
-      const productSnap = await getDoc(productRef);
-      
-      if (!productSnap.exists()) {
+      // Get the current product to calculate difference and handle damage/exchange tracking
+      const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+      if (!productDoc.exists()) {
         throw new Error("Product not found");
       }
-      
-      const productData = productSnap.data();
-      const oldStock = productData.stock || 0;
-      const productName = productData.name || "Unknown Product";
-      
+
+      const currentProduct = productDoc.data() as any;
+      const oldStock = currentProduct.stock || 0;
+      const stockDifference = newStock - oldStock; // Negative if stock decreased
+
       // Use provided staff info or fallback to current user
       const actingStaffName = staffName || userName || "System";
       const actingStaffId = staffId || userId || "system";
-      
-      // ONLY update stock if it's actually changing (prevents duplicate entries)
+
+      // Determine if we should update damageExchanged count
+      const isDamageOrExchange =
+        reason?.includes("Damaged") ||
+        reason?.includes("Damage") ||
+        reason?.includes("Exchange") ||
+        reason?.includes("Return");
+
+      // Only apply updates and logs if the stock actually changed
+      let appliedUpdateData: any = null;
       if (oldStock !== newStock) {
-        await updateDoc(productRef, {
+        // Prepare update payload
+        const updateData: any = {
           stock: newStock,
-          updatedAt: serverTimestamp()
-        });
+          updatedAt: serverTimestamp(),
+        };
+
+        if (isDamageOrExchange && stockDifference < 0) {
+          const itemsRemoved = Math.abs(stockDifference);
+          const currentDamageExchanged = currentProduct.damageExchanged || 0;
+          updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
+        }
+
+        // Persist update
+        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
+        appliedUpdateData = updateData;
 
         // Log stock adjustment with proper staff info
-        await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName);
-        
-        console.log(`Stock adjusted by ${actingStaffName} (${actingStaffId}): ${productName} from ${oldStock} to ${newStock}. Reason: ${reason}`);
+        try {
+          const productName = currentProduct.name || null;
+          await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
+        } catch (logErr) {
+          console.error("Failed to log stock adjustment:", logErr);
+        }
+
+        console.log(`Stock adjusted by ${actingStaffName} (${actingStaffId}): ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
       } else {
-        console.log(`Stock adjustment skipped - no change for ${productName} (${oldStock} → ${newStock})`);
+        // No change, nothing to persist or log
+        console.log(`Stock adjustment skipped - no change for ${currentProduct.name || id} (${oldStock} → ${newStock})`);
       }
 
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === id ? { ...p, stock: newStock } : p
+          p.id === id
+            ? {
+                ...p,
+                stock: newStock,
+                damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged) ?? p.damageExchanged,
+              }
+            : p
         )
       );
     } catch (error) {
@@ -1141,6 +1205,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     addProduct,
     updateProduct,
     deleteProduct,
+    archiveProduct,
     adjustStock,
 
     transactions,

@@ -1239,7 +1239,7 @@ export default function SalesPage() {
                   <Receipt size={14} className="sm:w-4 sm:h-4"/> Print / Download Receipt
                 </button>
                 <button onClick={() => setShowCheckoutModal(false)} className={`w-full py-2 sm:py-2.5 rounded-lg ${THEME_BG} text-white text-xs sm:text-sm font-bold ${THEME_HOVER} transition-colors`}>
-                  New Transaction
+                  Close
                 </button>
               </div>
             </motion.div>
