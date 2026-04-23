@@ -1,8 +1,9 @@
 // src/app/(app)/dashboard/AdminDashboard.tsx
+
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { motion, Variants } from "framer-motion";
+import { motion, Variants, AnimatePresence } from "framer-motion";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
 import {
@@ -15,7 +16,19 @@ import {
   Banknote,
   BarChart3,
   Database,
-  Clock
+  Clock,
+  X,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  PieChart,
+  ChevronRight,
+  Calculator,
+  DollarSign,
+  Percent,
+  ShoppingBag,
+  AlertCircle,
+  CheckCircle2
 } from "lucide-react";
 
 interface StatData {
@@ -58,6 +71,16 @@ interface DeadstockItem {
   aiSuggestion?: string | null;
   aiSuggestionType?: 'critical' | 'warning' | 'info' | null;
   recommendedDiscount?: number | null;
+  mlFactors?: {
+    daysFactor: number;
+    capitalFactor: number;
+    categoryUrgency: number;
+    velocityFactor: number;
+    finalDiscount: number;
+  } | null;
+  baseCost?: number;
+  markupPrice?: number;
+  historicalVelocity?: number;
 }
 
 interface Recommendation {
@@ -107,6 +130,12 @@ const itemVariants: Variants = {
   },
 };
 
+const modalVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.95 },
+  visible: { opacity: 1, scale: 1 },
+  exit: { opacity: 0, scale: 0.95 },
+};
+
 const CURRENT_PERIOD = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const MIN_TRANSACTIONS_FOR_ML = 10;
 
@@ -128,6 +157,7 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"weekly" | "monthly">("monthly");
   const [forecastPeriod, setForecastPeriod] = useState<30 | 60 | 90>(30);
   const [hoveredBar, setHoveredBar] = useState<{ label: string; fullLabel: string; actual: number; forecast: number } | null>(null);
+  const [selectedDeadstock, setSelectedDeadstock] = useState<DeadstockItem | null>(null);
   const { products, transactions } = useFirebase();
   const { loading, recommendations, forecastData, usingML, dataLoaded, deadstockSuggestions } = useMLForecasting();
 
@@ -152,7 +182,6 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
-  // Helper function to safely get date from Firestore Timestamp
   const getDateFromTimestamp = (timestamp: any): Date | null => {
     if (!timestamp) return null;
     
@@ -179,7 +208,6 @@ export default function AdminDashboard() {
     return null;
   };
 
-  // Weekly sales data
   const weeklySalesData = useMemo(() => {
     const today = new Date();
     const result: ChartDataPoint[] = [];
@@ -191,12 +219,6 @@ export default function AdminDashboard() {
     const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
     const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
     const useMLForWeekly = hasMLForecastData && monthlyForecasts.length > 0;
-    
-    console.log('📊 WEEKLY TREND VISUALIZATION:');
-    console.log(`  - ML Active: ${usingML}`);
-    console.log(`  - Has ML Forecast Data: ${hasMLForecastData}`);
-    console.log(`  - Monthly Forecasts Available: ${monthlyForecasts.length}`);
-    console.log(`  - Using ML for Weekly Forecast: ${useMLForWeekly}`);
     
     for (let i = 0; i < 7; i++) {
       const date = new Date(today);
@@ -237,21 +259,12 @@ export default function AdminDashboard() {
       });
     }
     
-    console.log(`  - Data Points: ${result.length} days`);
-    console.log(`  - Actual Sales Total: ₱${result.reduce((sum, d) => sum + d.actual, 0).toLocaleString()}`);
-    if (useMLForWeekly) {
-      console.log(`  - Forecast Sales Total: ₱${result.reduce((sum, d) => sum + d.forecast, 0).toLocaleString()}`);
-    }
-    
     return result;
   }, [completedTransactions, forecastData, usingML]);
 
-  // Monthly sales data
   const monthlySalesData = useMemo(() => {
     const year = new Date().getFullYear();
     const result: ChartDataPoint[] = [];
-    
-    const seasonalMultipliers: number[] = [1.4, 1.1, 1.3, 1.35, 1.2, 1.1, 0.85, 0.8, 0.9, 1.0, 1.2, 1.5];
     
     const actualSalesByMonth: number[] = new Array(12).fill(0);
     for (let month = 0; month < 12; month++) {
@@ -269,12 +282,6 @@ export default function AdminDashboard() {
     const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
     const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
     const useMLForMonthly = hasMLForecastData && monthlyForecasts.length > 0;
-    
-    console.log('📊 MONTHLY TREND VISUALIZATION:');
-    console.log(`  - ML Active: ${usingML}`);
-    console.log(`  - Has ML Forecast Data: ${hasMLForecastData}`);
-    console.log(`  - Forecast Data Points from ML: ${monthlyForecasts.length}`);
-    console.log(`  - Using ML for Monthly Forecast: ${useMLForMonthly}`);
     
     for (let month = 0; month < 12; month++) {
       const actualSales = actualSalesByMonth[month];
@@ -304,12 +311,6 @@ export default function AdminDashboard() {
       });
     }
     
-    console.log(`  - Data Points: ${result.length} months`);
-    console.log(`  - Actual Sales Total: ₱${result.reduce((sum, d) => sum + d.actual, 0).toLocaleString()}`);
-    if (useMLForMonthly) {
-      console.log(`  - Forecast Sales Total: ₱${result.reduce((sum, d) => sum + d.forecast, 0).toLocaleString()}`);
-    }
-    
     return result;
   }, [completedTransactions, forecastData, usingML]);
 
@@ -321,23 +322,8 @@ export default function AdminDashboard() {
     const maxForecast = usingML ? Math.max(...chartData.map((d: ChartDataPoint) => d.forecast)) : 0;
     const max = Math.max(maxActual, maxForecast);
     const roundedMax = Math.ceil(max / 20000) * 20000 || 100000;
-    
-    console.log(`📈 CHART SCALE CALCULATION:`);
-    console.log(`  - Max Actual Value: ₱${maxActual.toLocaleString()}`);
-    console.log(`  - Max Forecast Value: ₱${maxForecast.toLocaleString()}`);
-    console.log(`  - Absolute Max: ₱${max.toLocaleString()}`);
-    console.log(`  - Rounded Chart Max: ₱${roundedMax.toLocaleString()}`);
-    
     return roundedMax;
   }, [chartData, usingML]);
-
-  useEffect(() => {
-    console.log(`🔄 TREND VISUALIZATION TAB CHANGED: ${activeTab.toUpperCase()}`);
-    console.log(`  - ML Status: ${usingML ? 'ACTIVE' : 'INACTIVE'}`);
-    console.log(`  - Data Points: ${chartData.length}`);
-    console.log(`  - Chart Max Value: ₱${chartMaxValue.toLocaleString()}`);
-    console.log(`  - Forecast Points: ${chartData.filter(d => d.forecast > 0).length}`);
-  }, [activeTab, usingML, chartData.length, chartMaxValue]);
 
   const lowStockCount = useMemo(() => {
     return products.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
@@ -412,15 +398,8 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
-  // Demand Forecasting Data with Console Logs
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
-    console.log('📊 DEMAND FORECASTING:');
-    console.log(`  - ML Active: ${usingML}`);
-    console.log(`  - Has Enough Data: ${hasEnoughDataForML}`);
-    console.log(`  - Recommendations Count: ${recommendations?.length || 0}`);
-    
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
-      console.log('  - Forecast Items:');
       return recommendations.map((r: Recommendation) => {
         const predictedDemand30d = typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) 
           ? r.predictedDemand30d 
@@ -432,8 +411,6 @@ export default function AdminDashboard() {
           ? r.predictedDemand90d 
           : 0;
         
-        console.log(`    • ${r.productName}: Stock ${r.currentStock} | 30d: ${predictedDemand30d} | 60d: ${predictedDemand60d} | 90d: ${predictedDemand90d} | Trend: ${r.trend}`);
-        
         return {
           name: r.productName,
           currentStock: r.currentStock,
@@ -444,8 +421,6 @@ export default function AdminDashboard() {
           priority: r.confidence
         };
       });
-    } else {
-      console.log('  - No forecast data available');
     }
     return [];
   }, [usingML, hasEnoughDataForML, recommendations]);
@@ -477,16 +452,9 @@ export default function AdminDashboard() {
     }));
   }, [products]);
 
-  // DEADSTOCK DATA - FIXED: Properly handles new products with creation date
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
-    console.group('===== DEADSTOCK IMPACT ANALYSIS =====');
-    console.log(`Total Products: ${products.length}`);
-    console.log(`Completed Transactions: ${completedTransactions.length}`);
-    console.log(`ML Service Active: ${usingML ? 'YES' : 'NO'}`);
-    console.log(`AI Suggestions Available: ${deadstockSuggestions.size}`);
 
     const deadstockItems: DeadstockItem[] = [];
 
@@ -508,28 +476,25 @@ export default function AdminDashboard() {
         lastSaleDate.setHours(0, 0, 0, 0);
         daysSinceSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
       } else {
-        // If never sold, use creation date
         neverSold = true;
         const createdDate = getDateFromTimestamp((p as any).createdAt);
         
         if (createdDate) {
           createdDate.setHours(0, 0, 0, 0);
           daysSinceSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
-          console.log(`  📅 ${p.name}: created ${createdDate.toLocaleDateString()}, days since: ${daysSinceSale}`);
         } else {
-          // If no creation date, use lastMovedDaysAgo or default to 0 (assume new)
           daysSinceSale = p.lastMovedDaysAgo || 0;
-          console.log(`  ⚠️ ${p.name}: no creation date, using lastMovedDaysAgo: ${daysSinceSale}`);
         }
         lastSaleDate = null;
       }
       
-      // Only include if actually 30+ days unsold
       if (daysSinceSale >= 30) {
         const lockedCapital = p.stock * p.markupPrice;
         const mlSuggestion = deadstockSuggestions.get(p.id);
         
-        console.log(`  💀 ${p.name}: ${daysSinceSale} days ${neverSold ? '(never sold)' : 'unsold'} - INCLUDED`);
+        const totalQuantitySold = salesForProduct.reduce((sum, sale) => 
+          sum + (sale.items.find((item: any) => item.id === p.id)?.quantity || 0), 0);
+        const historicalVelocity = totalQuantitySold / Math.max(1, daysSinceSale) * 30;
         
         deadstockItems.push({
           id: p.sku || p.id.slice(0, 8),
@@ -542,25 +507,18 @@ export default function AdminDashboard() {
           lastSaleDate: lastSaleDate,
           aiSuggestion: mlSuggestion?.suggestion || null,
           aiSuggestionType: mlSuggestion?.suggestionType || null,
-          recommendedDiscount: mlSuggestion?.recommendedDiscount || null
+          recommendedDiscount: mlSuggestion?.recommendedDiscount || null,
+          mlFactors: mlSuggestion?.mlFactors || null,
+          baseCost: p.baseCost,
+          markupPrice: p.markupPrice,
+          historicalVelocity: historicalVelocity
         });
-      } else {
-        console.log(`  ✅ ${p.name}: ${daysSinceSale} days ${neverSold ? '(never sold)' : 'unsold'} - SKIPPED (under 30 days)`);
       }
     }
 
     deadstockItems.sort((a, b) => b.lockedCapital - a.lockedCapital);
-
-    console.log(`Total deadstock items: ${deadstockItems.length}`);
-    console.log(`Items with AI suggestions: ${deadstockItems.filter(i => i.aiSuggestion).length}`);
-    console.groupEnd();
-
     return deadstockItems;
   }, [products, completedTransactions, usingML, deadstockSuggestions]);
-
-  const totalLockedCapital = useMemo(() => {
-    return DEADSTOCK_DATA.reduce((sum: number, item: DeadstockItem) => sum + item.lockedCapital, 0);
-  }, [DEADSTOCK_DATA]);
 
   if (loading && !dataLoaded) {
     return (
@@ -589,400 +547,649 @@ export default function AdminDashboard() {
     setHoveredBar(null);
   };
 
+  const calculateDetailedAnalysis = (item: DeadstockItem) => {
+    if (!item) return null;
+    
+    const originalPrice = item.markupPrice || 0;
+    const baseCost = item.baseCost || 0;
+    const discountPercent = item.recommendedDiscount || 0;
+    const discountedPrice = originalPrice * (1 - discountPercent / 100);
+    const profitPerUnit = originalPrice - baseCost;
+    const profitAfterDiscount = discountedPrice - baseCost;
+    const totalProfitOriginal = profitPerUnit * item.stock;
+    const totalProfitAfterDiscount = profitAfterDiscount * item.stock;
+    const totalRecovered = discountedPrice * item.stock;
+    const totalBaseCost = baseCost * item.stock;
+    
+    const profitMargin = (profitPerUnit / originalPrice) * 100;
+    const maxAllowedDiscount = Math.min(profitMargin * 0.8, 50);
+    const recoversCost = profitAfterDiscount > 0;
+    
+    const daysFactor = item.mlFactors?.daysFactor || Math.min(1, item.daysSinceSale / 120);
+    const capitalFactor = item.mlFactors?.capitalFactor || Math.min(1, item.lockedCapital / 200000);
+    const categoryUrgency = item.mlFactors?.categoryUrgency || 1.0;
+    const velocityFactor = item.mlFactors?.velocityFactor || 0;
+    
+    return {
+      originalPrice,
+      baseCost,
+      discountedPrice,
+      profitPerUnit,
+      profitAfterDiscount,
+      totalProfitOriginal,
+      totalProfitAfterDiscount,
+      totalRecovered,
+      totalBaseCost,
+      discountPercentage: discountPercent,
+      daysFactor,
+      capitalFactor,
+      categoryUrgency,
+      velocityFactor,
+      profitMargin,
+      maxAllowedDiscount,
+      recoversCost
+    };
+  };
+
   return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      className="min-h-screen mt-2 sm:mt-2 p-2 sm:p-4 space-y-3 sm:space-y-4"
-    >
-      {usingML && hasEnoughDataForML && dataLoaded && (
-        <motion.div 
-          variants={itemVariants}
-          className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700 flex items-center gap-2"
-        >
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          AI-Powered Forecasts Active (Time Series Analysis)
-        </motion.div>
-      )}
-
-      {!usingML && dataLoaded && (
-        <motion.div 
-          variants={itemVariants}
-          className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs text-gray-600 flex items-center gap-2"
-        >
-          <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-          Showing actual sales only. AI predictions unavailable.
-        </motion.div>
-      )}
-
+    <>
       <motion.div
+        initial="hidden"
+        animate="visible"
         variants={containerVariants}
-        className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4"
+        className="min-h-screen mt-2 sm:mt-2 p-2 sm:p-4 space-y-3 sm:space-y-4"
       >
-        {STATS_DATA.map((stat: StatData) => (
-          <StatCard key={stat.id} data={stat} />
-        ))}
-      </motion.div>
+        {usingML && hasEnoughDataForML && dataLoaded && (
+          <motion.div 
+            variants={itemVariants}
+            className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700 flex items-center gap-2"
+          >
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            AI-Powered Forecasts Active (Time Series Analysis)
+          </motion.div>
+        )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {!usingML && dataLoaded && (
+          <motion.div 
+            variants={itemVariants}
+            className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs text-gray-600 flex items-center gap-2"
+          >
+            <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+            Showing actual sales only. AI predictions unavailable.
+          </motion.div>
+        )}
+
         <motion.div
-          variants={itemVariants}
-          className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
+          variants={containerVariants}
+          className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4"
         >
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-2 sm:gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="p-1.5 sm:p-2 bg-[#0B3C8A] rounded-lg">
-                  <Activity className="text-white w-4 h-4 sm:w-5 sm:h-5" />
-                </div>
-                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Trend Visualization
-                </h2>
-              </div>
-              <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-500 ml-1">
-                <BarChart3 size={10} className="sm:w-3 sm:h-3" />
-                <span>Actual {usingML ? 'vs. AI Predicted Sales' : 'Sales Only'}</span>
-              </div>
-            </div>
+          {STATS_DATA.map((stat: StatData) => (
+            <StatCard key={stat.id} data={stat} />
+          ))}
+        </motion.div>
 
-            <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
-              <button
-                onClick={() => setActiveTab("weekly")}
-                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                  activeTab === "weekly"
-                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                Weekly Sales
-              </button>
-              <button
-                onClick={() => setActiveTab("monthly")}
-                className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
-                  activeTab === "monthly"
-                    ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                Monthly Sales
-              </button>
-            </div>
-          </div>
-
-          <div className="relative min-h-57.5">
-            {chartData && chartData.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <motion.div
+            variants={itemVariants}
+            className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
+          >
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-2 sm:gap-4">
               <div>
-                <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
-                  <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                    <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
-                    <span>{Math.round(chartMaxValue * 0.25 / 1000)}k</span>
-                    <span>0</span>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="p-1.5 sm:p-2 bg-[#0B3C8A] rounded-lg">
+                    <Activity className="text-white w-4 h-4 sm:w-5 sm:h-5" />
                   </div>
-
-                  <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[800px] sm:min-w-0">
-                    {chartData.map((data: ChartDataPoint, idx: number) => (
-                      <ChartBarGroup
-                        key={`${activeTab}-${idx}`}
-                        label={data.label}
-                        fullLabel={data.fullLabel}
-                        actual={data.actual}
-                        forecast={data.forecast}
-                        lower={data.lower}
-                        upper={data.upper}
-                        maxVal={chartMaxValue}
-                        delay={idx * 0.03}
-                        isWide={activeTab === "monthly"}
-                        onHover={() => handleBarHover(data.label, data.fullLabel, data.actual, data.forecast)}
-                        onLeave={handleBarLeave}
-                        usingML={usingML}
-                      />
-                    ))}
-                  </div>
+                  <h2 className="text-sm sm:text-lg font-bold text-gray-800">
+                    Trend Visualization
+                  </h2>
                 </div>
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-500 ml-1">
+                  <BarChart3 size={10} className="sm:w-3 sm:h-3" />
+                  <span>Actual {usingML ? 'vs. AI Predicted Sales' : 'Sales Only'}</span>
+                </div>
+              </div>
 
-                {hoveredBar && (
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
-                    <div className="font-bold mb-1 text-center">{hoveredBar.fullLabel}</div>
-                    <div className="flex gap-4">
-                      <div>
-                        <span className="text-gray-400">Actual:</span>
-                        <span className="ml-1 font-bold">₱{hoveredBar.actual.toLocaleString()}</span>
-                      </div>
-                      {usingML && hoveredBar.forecast > 0 && (
+              <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
+                <button
+                  onClick={() => setActiveTab("weekly")}
+                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                    activeTab === "weekly"
+                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  Weekly Sales
+                </button>
+                <button
+                  onClick={() => setActiveTab("monthly")}
+                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                    activeTab === "monthly"
+                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  Monthly Sales
+                </button>
+              </div>
+            </div>
+
+            <div className="relative min-h-57.5">
+              {chartData && chartData.length > 0 ? (
+                <div>
+                  <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
+                    <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                      <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
+                      <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
+                      <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
+                      <span>{Math.round(chartMaxValue * 0.25 / 1000)}k</span>
+                      <span>0</span>
+                    </div>
+
+                    <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[800px] sm:min-w-0">
+                      {chartData.map((data: ChartDataPoint, idx: number) => (
+                        <ChartBarGroup
+                          key={`${activeTab}-${idx}`}
+                          label={data.label}
+                          fullLabel={data.fullLabel}
+                          actual={data.actual}
+                          forecast={data.forecast}
+                          lower={data.lower}
+                          upper={data.upper}
+                          maxVal={chartMaxValue}
+                          delay={idx * 0.03}
+                          isWide={activeTab === "monthly"}
+                          onHover={() => handleBarHover(data.label, data.fullLabel, data.actual, data.forecast)}
+                          onLeave={handleBarLeave}
+                          usingML={usingML}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {hoveredBar && (
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
+                      <div className="font-bold mb-1 text-center">{hoveredBar.fullLabel}</div>
+                      <div className="flex gap-4">
                         <div>
-                          <span className="text-gray-400">AI Predicted:</span>
-                          <span className="ml-1 font-bold text-blue-300">₱{hoveredBar.forecast.toLocaleString()}</span>
+                          <span className="text-gray-400">Actual:</span>
+                          <span className="ml-1 font-bold">₱{hoveredBar.actual.toLocaleString()}</span>
+                        </div>
+                        {usingML && hoveredBar.forecast > 0 && (
+                          <div>
+                            <span className="text-gray-400">AI Predicted:</span>
+                            <span className="ml-1 font-bold text-blue-300">₱{hoveredBar.forecast.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col items-center mt-3 sm:mt-6">
+                    <div className="flex justify-center items-center gap-3 sm:gap-6 text-xs sm:text-sm bg-gray-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-100">
+                      <div className="flex items-center gap-1.5 sm:gap-2">
+                        <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-[#0B3C8A]"></span>
+                        <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
+                          Actual Sales
+                        </span>
+                      </div>
+                      {usingML && (
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
+                          <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
+                            AI Predicted
+                          </span>
                         </div>
                       )}
                     </div>
                   </div>
-                )}
-
-                <div className="flex flex-col items-center mt-3 sm:mt-6">
-                  <div className="flex justify-center items-center gap-3 sm:gap-6 text-xs sm:text-sm bg-gray-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-100">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-[#0B3C8A]"></span>
-                      <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                        Actual Sales
-                      </span>
-                    </div>
-                    {usingML && (
-                      <div className="flex items-center gap-1.5 sm:gap-2">
-                        <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
-                        <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
-                          AI Predicted
-                        </span>
-                      </div>
-                    )}
-                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                <Database size={48} className="mb-3 opacity-20" />
-                <p className="text-sm font-medium">No transaction data available</p>
-                <p className="text-xs mt-1 text-center max-w-xs">
-                  Complete sales transactions to see sales velocity forecasts.
-                </p>
-              </div>
-            )}
-          </div>
-        </motion.div>
-
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 sm:p-2 bg-emerald-100 rounded-lg">
-              <BarChart3 className="text-emerald-700 w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                Performance Heatmap
-              </h2>
-              <p className="text-[9px] sm:text-xs text-gray-500">
-                Profit vs. Volume Analysis
-              </p>
-            </div>
-          </div>
-
-          <p className="text-[10px] sm:text-[11px] text-gray-400 mb-3 sm:mb-5 leading-relaxed">
-            Identifies which categories generate the most revenue (Solid Color)
-            relative to how many physical units are sold (Gray Overlay).
-          </p>
-
-          <div className="space-y-3 sm:space-y-5">
-            {HEATMAP_DATA.length > 0 ? (
-              HEATMAP_DATA.map((item: any, idx: number) => (
-                <div key={idx} className="space-y-1 sm:space-y-1.5">
-                  <div className="flex justify-between text-xs sm:text-sm">
-                    <span className="font-semibold text-gray-700 text-[10px] sm:text-sm">
-                      {item.category}
-                    </span>
-                  </div>
-                  <div className="relative h-5 sm:h-6 bg-gray-100 rounded-md overflow-hidden flex">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${item.profit}%` }}
-                      transition={{ duration: 1, ease: "easeOut" }}
-                      className={`${item.color} h-full flex items-center px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
-                    >
-                      Profit {item.profit}%
-                    </motion.div>
-                    <div
-                      className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold text-gray-800"
-                      style={{ width: `${100 - item.volume}%` }}
-                    >
-                      Vol {item.volume}%
-                    </div>
-                  </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                  <Database size={48} className="mb-3 opacity-20" />
+                  <p className="text-sm font-medium">No transaction data available</p>
+                  <p className="text-xs mt-1 text-center max-w-xs">
+                    Complete sales transactions to see sales velocity forecasts.
+                  </p>
                 </div>
-              ))
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-4">
-                No product data available.
-              </p>
-            )}
-          </div>
-        </motion.div>
-      </div>
+              )}
+            </div>
+          </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
-        >
-          <div className="flex flex-col gap-3 mb-4 shrink-0">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg flex-shrink-0">
-                <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
+          <motion.div
+            variants={itemVariants}
+            className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1.5 sm:p-2 bg-emerald-100 rounded-lg">
+                <BarChart3 className="text-emerald-700 w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <div>
                 <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Demand Forecasting
+                  Performance Heatmap
                 </h2>
-                <p className="text-[9px] sm:text-xs font-medium text-blue-600">
-                  {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
+                <p className="text-[9px] sm:text-xs text-gray-500">
+                  Profit vs. Volume Analysis
                 </p>
               </div>
             </div>
-            
-            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
-              <div className="flex items-center bg-gray-50 p-0.5 rounded-lg w-fit">
-                {[30, 60, 90].map((period: number) => (
-                  <button
-                    key={period}
-                    onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
-                    className={`px-2 py-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
-                      forecastPeriod === period 
-                        ? "bg-white text-[#0B3C8A] shadow-sm" 
-                        : "text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    {period}d
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '500px' }}>
-            {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
-              <div className="space-y-3 sm:space-y-4">
-                {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
-                  <ForecastItem 
-                    key={i} 
-                    data={item} 
-                    currentDemand={getCurrentDisplayDemand(item)}
-                    forecastPeriod={forecastPeriod}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                  <Database size={20} className="text-gray-400" />
-                </div>
-                <p className="text-sm text-gray-500">
-                  {!usingML 
-                    ? "AI prediction service is currently unavailable" 
-                    : !hasEnoughDataForML 
-                    ? "Insufficient data for AI recommendations"
-                    : "No reorder recommendations at this time"}
-                </p>
-                {!hasEnoughDataForML && usingML && (
-                  <p className="text-[10px] text-gray-400 mt-2">
-                    Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        </motion.div>
 
-        <motion.div
-          variants={itemVariants}
-          className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-red-100 p-3 sm:p-6 h-fit lg:h-full relative overflow-hidden flex flex-col"
-        >
-          <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-1.5 sm:p-2 bg-red-50 rounded-lg">
-              <AlertTriangle className="text-red-600 w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                Deadstock Impact
-              </h2>
-              <p className="text-[9px] sm:text-xs text-gray-500">Capital tied in non-moving inventory</p>
-            </div>
-          </div>
-          
-          <div className="mb-4 sm:mb-6 bg-red-50/50 border border-red-100 rounded-lg p-4 text-center">
-            <span className="text-[10px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider">Locked Capital</span>
-            <div className="text-2xl sm:text-3xl font-black text-red-600 mt-1">
-              ₱{totalLockedCapital.toLocaleString()}
-            </div>
-          </div>
+            <p className="text-[10px] sm:text-[11px] text-gray-400 mb-3 sm:mb-5 leading-relaxed">
+              Identifies which categories generate the most revenue (Solid Color)
+              relative to how many physical units are sold (Gray Overlay).
+            </p>
 
-          <div className="space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '400px' }}>
-            {DEADSTOCK_DATA.length > 0 ? (
-              DEADSTOCK_DATA.map((item: DeadstockItem) => {
-                const hasAISuggestion = usingML && item.aiSuggestion;
-                
-                const suggestion = hasAISuggestion 
-                  ? item.aiSuggestion 
-                  : `Item unsold for ${item.daysSinceSale} days. Enable AI service for intelligent recommendations.`;
-                
-                const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
-                const discountBadge = hasAISuggestion && item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
-                
-                const suggestionBgColor = hasAISuggestion 
-                  ? (suggestionType === 'critical' ? 'bg-red-50 border-red-200' : 
-                     suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 
-                     'bg-blue-50 border-blue-200')
-                  : 'bg-gray-50 border-gray-200';
-                
-                const suggestionTextColor = hasAISuggestion 
-                  ? (suggestionType === 'critical' ? 'text-red-600' : 
-                     suggestionType === 'warning' ? 'text-orange-600' : 
-                     'text-blue-600')
-                  : 'text-gray-500';
-                
-                return (
-                  <div key={item.id} className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-start">
-                      <div className="min-w-0 pr-3 flex-1">
-                        <h4 className="text-[11px] sm:text-sm font-semibold text-gray-800 truncate">
-                          {item.name}
-                        </h4>
-                        <span className="text-[9px] sm:text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
-                          <Clock size={10}/> {item.daysSinceSale} Days Unsold • {item.stock} units
-                          {item.lastSaleDate && (
-                            <span className="text-gray-400 ml-1">(Last sold: {item.lastSaleDate.toLocaleDateString()})</span>
-                          )}
-                          {!item.lastSaleDate && (
-                            <span className="text-gray-400 ml-1">(Never sold)</span>
-                          )}
-                          {discountBadge && (
-                            <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[8px] font-bold">
-                              {discountBadge}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="text-[11px] sm:text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
-                        ₱{item.lockedCapital.toLocaleString()}
-                      </div>
+            <div className="space-y-3 sm:space-y-5">
+              {HEATMAP_DATA.length > 0 ? (
+                HEATMAP_DATA.map((item: any, idx: number) => (
+                  <div key={idx} className="space-y-1 sm:space-y-1.5">
+                    <div className="flex justify-between text-xs sm:text-sm">
+                      <span className="font-semibold text-gray-700 text-[10px] sm:text-sm">
+                        {item.category}
+                      </span>
                     </div>
-                    
-                    <div className="border-t border-gray-100 pt-2">
-                      <p className="text-[8px] sm:text-[9px] font-medium text-gray-400 uppercase tracking-wider mb-1">
-                        {usingML && hasAISuggestion ? 'AI SUGGESTION (ML Analysis)' : 'STATUS'}
-                      </p>
-                      <div className={`${suggestionBgColor} border rounded p-2 min-h-[50px] flex items-center`}>
-                        <p className={`text-[9px] sm:text-xs ${suggestionTextColor} leading-relaxed`}>
-                          {suggestion}
-                        </p>
+                    <div className="relative h-5 sm:h-6 bg-gray-100 rounded-md overflow-hidden flex">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${item.profit}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className={`${item.color} h-full flex items-center px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
+                      >
+                        Profit {item.profit}%
+                      </motion.div>
+                      <div
+                        className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold text-gray-800"
+                        style={{ width: `${100 - item.volume}%` }}
+                      >
+                        Vol {item.volume}%
                       </div>
                     </div>
                   </div>
-                );
-              })
-            ) : (
-              <div className="text-center py-4 text-gray-400">
-                <Package size={24} className="mx-auto mb-2 opacity-20"/>
-                <p className="text-xs">No deadstock items identified</p>
-                <p className="text-[10px] mt-1">Items with no sales in 30+ days will appear here</p>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  No product data available.
+                </p>
+              )}
+            </div>
+          </motion.div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Demand Forecasting Card */}
+          <motion.div
+            variants={itemVariants}
+            className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
+          >
+            <div className="flex flex-col gap-3 mb-4 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg flex-shrink-0">
+                  <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-lg font-bold text-gray-800">
+                    Demand Forecasting                  </h2>
+                  <p className="text-[9px] sm:text-xs font-medium text-blue-600">
+                    {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
+                  </p>
+                </div>
+              </div>
+              
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
+                <div className="flex items-center bg-gray-50 p-0.5 rounded-lg w-fit">
+                  {[30, 60, 90].map((period: number) => (
+                    <button
+                      key={period}
+                      onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
+                      className={`px-2 py-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
+                        forecastPeriod === period 
+                          ? "bg-white text-[#0B3C8A] shadow-sm" 
+                          : "text-gray-400 hover:text-gray-600"
+                      }`}
+                    >
+                      {period}d
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '500px' }}>
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
+                <div className="space-y-3 sm:space-y-4">
+                  {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
+                    <ForecastItem 
+                      key={i} 
+                      data={item} 
+                      currentDemand={getCurrentDisplayDemand(item)}
+                      forecastPeriod={forecastPeriod}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                    <Database size={20} className="text-gray-400" />
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    {!usingML 
+                      ? "AI prediction service is currently unavailable" 
+                      : !hasEnoughDataForML 
+                      ? "Insufficient data for AI recommendations"
+                      : "No reorder recommendations at this time"}
+                  </p>
+                  {!hasEnoughDataForML && usingML && (
+                    <p className="text-[10px] text-gray-400 mt-2">
+                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Deadstock Impact Card - FIXED: Removed Total Value at Risk section */}
+          <motion.div
+            variants={itemVariants}
+            className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-red-100 p-3 sm:p-6 h-fit lg:h-full relative overflow-hidden flex flex-col"
+          >
+            <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-1.5 sm:p-2 bg-red-50 rounded-lg">
+                <AlertTriangle className="text-red-600 w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
+                  Deadstock Impact
+                </h2>
+              </div>
+            </div>
+
+            {/* Deadstock Cards - No extra spacing above */}
+            <div className="space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+              {DEADSTOCK_DATA.length > 0 ? (
+                DEADSTOCK_DATA.map((item: DeadstockItem) => {
+                  const hasAISuggestion = usingML && item.aiSuggestion;
+                  
+                  const suggestion = hasAISuggestion && item.aiSuggestion
+                    ? item.aiSuggestion 
+                    : `Item unsold for ${item.daysSinceSale} days. Enable AI service for intelligent recommendations.`;
+                  
+                  const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                  const discountBadge = hasAISuggestion && item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
+                  
+                  const suggestionBgColor = hasAISuggestion 
+                    ? (suggestionType === 'critical' ? 'bg-red-50 border-red-200' : 
+                       suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 
+                       'bg-blue-50 border-blue-200')
+                    : 'bg-gray-50 border-gray-200';
+                  
+                  return (
+                    <div 
+                      key={item.id} 
+                      onClick={() => setSelectedDeadstock(item)}
+                      className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 pr-3 flex-1">
+                          <h4 className="text-[11px] sm:text-sm font-semibold text-gray-800 truncate">
+                            {item.name}
+                          </h4>
+                          <span className="text-[9px] sm:text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
+                            <Clock size={10}/> {item.daysSinceSale} Days Unsold • {item.stock} units
+                            {item.lastSaleDate && (
+                              <span className="text-gray-400 ml-1">(Last sold: {item.lastSaleDate.toLocaleDateString()})</span>
+                            )}
+                            {!item.lastSaleDate && (
+                              <span className="text-gray-400 ml-1">(Never sold)</span>
+                            )}
+                            {discountBadge && (
+                              <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[8px] font-bold">
+                                {discountBadge}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="text-[11px] sm:text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
+                          ₱{item.lockedCapital.toLocaleString()}
+                        </div>
+                      </div>
+                      
+                      <div className="border-t border-gray-100 pt-2">
+                        <p className="text-[8px] sm:text-[9px] font-medium text-gray-400 uppercase tracking-wider mb-1">
+                          {usingML && hasAISuggestion ? 'AI SUGGESTION (Click for details)' : 'STATUS'}
+                        </p>
+                        <div className={`${suggestionBgColor} border rounded p-2 min-h-[50px] flex items-center justify-between`}>
+                          <p className={`text-[9px] sm:text-xs ${suggestionType === 'critical' ? 'text-red-600' : suggestionType === 'warning' ? 'text-orange-600' : 'text-blue-600'} leading-relaxed flex-1`}>
+                            {suggestion.length > 150 ? suggestion.substring(0, 150) + '...' : suggestion}
+                          </p>
+                          <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-4 text-gray-400">
+                  <Package size={24} className="mx-auto mb-2 opacity-20"/>
+                  <p className="text-xs">No deadstock items identified</p>
+                  <p className="text-[10px] mt-1">Items with no sales in 30+ days will appear here</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      </motion.div>
+
+      {/* Deadstock Analysis Modal */}
+      <AnimatePresence>
+        {selectedDeadstock && (
+          <DeadstockAnalysisModal
+            item={selectedDeadstock}
+            onClose={() => setSelectedDeadstock(null)}
+            analysis={calculateDetailedAnalysis(selectedDeadstock)}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+// Deadstock Analysis Modal Component
+function DeadstockAnalysisModal({ 
+  item, 
+  onClose, 
+  analysis 
+}: { 
+  item: DeadstockItem; 
+  onClose: () => void; 
+  analysis: any;
+}) {
+  if (!analysis) return null;
+  
+  const profitMarginColor = analysis.profitMargin >= 30 ? 'text-green-700' : analysis.profitMargin >= 15 ? 'text-yellow-700' : 'text-red-700';
+  
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      >
+        <div className="sticky top-0 bg-gradient-to-r from-blue-50 to-white p-5 border-b border-gray-200 rounded-t-2xl">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">{item.name}</h2>
+              <p className="text-sm text-gray-500 mt-1">SKU: {item.id} • {item.category}</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <X size={20} className="text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-1.5 bg-blue-100 rounded-lg">
+                <AlertCircle size={18} className="text-blue-600" />
+              </div>
+              <h3 className="font-bold text-gray-800">AI Recommendation Summary</h3>
+            </div>
+            <p className="text-sm text-gray-700 leading-relaxed">{item.aiSuggestion || 'No AI suggestion available'}</p>
+            {item.recommendedDiscount && (
+              <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-full">
+                <Percent size={14} className="text-red-600" />
+                <span className="text-sm font-bold text-red-700">{item.recommendedDiscount}% Recommended Discount</span>
               </div>
             )}
           </div>
-        </motion.div>
-      </div>
-    </motion.div>
+
+          <div className="border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-1.5 bg-emerald-100 rounded-lg">
+                <DollarSign size={18} className="text-emerald-600" />
+              </div>
+              <h3 className="font-bold text-gray-800">Financial Impact Analysis</h3>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Base Cost</p>
+                <p className="text-lg font-bold text-gray-900">₱{analysis.baseCost.toLocaleString()}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Original/Retail Price</p>
+                <p className="text-lg font-bold text-gray-900">₱{analysis.originalPrice.toLocaleString()}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">After Discount</p>
+                <p className="text-lg font-bold text-blue-700">₱{analysis.discountedPrice.toLocaleString()}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-700">Profit per unit (original)</span>
+                <span className="font-semibold text-gray-900">₱{analysis.profitPerUnit.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-700">Profit per unit (after discount)</span>
+                <span className={`font-semibold ${analysis.profitAfterDiscount > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  ₱{analysis.profitAfterDiscount.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-700">Total base cost</span>
+                <span className="font-semibold text-gray-900">₱{analysis.totalBaseCost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-700">Total recovered amount</span>
+                <span className="font-semibold text-green-700">₱{analysis.totalRecovered.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm text-gray-700">Total profit after discount</span>
+                <span className={`font-bold ${analysis.totalProfitAfterDiscount > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  ₱{analysis.totalProfitAfterDiscount.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-1.5 bg-purple-100 rounded-lg">
+                <Calculator size={18} className="text-purple-600" />
+              </div>
+              <h3 className="font-bold text-gray-800">ML Factor Breakdown</h3>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-medium text-gray-700">Days Unsold Factor</span>
+                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.daysFactor * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${analysis.daysFactor * 100}%` }}></div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Higher days unsold = higher discount urgency</p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-medium text-gray-700">Capital Locked Factor</span>
+                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.capitalFactor * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-red-500 h-2 rounded-full" style={{ width: `${analysis.capitalFactor * 100}%` }}></div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Higher locked capital increases discount recommendation</p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-medium text-gray-700">Category Urgency Multiplier</span>
+                  <span className="text-xs font-bold text-gray-900">{analysis.categoryUrgency.toFixed(2)}x</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-yellow-500 h-2 rounded-full" style={{ width: `${Math.min(analysis.categoryUrgency * 100, 100)}%` }}></div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Perishable categories (Contacts, Solutions) get higher urgency</p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-medium text-gray-700">Historical Velocity Factor</span>
+                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.velocityFactor * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-green-500 h-2 rounded-full" style={{ width: `${analysis.velocityFactor * 100}%` }}></div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Products that sold well previously get lower discounts</p>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-gray-200">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-700">Profit Margin</span>
+                <span className={`font-bold ${profitMarginColor}`}>{analysis.profitMargin.toFixed(1)}%</span>
+              </div>
+              <div className="flex justify-between items-center mt-2">
+                <span className="text-sm font-medium text-gray-700">Max Allowed Discount (Cost Recovery)</span>
+                <span className="font-bold text-blue-700">{analysis.maxAllowedDiscount.toFixed(1)}%</span>
+              </div>
+              <div className="flex justify-between items-center mt-2">
+                <span className="text-sm font-medium text-gray-700">Final Recommended Discount</span>
+                <span className="font-bold text-red-700">{analysis.discountPercentage}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-4 ${analysis.recoversCost ? 'bg-green-100 border border-green-300' : 'bg-yellow-100 border border-yellow-300'}`}>
+            <div className="flex items-center gap-2">
+              {analysis.recoversCost ? (
+                <CheckCircle2 size={18} className="text-green-700" />
+              ) : (
+                <AlertTriangle size={18} className="text-yellow-700" />
+              )}
+              <p className="text-sm font-semibold text-gray-800">
+                {analysis.recoversCost 
+                  ? "✅ This discount recommendation ensures cost recovery while maintaining profitability." 
+                  : "⚠️ This product has low profit margin. Recommended discount is minimal to avoid loss."}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200 rounded-b-2xl">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 

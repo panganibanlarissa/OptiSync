@@ -463,21 +463,24 @@ export default function SettingsPage() {
           transition={{ duration: 0.2 }}
           className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
         >
-          <div className="p-6 sm:p-8 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
-            <div>
-              <h2 className="text-lg font-bold text-gray-800">Staff Accounts</h2>
-              <p className="text-xs text-gray-500 mt-1">
-                {activeCount} active, {pendingCount} pending, {inactiveCount} inactive
-              </p>
+          {/* Header - Updated with gradient background to match Activity Logs */}
+          <div className="p-6 sm:p-8 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Staff Accounts</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  {activeCount} active, {pendingCount} pending, {inactiveCount} inactive
+                </p>
+              </div>
+              <button 
+                onClick={openAddUserModal} 
+                className={`flex items-center justify-center gap-2 ${THEME_BG} ${THEME_HOVER} text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition-all shrink-0`}
+              >
+                <Plus size={16}/> 
+                <span className="hidden sm:inline">Add Staff Member</span>
+                <span className="sm:hidden">Add Staff</span>
+              </button>
             </div>
-            <button 
-              onClick={openAddUserModal} 
-              className={`flex items-center justify-center gap-2 ${THEME_BG} ${THEME_HOVER} text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm transition-all shrink-0`}
-            >
-              <Plus size={16}/> 
-              <span className="hidden sm:inline">Add Staff Member</span>
-              <span className="sm:hidden">Add Staff</span>
-            </button>
           </div>
 
           <div className="p-0 sm:p-2 overflow-x-auto">

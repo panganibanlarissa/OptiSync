@@ -40,15 +40,15 @@ import {
   getDoc,
   setDoc,
   limit,
-  onSnapshot
+  onSnapshot,
+  writeBatch
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
 import { initializeApp, getApps } from "firebase/app";
 
 // 🔥 CONFIG
-const CLINIC_ID =
-  process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
+const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
 // 🔐 SECONDARY AUTH - Used for creating users without affecting main auth
 const getSecondaryAuth = () => {
@@ -195,8 +195,6 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
   const userSnap = await getDoc(userRef);
   
   if (!userSnap.exists()) {
-    // This is an EXISTING account without a Firestore document (legacy)
-    // Mark as Active and verified since it's an existing account
     await setDoc(userRef, {
       email: email || "",
       name: name || email?.split('@')[0] || "User",
@@ -206,8 +204,8 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
       updatedAt: serverTimestamp(),
       lastLogin: "Never",
       lastLoginAt: null,
-      emailVerified: true, // Existing accounts are considered verified
-      isLegacyAccount: true // Flag to identify legacy accounts
+      emailVerified: true,
+      isLegacyAccount: true
     });
     console.log("Created user document for existing account:", uid);
   }
@@ -215,24 +213,37 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
   return userRef;
 };
 
-// Helper function to log logout events
+// Helper function to log logout events - FIXED to ensure proper storage
 const logLogout = async (staffName: string, staffId: string, userEmail: string | null, sessionDuration?: number) => {
   try {
-    const logoutRef = collection(db, `clinics/${CLINIC_ID}/logout_logs`);
-    await addDoc(logoutRef, {
-      staffName: staffName || 'User',
+    const clinicId = CLINIC_ID;
+    console.log("📝 Logging logout for:", { staffName, staffId, userEmail, sessionDuration });
+    
+    // Create reference to logout_logs collection under the specific clinic
+    const logoutRef = collection(db, `clinics/${clinicId}/logout_logs`);
+    
+    const logoutData = {
+      staffName: staffName || 'Unknown User',
       staffId: staffId || 'unknown',
+      email: userEmail || null,
       timestamp: serverTimestamp(),
-      sessionDuration: sessionDuration || null,
-      email: userEmail || null
-    });
-    console.log("Logout event logged successfully");
+      sessionDurationSeconds: sessionDuration || 0,
+      sessionDurationMinutes: sessionDuration ? Math.floor(sessionDuration / 60) : 0,
+      logoutDate: new Date().toISOString().split('T')[0],
+      createdAt: serverTimestamp()
+    };
+    
+    const docRef = await addDoc(logoutRef, logoutData);
+    console.log("✅ Logout event logged successfully with ID:", docRef.id);
+    console.log("📁 Collection path:", `clinics/${clinicId}/logout_logs`);
+    return docRef.id;
   } catch (error) {
-    console.error("Error logging logout:", error);
+    console.error("❌ Error logging logout:", error);
+    return null;
   }
 };
 
-// Helper function to log stock adjustments with proper staff info
+// Helper function to log stock adjustments
 const logStockAdjustment = async (
   productId: string, 
   oldStock: number, 
@@ -278,7 +289,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const [isOnline, setIsOnline] = useState(true);
 
-  // Cache flags to prevent excessive reads
+  // Cache flags
   const hasFetchedProductsRef = useRef(false);
   const hasFetchedTransactionsRef = useRef(false);
   const hasFetchedUsersRef = useRef(false);
@@ -291,19 +302,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const lastTransactionsFetchRef = useRef<number>(0);
   const lastUsersFetchRef = useRef<number>(0);
   
-  // Cache TTL: 10 minutes
   const CACHE_TTL = 10 * 60 * 1000;
 
-  // Store session start time for logout duration calculation
   const sessionStartTimeRef = useRef<number | null>(null);
-
-  // Store temporary passwords for resend verification (in memory only)
   const pendingUserPasswords = useRef<Map<string, string>>(new Map());
-
-  // Track if listeners are already set up
   const listenersSetupRef = useRef(false);
-  
-  // Track if initial staff users fetch has been done
   const initialStaffFetchDoneRef = useRef(false);
 
   // ================= AUTH =================
@@ -316,10 +319,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId(u.uid);
         setUserEmail(u.email || "");
         
-        // Record session start time when user logs in
         sessionStartTimeRef.current = Date.now();
 
-        // Only ensure document exists, don't modify existing data
         await ensureUserDocument(u.uid, u.email);
         
         const ref = doc(db, "users", u.uid);
@@ -329,7 +330,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           const data = snap.data();
           const isLegacy = data.isLegacyAccount === true;
           
-          // Determine if email verification is required
           const createdAt = data.createdAt?.toDate?.() || new Date(0);
           const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
           const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
@@ -396,19 +396,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   // ================= FETCH STAFF USERS =================
 
   const fetchStaffUsers = useCallback(async (forceRefresh = false) => {
-    // Don't fetch if not admin
     if (userRole !== "admin") {
       return;
     }
     
     const now = Date.now();
     
-    // Check cache - don't fetch if we have data and it's fresh (unless forced)
     if (!forceRefresh && hasFetchedUsersRef.current && (now - lastUsersFetchRef.current) < CACHE_TTL) {
       return;
     }
     
-    // Prevent concurrent fetches
     if (isFetchingUsersRef.current) return;
     
     isFetchingUsersRef.current = true;
@@ -530,13 +527,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // ================= SINGLE REAL-TIME LISTENER FOR ALL DATA =================
+  // ================= REAL-TIME LISTENERS =================
   useEffect(() => {
     if (!user || listenersSetupRef.current) return;
     
     listenersSetupRef.current = true;
     
-    // Products listener
     const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
     const productsQuery = query(productsRef, orderBy("createdAt", "desc"), limit(100));
     
@@ -553,7 +549,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       console.error("Error in products listener:", error);
     });
 
-    // Transactions listener
     const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
     const transactionsQuery = query(transactionsRef, orderBy("date", "desc"), limit(200));
     
@@ -622,7 +617,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [user, userRole]);
 
-  // Initial data fetch on login - only once
+  // Initial data fetch
   useEffect(() => {
     if (user && !hasFetchedProductsRef.current && !isFetchingProductsRef.current) {
       fetchProducts(false);
@@ -635,11 +630,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [user, fetchTransactions]);
 
-  // Fetch staff users only once on admin login
   useEffect(() => {
     if (user && userRole === "admin" && !initialStaffFetchDoneRef.current) {
       initialStaffFetchDoneRef.current = true;
-      // Small delay to avoid race conditions
       const timer = setTimeout(() => {
         fetchStaffUsers(false);
       }, 500);
@@ -656,7 +649,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const loggedInUser = userCredential.user;
       
       console.log('🔐 User logged in:', loggedInUser.email);
-      console.log('🔐 Firebase Auth emailVerified:', loggedInUser.emailVerified);
       
       const userRef = doc(db, "users", loggedInUser.uid);
       const userSnap = await getDoc(userRef);
@@ -664,13 +656,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       if (userSnap.exists()) {
         const userData = userSnap.data();
         
-        console.log('🔐 Firestore user data:', {
-          status: userData.status,
-          emailVerified: userData.emailVerified,
-          isLegacyAccount: userData.isLegacyAccount
-        });
-        
-        // Check if account is deactivated or deleted
         if (userData.status === "Inactive") {
           await signOut(auth);
           throw new Error("This account has been deactivated. Please contact an administrator.");
@@ -680,16 +665,13 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           throw new Error("This account has been deleted. Please contact an administrator.");
         }
         
-        // CRITICAL FIX: Update Firestore if email is verified in Firebase Auth but not in Firestore
         if (userData.emailVerified === false && loggedInUser.emailVerified === true) {
-          console.log('🔐 Updating Firestore: email verified!');
           await setDoc(userRef, { 
             emailVerified: true, 
             status: "Active",
             updatedAt: serverTimestamp()
           }, { merge: true });
           
-          // Also update local appUser state
           setAppUser(prev => prev ? {
             ...prev,
             emailVerified: true,
@@ -697,26 +679,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           } : prev);
         }
         
-        // Check if this is a NEW account that requires verification
         const isLegacy = userData.isLegacyAccount === true;
         const createdAt = userData.createdAt?.toDate?.() || new Date(0);
         const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
         
-        // Only block if it's a new account (not legacy) AND email is NOT verified in Firebase Auth
         const requiresVerification = !isLegacy && 
                                       userData.emailVerified === false && 
                                       loggedInUser.emailVerified === false && 
                                       daysSinceCreation < 30;
         
         if (requiresVerification) {
-          console.log('🔐 Email verification required, logging out');
           await signOut(auth);
           throw new Error("EMAIL_VERIFICATION_REQUIRED");
         }
         
       } else {
-        // User document doesn't exist - this is a legacy account, create it
-        console.log('🔐 Creating user document for legacy account');
         await setDoc(userRef, {
           email: loggedInUser.email || email,
           name: loggedInUser.displayName || email.split('@')[0],
@@ -731,7 +708,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         });
       }
       
-      // Update last login timestamp
       const now = new Date();
       const formattedLastLogin = formatLastLogin(now);
       
@@ -742,7 +718,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         updatedAt: Timestamp.fromDate(now)
       }, { merge: true });
       
-      // Reset flags for fresh data on next navigation
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
@@ -752,8 +727,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       listenersSetupRef.current = false;
       initialStaffFetchDoneRef.current = false;
       
-      console.log('🔐 Login successful, user will be redirected');
-      
     } catch (error) {
       console.error("Login error:", error);
       throw error;
@@ -762,26 +735,45 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      // Log the logout event before signing out
+      console.log("🔐 Starting logout process...");
+      
       const currentUserId = userId;
       const currentUserName = userName;
       const currentUserEmail = userEmail;
+      const currentAppUser = appUser;
       
-      // Calculate session duration if we have a start time
       let sessionDuration: number | undefined;
       if (sessionStartTimeRef.current) {
         sessionDuration = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
+        console.log(`📊 Session duration: ${sessionDuration} seconds (${Math.floor(sessionDuration / 60)} minutes)`);
       }
       
-      // Log logout asynchronously
-      if (currentUserId && currentUserName) {
-        logLogout(currentUserName, currentUserId, currentUserEmail, sessionDuration).catch(err => {
-          console.error("Background logout logging failed:", err);
-        });
+      // Try to record logout in Firestore
+      let logoutRecorded = false;
+      try {
+        if (currentUserId && currentUserName) {
+          const logoutId = await logLogout(currentUserName, currentUserId, currentUserEmail, sessionDuration);
+          logoutRecorded = !!logoutId;
+          console.log(`📝 Logout ${logoutRecorded ? 'recorded' : 'failed to record'} with ID: ${logoutId || 'N/A'}`);
+        } else if (currentAppUser) {
+          const logoutId = await logLogout(currentAppUser.name || "User", currentAppUser.uid, currentAppUser.email, sessionDuration);
+          logoutRecorded = !!logoutId;
+          console.log(`📝 Logout recorded via appUser: ${logoutRecorded}`);
+        } else {
+          console.log("⚠️ No user info available for logout logging");
+          const logoutId = await logLogout("Unknown User", "unknown", null, sessionDuration);
+          logoutRecorded = !!logoutId;
+        }
+      } catch (logError) {
+        console.error("Failed to record logout:", logError);
       }
+      
+      // Small delay to ensure Firestore write completes
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Sign out from Firebase Auth
       await signOut(auth);
+      console.log("🔐 Signed out from Firebase Auth");
       
       // Clear all state
       setProducts([]);
@@ -808,17 +800,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       initialStaffFetchDoneRef.current = false;
       sessionStartTimeRef.current = null;
       
-      // Clear temporary passwords
       pendingUserPasswords.current.clear();
       
-      console.log("Logout successful");
+      console.log("✅ Logout successful, state cleared");
     } catch (error) {
-      console.error("Logout error:", error);
+      console.error("❌ Logout error:", error);
       throw error;
     }
   };
 
-  // ================= PRODUCT =================
+  // ================= PRODUCT ACTIONS =================
 
   const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
@@ -908,7 +899,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const adjustStock = async (id: string, newStock: number, reason: string, staffName?: string, staffId?: string) => {
     try {
-      // Get the current product to calculate difference and handle damage/exchange tracking
       const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       if (!productDoc.exists()) {
         throw new Error("Product not found");
@@ -916,61 +906,27 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
       const currentProduct = productDoc.data() as any;
       const oldStock = currentProduct.stock || 0;
-      const stockDifference = newStock - oldStock; // Negative if stock decreased
 
-      // Use provided staff info or fallback to current user
       const actingStaffName = staffName || userName || "System";
       const actingStaffId = staffId || userId || "system";
 
-      // Determine if we should update damageExchanged count
-      const isDamageOrExchange =
-        reason?.includes("Damaged") ||
-        reason?.includes("Damage") ||
-        reason?.includes("Exchange") ||
-        reason?.includes("Return");
-
-      // Only apply updates and logs if the stock actually changed
-      let appliedUpdateData: any = null;
       if (oldStock !== newStock) {
-        // Prepare update payload
-        const updateData: any = {
+        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), {
           stock: newStock,
-          updatedAt: serverTimestamp(),
-        };
+          updatedAt: serverTimestamp()
+        });
 
-        if (isDamageOrExchange && stockDifference < 0) {
-          const itemsRemoved = Math.abs(stockDifference);
-          const currentDamageExchanged = currentProduct.damageExchanged || 0;
-          updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
-        }
-
-        // Persist update
-        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
-        appliedUpdateData = updateData;
-
-        // Log stock adjustment with proper staff info
         try {
           const productName = currentProduct.name || null;
           await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
         } catch (logErr) {
           console.error("Failed to log stock adjustment:", logErr);
         }
-
-        console.log(`Stock adjusted by ${actingStaffName} (${actingStaffId}): ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
-      } else {
-        // No change, nothing to persist or log
-        console.log(`Stock adjustment skipped - no change for ${currentProduct.name || id} (${oldStock} → ${newStock})`);
       }
 
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                stock: newStock,
-                damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged) ?? p.damageExchanged,
-              }
-            : p
+          p.id === id ? { ...p, stock: newStock } : p
         )
       );
     } catch (error) {
@@ -979,7 +935,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ================= TRANSACTION =================
+  // ================= TRANSACTION ACTIONS =================
 
   const addTransaction = async (data: Omit<Transaction, 'id' | 'createdAt'>) => {
     try {
@@ -1026,7 +982,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ================= STAFF =================
+  // ================= STAFF ACTIONS =================
 
   const createStaffUser = async (email: string, password: string, name: string, role: "admin" | "staff") => {
     try {
@@ -1066,10 +1022,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const updateStaffUser = async (uid: string, data: Partial<StaffUser>) => {
     try {
-      const updateData: any = { ...data };
-      
       await updateDoc(doc(db, "users", uid), {
-        ...updateData,
+        ...data,
         updatedAt: serverTimestamp()
       });
       
@@ -1150,7 +1104,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const resendVerificationEmail = async (email: string, providedPassword?: string) => {
     try {
       const secondaryAuth = getSecondaryAuth();
-      
       const password = providedPassword || pendingUserPasswords.current.get(email);
       
       if (!password) {
@@ -1242,8 +1195,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     </FirebaseContext.Provider>
   );
 }
-
-// ================= HOOK =================
 
 export const useFirebase = () => {
   const ctx = useContext(FirebaseContext);
