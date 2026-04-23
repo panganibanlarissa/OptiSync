@@ -13,6 +13,7 @@ import {
   Users,
   BarChart3,
   X,
+  History,
 } from "lucide-react";
 
 import Notifications from "@/components/Notifications";
@@ -102,6 +103,12 @@ export default function Sidebar({ children }: SidebarProps) {
             {appUser?.role === "admin" && (
               <Link href="/reports" className={linkClass("/reports")}>
                 <BarChart3 size={18} /> Reports
+              </Link>
+            )}
+            
+            {appUser?.role === "admin" && (
+              <Link href="/activity-logs" className={linkClass("/activity-logs")}>
+                <History size={18} /> Activity Logs
               </Link>
             )}
             
