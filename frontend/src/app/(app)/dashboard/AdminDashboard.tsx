@@ -197,18 +197,6 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
-  const todayTransactionCount = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    return completedTransactions
-      .filter((t: any) => {
-        const transDate = new Date(t.date);
-        transDate.setHours(0, 0, 0, 0);
-        return transDate.getTime() === today.getTime();
-      }).length;
-  }, [completedTransactions]);
-
   const getDateFromTimestamp = (timestamp: any): Date | null => {
     if (!timestamp) return null;
     
@@ -416,11 +404,11 @@ export default function AdminDashboard() {
         trendType: "positive",
       },
       {
-        id: "transaction_count",
-        label: "Today's Transactions",
-        value: todayTransactionCount,
-        trend: todayTransactionCount > 0 ? "Active" : "No Sales",
-        trendType: todayTransactionCount > 0 ? "positive" : "neutral",
+        id: "low_stock",
+        label: "Low-Stock Items",
+        value: lowStockCount,
+        trend: lowStockCount > 0 ? "Action Needed" : "All Good",
+        trendType: lowStockCount > 0 ? "negative" : "positive",
       },
       {
         id: "gross_profit",
@@ -437,7 +425,7 @@ export default function AdminDashboard() {
         trendType: parseFloat(revenueTrend) >= 0 ? "positive" : "negative",
       },
     ];
-  }, [todaySales, grossProfit, totalRevenue, todayTransactionCount, revenueTrend]);
+  }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
@@ -683,7 +671,7 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">
-                      Low Stock Items
+                      Low Stock Alerts
                     </h2>
                     <p className="text-xs font-medium text-orange-600">
                       Products below reorder point
@@ -704,7 +692,7 @@ export default function AdminDashboard() {
             
             <div className="p-4 sm:p-5 pt-0">
               <div className="space-y-3">
-                {lowStockItems.slice(0, 3).map((item) => (
+                {lowStockItems.slice(0, 4).map((item) => (
                   <motion.div
                     key={item.id}
                     initial={{ x: -20, opacity: 0 }}
@@ -725,19 +713,13 @@ export default function AdminDashboard() {
                         {item.status === 'critical' ? 'OUT' : 'LOW'}
                       </span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <div>
-                        <p className="text-gray-500 text-xs">Current</p>
-                        <p className="font-bold text-gray-900">{item.currentStock} units</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-gray-500 text-xs">Reorder Point</p>
-                        <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
-                      </div>
+                    <div className="text-sm">
+                      <p className="text-gray-500 text-xs">Current Stock</p>
+                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
                     </div>
                   </motion.div>
                 ))}
-                {lowStockItems.length === 0 && (
+                {lowStockItems.length === 4 && (
                   <div className="text-center py-8">
                     <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
                     <p className="text-sm text-gray-500">All stock levels healthy</p>
@@ -1148,15 +1130,9 @@ export default function AdminDashboard() {
                       {item.status === 'critical' ? 'OUT' : 'LOW'}
                     </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <div>
-                      <p className="text-gray-500 text-xs">Current</p>
-                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-500 text-xs">Reorder Point</p>
-                      <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
-                    </div>
+                  <div className="text-sm">
+                    <p className="text-gray-500 text-xs">Current Stock</p>
+                    <p className="font-bold text-gray-900">{item.currentStock} units</p>
                   </div>
                 </div>
               ))}
