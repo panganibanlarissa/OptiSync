@@ -55,6 +55,8 @@ interface Product {
   leadTimeDays: number;
   reorderPoint: number;
   specifications: string;
+  totalSold?: number;
+  damageExchanged?: number;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   availableStock?: number;
@@ -179,7 +181,6 @@ export default function SalesPage() {
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
-      // Ensure date is a Date object
       let transactionDate: Date;
       if (transaction.date instanceof Date) {
         transactionDate = transaction.date;
@@ -386,18 +387,15 @@ export default function SalesPage() {
         paymentMethod: paymentMethodToUse,
       };
 
-      // Only add cash-related fields if they are defined
       if (paymentMethodToUse === "cash" && amountReceivedForCash !== undefined) {
         newTransactionData.amountReceive = amountReceivedForCash;
         newTransactionData.change = amountReceivedForCash - total;
       }
 
-      // Only add online-related fields if they are defined
       if (paymentMethodToUse === "online" && referenceNumber.trim()) {
         newTransactionData.referenceNumber = referenceNumber;
       }
 
-      // Add warranty information if dates are provided
       if (warrantyStartDate && warrantyEndDate) {
         newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
         newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
@@ -410,14 +408,19 @@ export default function SalesPage() {
         throw new Error("Failed to create transaction - no ID returned");
       }
 
-      // Update product stocks
+      // Update product stocks AND totalSold
       for (const cartItem of cart) {
         const product = (firebaseProducts as Product[]).find(p => p.id === cartItem.id);
         if (product) {
           const newStock = product.stock - cartItem.quantity;
           
+          // Get current totalSold and calculate new totalSold
+          const currentTotalSold = (product as any).totalSold || 0;
+          const newTotalSold = currentTotalSold + cartItem.quantity;
+          
           await updateProduct(product.id, {
             stock: newStock,
+            totalSold: newTotalSold,
             lastMovedDaysAgo: 0
           });
           
@@ -541,10 +544,8 @@ export default function SalesPage() {
         return;
       }
 
-      // Proceed with cash checkout
       await processCheckout("cash", parsedAmountReceive);
     } else if (paymentMethod === "online") {
-      // Show confirmation modal for online payment
       setShowOnlineConfirm(true);
     }
   };
@@ -758,35 +759,28 @@ export default function SalesPage() {
   const handleVoid = async () => {
     if (transactionToVoid) {
       try {
-        const trxToRefund = (firebaseTransactions as Transaction[]).find(t => t.id === transactionToVoid);
-        
-        if (trxToRefund) {
-          // Check warranty status for notification
-          const warrantyValid = isWarrantyValid(trxToRefund.warrantyStartDate, trxToRefund.warrantyEndDate);
-          
-          for (const item of trxToRefund.items) {
-            const product = (firebaseProducts as Product[]).find(p => p.id === item.id);
-            if (product) {
-              await updateProduct(product.id, {
-                stock: product.stock + item.quantity
-              });
-            }
-          }
-        }
-        
-        // Call voidTransaction with just the ID (the function will handle updating the transaction)
-        await voidTransaction(transactionToVoid);
+        // Call voidTransaction with the reason
+        await voidTransaction(transactionToVoid, voidReason, userName || "Staff");
         
         setVoidModalOpen(false);
         setTransactionToVoid(null);
         setVoidReason("");
         setWarrantyWarning({ show: false, message: "", transaction: null });
         
-        showNotification(
-          `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided successfully. Stock returned.`, 
-          "info", 
-          "Transaction Voided"
-        );
+        // Show appropriate message based on void reason
+        if (voidReason?.toLowerCase().includes('damage') || voidReason?.toLowerCase().includes('damaged')) {
+          showNotification(
+            `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided. Items marked as damaged (not returned to stock).`, 
+            "warning", 
+            "Transaction Voided (Damaged)"
+          );
+        } else {
+          showNotification(
+            `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided successfully. Stock returned.`, 
+            "info", 
+            "Transaction Voided"
+          );
+        }
       } catch (error) {
         console.error("Void error:", error);
         showToastOnly("Failed to void transaction.", "error");
@@ -1324,97 +1318,106 @@ export default function SalesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
-                  <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
-                    <tr>
-                      <th className="p-2 sm:p-3">Receipt No.</th>
-                      <th className="p-2 sm:p-3">Date</th>
-                      <th className="p-2 sm:p-3">Time</th>
-                      <th className="p-2 sm:p-3">Patient Name</th>
-                      <th className="p-2 sm:p-3">User</th>
-                      <th className="p-2 sm:p-3">Items</th>
-                      <th className="p-2 sm:p-3 text-right">Amount</th>
-                      <th className="p-2 sm:p-3 text-center">Payment</th>
-                      <th className="p-2 sm:p-3 text-center">Warranty</th>
-                      <th className="p-2 sm:p-3 text-center">Sync</th>
-                      <th className="p-2 sm:p-3 text-center">Status</th>
-                      <th className="p-2 sm:p-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredTransactions.map(trx => {
-                      const warrantyValid = trx.status === 'completed' && isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
-                      return (
-                        <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
-                          <td className="p-2 sm:p-3 text-gray-600">
-                            <div className="flex items-center gap-1">
-                              <Calendar size={12} className="text-gray-400" />
-                              {formatDate(trx.date)}
-                            </div>
-                          </td>
-                          <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                          <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
-                          <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
-                          <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
-                            <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
-                              {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
-                            </div>
-                          </td>
-                          <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
-                          <td className="p-2 sm:p-3 text-center">
-                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
-                              trx.paymentMethod === 'cash' 
-                                ? 'bg-blue-100 text-blue-700' 
-                                : trx.paymentMethod === 'online'
-                                ? 'bg-purple-100 text-purple-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              {trx.paymentMethod || 'N/A'}
-                            </span>
-                            {trx.referenceNumber && trx.paymentMethod === 'online' && (
-                              <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3 text-center">
-                            {trx.warrantyStartDate && trx.warrantyEndDate ? (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <Shield size={12} className={warrantyValid ? "text-green-600" : "text-gray-400"} />
-                                <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-gray-500"}`}>
-                                  {warrantyValid ? "Active" : "Expired"}
-                                </span>
-                                <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-[8px]">None</span>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3 text-center">
-                            {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
-                          </td>
-                          <td className="p-2 sm:p-3 text-center">
-                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                              {trx.status}
-                            </span>
-                          </td>
-                          <td className="p-2 sm:p-3 text-right">
-                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
-                              <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
-                                <Receipt size={14}/>
-                              </button>
-                              {trx.status === 'completed' && (
-                                <button onClick={() => openVoidModal(trx)} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
-                                  <X size={14}/>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+  <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
+    <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
+      <tr>
+        <th className="p-2 sm:p-3">Receipt No.</th>
+        <th className="p-2 sm:p-3">Date</th>
+        <th className="p-2 sm:p-3">Time</th>
+        <th className="p-2 sm:p-3">Patient Name</th>
+        <th className="p-2 sm:p-3">User</th>
+        <th className="p-2 sm:p-3">Items</th>
+        <th className="p-2 sm:p-3 text-right">Amount</th>
+        <th className="p-2 sm:p-3 text-center">Payment</th>
+        <th className="p-2 sm:p-3 text-center">Warranty</th>
+        <th className="p-2 sm:p-3 text-center">Sync</th>
+        <th className="p-2 sm:p-3 text-center">Status</th>
+        <th className="p-2 sm:p-3 text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-gray-100">
+      {filteredTransactions.length === 0 ? (
+        <tr>
+          <td colSpan={12} className="py-20 text-center text-gray-400">
+            <History size={36} className="mx-auto mb-3 opacity-20" />
+            <p className="text-xs sm:text-sm">No transactions found for this period.</p>
+          </td>
+        </tr>
+      ) : (
+        filteredTransactions.map(trx => {
+          const warrantyValid = trx.status === 'completed' && isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
+          return (
+            <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
+              <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
+              <td className="p-2 sm:p-3 text-gray-600">
+                <div className="flex items-center gap-1">
+                  <Calendar size={12} className="text-gray-400" />
+                  {formatDate(trx.date)}
+                </div>
+              </td>
+              <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+              <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
+              <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
+              <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
+                <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
+                  {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+                </div>
+              </td>
+              <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+              <td className="p-2 sm:p-3 text-center">
+                <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
+                  trx.paymentMethod === 'cash' 
+                    ? 'bg-blue-100 text-blue-700' 
+                    : trx.paymentMethod === 'online'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {trx.paymentMethod || 'N/A'}
+                </span>
+                {trx.referenceNumber && trx.paymentMethod === 'online' && (
+                  <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
+                )}
+              </td>
+              <td className="p-2 sm:p-3 text-center">
+                {trx.warrantyStartDate && trx.warrantyEndDate ? (
+                  <div className="flex flex-col items-center gap-0.5">
+                    <Shield size={12} className={warrantyValid ? "text-green-600" : "text-gray-400"} />
+                    <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-gray-500"}`}>
+                      {warrantyValid ? "Active" : "Expired"}
+                    </span>
+                    <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
+                  </div>
+                ) : (
+                  <span className="text-gray-400 text-[8px]">None</span>
+                )}
+              </td>
+              <td className="p-2 sm:p-3 text-center">
+                {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
+              </td>
+              <td className="p-2 sm:p-3 text-center">
+                <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                  {trx.status}
+                </span>
+              </td>
+              <td className="p-2 sm:p-3 text-right">
+                <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                  <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
+                    <Receipt size={14}/>
+                  </button>
+                  {trx.status === 'completed' && (
+                    <button onClick={() => openVoidModal(trx)} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
+                      <X size={14}/>
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          );
+        })
+      )}
+    </tbody>
+  </table>
+</div>
             )}
           </div>
         </motion.div>
@@ -1553,7 +1556,7 @@ export default function SalesPage() {
               
               <p className="text-[11px] sm:text-xs text-gray-500 mb-4">
                 Are you sure you want to void receipt <span className="font-mono font-bold text-gray-700">{transactionToVoid.slice(-8).toUpperCase()}</span>? 
-                This will record the sale as refunded and instantly return the items to stock.
+                This will record the sale as refunded.
               </p>
               
               <div className="mb-4">

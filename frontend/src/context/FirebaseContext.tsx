@@ -75,6 +75,7 @@ export interface Product {
   markupPrice: number;
   supplierInfo: string;
   stock: number;
+  beginningInventory?: number;
   lastMovedDaysAgo: number;
   imageColor: string;
   image: string | null;
@@ -84,7 +85,6 @@ export interface Product {
   batchNumber?: string;
   manufacturingDate?: Date;
   totalSold?: number;
-  beginningInventory?: number;
   damageExchanged?: number;
   deleted?: boolean;
   archived?: boolean;
@@ -155,7 +155,7 @@ interface FirebaseContextType {
 
   transactions: Transaction[];
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
-  voidTransaction: (id: string) => Promise<void>;
+  voidTransaction: (id: string, voidReason?: string, voidedBy?: string) => Promise<void>;
 
   staffUsers: StaffUser[];
   fetchStaffUsers: (forceRefresh?: boolean) => Promise<void>;
@@ -203,7 +203,7 @@ const formatLastLogin = (date: Date): string => {
   });
 };
 
-// Helper function to create or update user document - ONLY for existing accounts
+// Helper function to create or update user document
 const ensureUserDocument = async (uid: string, email: string | null, name?: string) => {
   const userRef = doc(db, "users", uid);
   const userSnap = await getDoc(userRef);
@@ -227,14 +227,10 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
   return userRef;
 };
 
-// Helper function to log logout events - FIXED to ensure proper storage
+// Helper function to log logout events
 const logLogout = async (staffName: string, staffId: string, userEmail: string | null, sessionDuration?: number) => {
   try {
-    const clinicId = CLINIC_ID;
-    console.log("📝 Logging logout for:", { staffName, staffId, userEmail, sessionDuration });
-    
-    // Create reference to logout_logs collection under the specific clinic
-    const logoutRef = collection(db, `clinics/${clinicId}/logout_logs`);
+    const logoutRef = collection(db, `clinics/${CLINIC_ID}/logout_logs`);
     
     const logoutData = {
       staffName: staffName || 'Unknown User',
@@ -249,7 +245,6 @@ const logLogout = async (staffName: string, staffId: string, userEmail: string |
     
     const docRef = await addDoc(logoutRef, logoutData);
     console.log("✅ Logout event logged successfully with ID:", docRef.id);
-    console.log("📁 Collection path:", `clinics/${clinicId}/logout_logs`);
     return docRef.id;
   } catch (error) {
     console.error("❌ Error logging logout:", error);
@@ -766,7 +761,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         console.log(`📊 Session duration: ${sessionDuration} seconds (${Math.floor(sessionDuration / 60)} minutes)`);
       }
       
-      // Try to record logout in Firestore
       let logoutRecorded = false;
       try {
         if (currentUserId && currentUserName) {
@@ -786,14 +780,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         console.error("Failed to record logout:", logError);
       }
       
-      // Small delay to ensure Firestore write completes
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Sign out from Firebase Auth
       await signOut(auth);
       console.log("🔐 Signed out from Firebase Auth");
       
-      // Clear all state
       setProducts([]);
       setTransactions([]);
       setStaffUsers([]);
@@ -804,7 +795,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setAppUser(null);
       setUser(null);
       
-      // Reset refs
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
@@ -831,10 +821,15 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      const beginningInventory = data.stock || 0;
+      
       const docRef = await addDoc(
         collection(db, `clinics/${CLINIC_ID}/products`),
         {
           ...data,
+          beginningInventory: beginningInventory,
+          totalSold: 0,
+          damageExchanged: 0,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         }
@@ -843,6 +838,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const newProduct: Product = { 
         ...data, 
         id: docRef.id,
+        beginningInventory: beginningInventory,
+        totalSold: 0,
+        damageExchanged: 0,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       };
@@ -858,16 +856,18 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
+      const { beginningInventory, ...safeUpdates } = updates as any;
+      
       await updateDoc(
         doc(db, `clinics/${CLINIC_ID}/products`, id),
         {
-          ...updates,
+          ...safeUpdates,
           updatedAt: serverTimestamp()
         }
       );
 
       setProducts((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
+        prev.map((p) => (p.id === id ? { ...p, ...safeUpdates } : p))
       );
     } catch (error) {
       console.error("Error updating product:", error);
@@ -924,15 +924,34 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
       const currentProduct = productDoc.data() as any;
       const oldStock = currentProduct.stock || 0;
+      const stockDifference = newStock - oldStock;
 
       const actingStaffName = staffName || userName || "System";
       const actingStaffId = staffId || userId || "system";
 
+      let appliedUpdateData: any = null;
+
       if (oldStock !== newStock) {
-        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), {
+        const updateData: any = {
           stock: newStock,
           updatedAt: serverTimestamp()
-        });
+        };
+
+        // Check if the adjustment is for damaged/exchanged items (stock decreased)
+        const isDamageOrExchange = reason?.toLowerCase().includes('damage') || 
+                                    reason?.toLowerCase().includes('damaged') ||
+                                    reason?.toLowerCase().includes('exchange') ||
+                                    reason?.toLowerCase().includes('return');
+
+        if (isDamageOrExchange && stockDifference < 0) {
+          const itemsRemoved = Math.abs(stockDifference);
+          const currentDamageExchanged = currentProduct.damageExchanged || 0;
+          updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
+          console.log(`📝 Damage/Exchange recorded: +${itemsRemoved} units (total: ${currentDamageExchanged + itemsRemoved})`);
+        }
+
+        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
+        appliedUpdateData = updateData;
 
         try {
           const productName = currentProduct.name || null;
@@ -940,11 +959,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         } catch (logErr) {
           console.error("Failed to log stock adjustment:", logErr);
         }
+
+        console.log(`📊 Stock adjusted by ${actingStaffName}: ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
+      } else {
+        console.log(`📊 Stock adjustment skipped - no change for ${currentProduct.name || id} (${oldStock} → ${newStock})`);
       }
 
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === id ? { ...p, stock: newStock } : p
+          p.id === id
+            ? {
+                ...p,
+                stock: newStock,
+                damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged) ?? p.damageExchanged,
+              }
+            : p
         )
       );
     } catch (error) {
@@ -979,19 +1008,70 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const voidTransaction = async (id: string) => {
+  const voidTransaction = async (id: string, voidReason?: string, voidedBy?: string) => {
     try {
-      await updateDoc(
-        doc(db, `clinics/${CLINIC_ID}/transactions`, id),
-        {
-          status: "voided",
-          updatedAt: serverTimestamp()
+      // Get the transaction to be voided
+      const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, id);
+      const transactionSnap = await getDoc(transactionRef);
+      
+      if (!transactionSnap.exists()) {
+        throw new Error("Transaction not found");
+      }
+      
+      const transactionData = transactionSnap.data() as Transaction;
+      
+      // Check if void reason is for damaged items
+      const isDamagedReturn = voidReason?.toLowerCase().includes('damage') || 
+                               voidReason?.toLowerCase().includes('damaged');
+      
+      // Update product stocks based on void reason
+      for (const item of transactionData.items) {
+        const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
+        const productSnap = await getDoc(productRef);
+        
+        if (productSnap.exists()) {
+          const productData = productSnap.data();
+          const currentStock = productData.stock || 0;
+          
+          if (isDamagedReturn) {
+            // For damaged returns: DO NOT return to stock, instead update damageExchanged
+            const currentDamage = productData.damageExchanged || 0;
+            await updateDoc(productRef, {
+              damageExchanged: currentDamage + item.quantity,
+              updatedAt: serverTimestamp()
+            });
+            console.log(`📝 Damaged return recorded: +${item.quantity} units to damageExchanged for ${productData.name}`);
+          } else {
+            // For normal returns: return items to stock
+            await updateDoc(productRef, {
+              stock: currentStock + item.quantity,
+              updatedAt: serverTimestamp()
+            });
+            console.log(`📝 Stock returned: +${item.quantity} units to ${productData.name}`);
+          }
         }
-      );
+      }
+      
+      // Update transaction status
+      await updateDoc(transactionRef, {
+        status: "voided",
+        voidReason: voidReason || "No reason provided",
+        voidedAt: new Date(),
+        voidedBy: voidedBy || userName || "System",
+        updatedAt: serverTimestamp()
+      });
 
       setTransactions((prev) =>
         prev.map((t) =>
-          t.id === id ? { ...t, status: "voided" } : t
+          t.id === id 
+            ? { 
+                ...t, 
+                status: "voided",
+                voidReason: voidReason || "No reason provided",
+                voidedAt: new Date(),
+                voidedBy: voidedBy || userName || "System"
+              } 
+            : t
         )
       );
     } catch (error) {
