@@ -28,7 +28,9 @@ import {
   Percent,
   ShoppingBag,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Eye,
+  Maximize2
 } from "lucide-react";
 
 interface StatData {
@@ -104,6 +106,15 @@ interface ForecastDataPoint {
   upper?: number;
 }
 
+interface LowStockItem {
+  id: string;
+  name: string;
+  category: string;
+  currentStock: number;
+  reorderPoint: number;
+  status: 'critical' | 'low';
+}
+
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
@@ -158,6 +169,10 @@ export default function AdminDashboard() {
   const [forecastPeriod, setForecastPeriod] = useState<30 | 60 | 90>(30);
   const [hoveredBar, setHoveredBar] = useState<{ label: string; fullLabel: string; actual: number; forecast: number } | null>(null);
   const [selectedDeadstock, setSelectedDeadstock] = useState<DeadstockItem | null>(null);
+  const [showLowStockModal, setShowLowStockModal] = useState(false);
+  const [showDeadstockModal, setShowDeadstockModal] = useState(false);
+  const [showForecastModal, setShowForecastModal] = useState(false);
+  
   const { products, transactions } = useFirebase();
   const { loading, recommendations, forecastData, usingML, dataLoaded, deadstockSuggestions } = useMLForecasting();
 
@@ -327,6 +342,20 @@ export default function AdminDashboard() {
 
   const lowStockCount = useMemo(() => {
     return products.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
+  }, [products]);
+
+  const lowStockItems = useMemo(() => {
+    return products
+      .filter(p => p.stock <= p.reorderPoint && p.stock >= 0)
+      .sort((a, b) => a.stock - b.stock)
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        currentStock: p.stock,
+        reorderPoint: p.reorderPoint,
+        status: p.stock === 0 ? 'critical' as const : 'low' as const
+      }));
   }, [products]);
 
   const grossProfit = useMemo(() => {
@@ -597,12 +626,12 @@ export default function AdminDashboard() {
         initial="hidden"
         animate="visible"
         variants={containerVariants}
-        className="min-h-screen mt-2 sm:mt-2 p-2 sm:p-4 space-y-3 sm:space-y-4"
+        className="min-h-screen p-4 space-y-4"
       >
         {usingML && hasEnoughDataForML && dataLoaded && (
           <motion.div 
             variants={itemVariants}
-            className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-700 flex items-center gap-2"
+            className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
           >
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             AI-Powered Forecasts Active (Time Series Analysis)
@@ -612,7 +641,7 @@ export default function AdminDashboard() {
         {!usingML && dataLoaded && (
           <motion.div 
             variants={itemVariants}
-            className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-xs text-gray-600 flex items-center gap-2"
+            className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2"
           >
             <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
             Showing actual sales only. AI predictions unavailable.
@@ -621,38 +650,363 @@ export default function AdminDashboard() {
 
         <motion.div
           variants={containerVariants}
-          className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
         >
           {STATS_DATA.map((stat: StatData) => (
             <StatCard key={stat.id} data={stat} />
           ))}
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Low Stock Alerts - Show first 5 items */}
           <motion.div
             variants={itemVariants}
-            className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
+            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
           >
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-2 sm:gap-4">
+            <div className="p-4 sm:p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-orange-100 rounded-lg">
+                    <AlertTriangle className="text-orange-600 w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      Low Stock Alerts
+                    </h2>
+                    <p className="text-xs font-medium text-orange-600">
+                      Items below reorder point
+                    </p>
+                  </div>
+                </div>
+                {lowStockItems.length > 5 && (
+                  <button
+                    onClick={() => setShowLowStockModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                  >
+                    <Eye size={14} />
+                    View All ({lowStockItems.length})
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 sm:p-5 pt-0">
+              <div className="space-y-3">
+                {lowStockItems.slice(0, 3).map((item) => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ duration: 0.5 }}
+                    className="bg-gray-50 p-3 rounded-lg border border-gray-100"
+                  >
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-800 text-sm truncate">
+                          {item.name}
+                        </h3>
+                        <p className="text-xs text-gray-500">{item.category}</p>
+                      </div>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
+                        item.status === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                      }`}>
+                        {item.status === 'critical' ? 'OUT' : 'LOW'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <div>
+                        <p className="text-gray-500 text-xs">Current</p>
+                        <p className="font-bold text-gray-900">{item.currentStock} units</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-xs">Reorder Point</p>
+                        <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+                {lowStockItems.length === 0 && (
+                  <div className="text-center py-8">
+                    <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
+                    <p className="text-sm text-gray-500">All stock levels healthy</p>
+                    <p className="text-xs text-gray-400 mt-1">No items below reorder point</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Deadstock Impact Card - Show first 3 items */}
+          <motion.div
+            variants={itemVariants}
+            className="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden flex flex-col relative"
+          >
+            <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
+            <div className="p-4 sm:p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-red-50 rounded-lg">
+                    <AlertTriangle className="text-red-600 w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      Deadstock Items
+                    </h2>
+                    <p className="text-xs font-medium text-red-600">
+                      Items without sales (30+ days)
+                    </p>
+                  </div>
+                </div>
+                {DEADSTOCK_DATA.length > 3 && (
+                  <button
+                    onClick={() => setShowDeadstockModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                  >
+                    <Eye size={14} />
+                    View All ({DEADSTOCK_DATA.length})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-5 pt-0">
+              <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+                Monitors slow-moving inventory that ties up capital. AI analyzes each item to recommend optimal discounts.
+              </p>
+
+              <div className="space-y-3">
+                {DEADSTOCK_DATA.slice(0, 2).map((item: DeadstockItem) => {
+                  const hasAISuggestion = usingML && item.aiSuggestion;
+                  const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                  
+                  return (
+                    <div 
+                      key={item.id} 
+                      onClick={() => setSelectedDeadstock(item)}
+                      className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 pr-3 flex-1">
+                          <h4 className="text-sm font-semibold text-gray-800 truncate">
+                            {item.name}
+                          </h4>
+                          <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
+                            <Clock size={12}/> {item.daysSinceSale} Days Unsold • {item.stock} units
+                          </span>
+                        </div>
+                        <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
+                          ₱{item.lockedCapital.toLocaleString()}
+                        </div>
+                      </div>
+                      
+                      <div className="border-t border-gray-100 pt-2">
+                        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
+                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : 'STATUS'}
+                        </p>
+                        <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
+                          suggestionType === 'critical' ? 'border-red-200' : 
+                          suggestionType === 'warning' ? 'border-orange-200' : 
+                          'border-blue-200'
+                        }`}>
+                          <p className={`text-xs ${
+                            suggestionType === 'critical' ? 'text-red-600' : 
+                            suggestionType === 'warning' ? 'text-orange-600' : 
+                            'text-blue-600'
+                          } leading-relaxed flex-1`}>
+                            {item.aiSuggestion || `Item unsold for ${item.daysSinceSale} days`}
+                          </p>
+                          <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {DEADSTOCK_DATA.length === 0 && (
+                  <div className="text-center py-8">
+                    <Package size={32} className="mx-auto mb-3 text-gray-300" />
+                    <p className="text-sm text-gray-500">No deadstock items identified</p>
+                    <p className="text-xs text-gray-400 mt-1">Items with no sales in 30+ days will appear here</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Demand Forecasting Card - Show first 3 items */}
+          <motion.div
+            variants={itemVariants}
+            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
+          >
+            <div className="p-4 sm:p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-green-100 rounded-lg">
+                    <Package className="text-[#047857] w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      Demand Forecasting
+                    </h2>
+                    <p className="text-xs font-medium text-blue-600">
+                      {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
+                    </p>
+                  </div>
+                </div>
+                {FORECAST_DATA.length > 3 && (
+                  <button
+                    onClick={() => setShowForecastModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                  >
+                    <Eye size={14} />
+                    View All ({FORECAST_DATA.length})
+                  </button>
+                )}
+              </div>
+              
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
+                <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
+                  {[30, 60, 90].map((period: number) => (
+                    <button
+                      key={period}
+                      onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
+                        forecastPeriod === period 
+                          ? "bg-white text-[#0B3C8A] shadow-sm" 
+                          : "text-gray-400 hover:text-gray-600"
+                      }`}
+                    >
+                      {period}d
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 sm:p-5 pt-0">
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
+                <div className="space-y-3">
+                  {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
+                    <ForecastItem 
+                      key={i} 
+                      data={item} 
+                      currentDemand={getCurrentDisplayDemand(item)}
+                      forecastPeriod={forecastPeriod}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center py-8">
+                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                    <Database size={20} className="text-gray-400" />
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    {!usingML 
+                      ? "AI prediction service is currently unavailable" 
+                      : !hasEnoughDataForML 
+                      ? "Insufficient data for AI recommendations"
+                      : "No reorder recommendations at this time"}
+                  </p>
+                  {!hasEnoughDataForML && usingML && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          <motion.div
+            variants={itemVariants}
+            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
+          >
+            <div className="p-4 sm:p-5 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <BarChart3 className="text-emerald-700 w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">
+                    Performance Heatmap
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    Profit vs. Volume Analysis
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-5 pt-0">
+              <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                Identifies which categories generate the most revenue (Solid Color)
+                relative to how many physical units are sold (Gray Overlay).
+              </p>
+
+              <div className="space-y-4">
+                {HEATMAP_DATA.length > 0 ? (
+                  HEATMAP_DATA.map((item: any, idx: number) => (
+                    <div key={idx} className="space-y-1.5">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-semibold text-gray-700">
+                          {item.category}
+                        </span>
+                      </div>
+                      <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${item.profit}%` }}
+                          transition={{ duration: 1, ease: "easeOut" }}
+                          className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
+                        >
+                          Profit {item.profit}%
+                        </motion.div>
+                        <div
+                          className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-800"
+                          style={{ width: `${100 - item.volume}%` }}
+                        >
+                          Vol {item.volume}%
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    No product data available.
+                  </p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Trend Visualization - Full Width */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
+        >
+          <div className="p-4 sm:p-6 border-b border-gray-100">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="p-1.5 sm:p-2 bg-[#0B3C8A] rounded-lg">
-                    <Activity className="text-white w-4 h-4 sm:w-5 sm:h-5" />
+                  <div className="p-2 bg-[#0B3C8A] rounded-lg">
+                    <Activity className="text-white w-5 h-5" />
                   </div>
-                  <h2 className="text-sm sm:text-lg font-bold text-gray-800">
+                  <h2 className="text-lg font-bold text-gray-800">
                     Trend Visualization
                   </h2>
                 </div>
-                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-500 ml-1">
-                  <BarChart3 size={10} className="sm:w-3 sm:h-3" />
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 ml-1">
+                  <BarChart3 size={12} />
                   <span>Actual {usingML ? 'vs. AI Predicted Sales' : 'Sales Only'}</span>
                 </div>
               </div>
 
-              <div className="bg-gray-100 p-0.5 sm:p-1 rounded-lg flex text-xs sm:text-sm font-medium">
+              <div className="bg-gray-100 p-1 rounded-lg flex text-sm font-medium">
                 <button
                   onClick={() => setActiveTab("weekly")}
-                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                  className={`px-4 py-1.5 rounded-md transition-all text-sm ${
                     activeTab === "weekly"
                       ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
                       : "text-gray-500 hover:text-gray-700"
@@ -662,7 +1016,7 @@ export default function AdminDashboard() {
                 </button>
                 <button
                   onClick={() => setActiveTab("monthly")}
-                  className={`px-2 sm:px-4 py-1 sm:py-1.5 rounded-md transition-all text-[11px] sm:text-sm ${
+                  className={`px-4 py-1.5 rounded-md transition-all text-sm ${
                     activeTab === "monthly"
                       ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
                       : "text-gray-500 hover:text-gray-700"
@@ -672,12 +1026,14 @@ export default function AdminDashboard() {
                 </button>
               </div>
             </div>
+          </div>
 
-            <div className="relative min-h-57.5">
+          <div className="p-4 sm:p-6 pt-0">
+            <div className="relative min-h-[300px]">
               {chartData && chartData.length > 0 ? (
                 <div>
-                  <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-4 custom-scrollbar scroll-smooth">
-                    <div className="flex flex-col justify-between h-40 sm:h-64 pb-6 text-[8px] sm:text-xs text-gray-400 font-medium text-right w-8 sm:w-12 border-r border-gray-100 pr-1 sm:pr-2 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                  <div className="flex gap-4 overflow-x-auto pb-4">
+                    <div className="flex flex-col justify-between h-64 pb-6 text-xs text-gray-400 font-medium text-right w-12 border-r border-gray-100 pr-3 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                       <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
                       <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
                       <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
@@ -685,7 +1041,7 @@ export default function AdminDashboard() {
                       <span>0</span>
                     </div>
 
-                    <div className="flex-1 h-40 sm:h-64 flex items-end justify-between gap-1 sm:gap-2 px-1 sm:px-2 border-b border-dashed border-gray-200 pb-2 min-w-[800px] sm:min-w-0">
+                    <div className="flex-1 h-64 flex items-end justify-between gap-2 px-2 border-b border-dashed border-gray-200 pb-2 min-w-[800px]">
                       {chartData.map((data: ChartDataPoint, idx: number) => (
                         <ChartBarGroup
                           key={`${activeTab}-${idx}`}
@@ -707,7 +1063,7 @@ export default function AdminDashboard() {
                   </div>
 
                   {hoveredBar && (
-                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
+                    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
                       <div className="font-bold mb-1 text-center">{hoveredBar.fullLabel}</div>
                       <div className="flex gap-4">
                         <div>
@@ -724,18 +1080,18 @@ export default function AdminDashboard() {
                     </div>
                   )}
 
-                  <div className="flex flex-col items-center mt-3 sm:mt-6">
-                    <div className="flex justify-center items-center gap-3 sm:gap-6 text-xs sm:text-sm bg-gray-50 px-2 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-100">
-                      <div className="flex items-center gap-1.5 sm:gap-2">
-                        <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-[#0B3C8A]"></span>
-                        <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
+                  <div className="flex flex-col items-center mt-6">
+                    <div className="flex justify-center items-center gap-6 text-sm bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded bg-[#0B3C8A]"></span>
+                        <span className="text-gray-700 font-medium">
                           Actual Sales
                         </span>
                       </div>
                       {usingML && (
-                        <div className="flex items-center gap-1.5 sm:gap-2">
-                          <span className="w-2 h-2 sm:w-3 sm:h-3 rounded bg-blue-300"></span>
-                          <span className="text-gray-700 font-medium text-[10px] sm:text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded bg-blue-300"></span>
+                          <span className="text-gray-700 font-medium">
                             AI Predicted
                           </span>
                         </div>
@@ -753,232 +1109,129 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
-          </motion.div>
-
-          <motion.div
-            variants={itemVariants}
-            className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 sm:p-2 bg-emerald-100 rounded-lg">
-                <BarChart3 className="text-emerald-700 w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <div>
-                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Performance Heatmap
-                </h2>
-                <p className="text-[9px] sm:text-xs text-gray-500">
-                  Profit vs. Volume Analysis
-                </p>
-              </div>
-            </div>
-
-            <p className="text-[10px] sm:text-[11px] text-gray-400 mb-3 sm:mb-5 leading-relaxed">
-              Identifies which categories generate the most revenue (Solid Color)
-              relative to how many physical units are sold (Gray Overlay).
-            </p>
-
-            <div className="space-y-3 sm:space-y-5">
-              {HEATMAP_DATA.length > 0 ? (
-                HEATMAP_DATA.map((item: any, idx: number) => (
-                  <div key={idx} className="space-y-1 sm:space-y-1.5">
-                    <div className="flex justify-between text-xs sm:text-sm">
-                      <span className="font-semibold text-gray-700 text-[10px] sm:text-sm">
-                        {item.category}
-                      </span>
-                    </div>
-                    <div className="relative h-5 sm:h-6 bg-gray-100 rounded-md overflow-hidden flex">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${item.profit}%` }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                        className={`${item.color} h-full flex items-center px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
-                      >
-                        Profit {item.profit}%
-                      </motion.div>
-                      <div
-                        className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-1.5 sm:px-2 text-[8px] sm:text-[10px] font-bold text-gray-800"
-                        style={{ width: `${100 - item.volume}%` }}
-                      >
-                        Vol {item.volume}%
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  No product data available.
-                </p>
-              )}
-            </div>
-          </motion.div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Demand Forecasting Card */}
-          <motion.div
-            variants={itemVariants}
-            className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 flex flex-col h-fit lg:h-full"
-          >
-            <div className="flex flex-col gap-3 mb-4 shrink-0">
-              <div className="flex items-center gap-2 sm:gap-3">
-                <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg flex-shrink-0">
-                  <Package className="text-[#047857] w-4 h-4 sm:w-5 sm:h-5" />
-                </div>
-                <div>
-                  <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                    Demand Forecasting                  </h2>
-                  <p className="text-[9px] sm:text-xs font-medium text-blue-600">
-                    {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
-                  </p>
-                </div>
-              </div>
-              
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
-                <div className="flex items-center bg-gray-50 p-0.5 rounded-lg w-fit">
-                  {[30, 60, 90].map((period: number) => (
-                    <button
-                      key={period}
-                      onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
-                      className={`px-2 py-1 text-[10px] sm:text-xs font-bold rounded-md transition-all ${
-                        forecastPeriod === period 
-                          ? "bg-white text-[#0B3C8A] shadow-sm" 
-                          : "text-gray-400 hover:text-gray-600"
-                      }`}
-                    >
-                      {period}d
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: '500px' }}>
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
-                <div className="space-y-3 sm:space-y-4">
-                  {FORECAST_DATA.map((item: ForecastDisplayData, i: number) => (
-                    <ForecastItem 
-                      key={i} 
-                      data={item} 
-                      currentDemand={getCurrentDisplayDemand(item)}
-                      forecastPeriod={forecastPeriod}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Database size={20} className="text-gray-400" />
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    {!usingML 
-                      ? "AI prediction service is currently unavailable" 
-                      : !hasEnoughDataForML 
-                      ? "Insufficient data for AI recommendations"
-                      : "No reorder recommendations at this time"}
-                  </p>
-                  {!hasEnoughDataForML && usingML && (
-                    <p className="text-[10px] text-gray-400 mt-2">
-                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* Deadstock Impact Card - FIXED: Removed Total Value at Risk section */}
-          <motion.div
-            variants={itemVariants}
-            className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-red-100 p-3 sm:p-6 h-fit lg:h-full relative overflow-hidden flex flex-col"
-          >
-            <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-1.5 sm:p-2 bg-red-50 rounded-lg">
-                <AlertTriangle className="text-red-600 w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <div>
-                <h2 className="text-sm sm:text-lg font-bold text-gray-800">
-                  Deadstock Impact
-                </h2>
-              </div>
-            </div>
-
-            {/* Deadstock Cards - No extra spacing above */}
-            <div className="space-y-3 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-              {DEADSTOCK_DATA.length > 0 ? (
-                DEADSTOCK_DATA.map((item: DeadstockItem) => {
-                  const hasAISuggestion = usingML && item.aiSuggestion;
-                  
-                  const suggestion = hasAISuggestion && item.aiSuggestion
-                    ? item.aiSuggestion 
-                    : `Item unsold for ${item.daysSinceSale} days. Enable AI service for intelligent recommendations.`;
-                  
-                  const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
-                  const discountBadge = hasAISuggestion && item.recommendedDiscount ? `${item.recommendedDiscount}% off` : '';
-                  
-                  const suggestionBgColor = hasAISuggestion 
-                    ? (suggestionType === 'critical' ? 'bg-red-50 border-red-200' : 
-                       suggestionType === 'warning' ? 'bg-orange-50 border-orange-200' : 
-                       'bg-blue-50 border-blue-200')
-                    : 'bg-gray-50 border-gray-200';
-                  
-                  return (
-                    <div 
-                      key={item.id} 
-                      onClick={() => setSelectedDeadstock(item)}
-                      className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 pr-3 flex-1">
-                          <h4 className="text-[11px] sm:text-sm font-semibold text-gray-800 truncate">
-                            {item.name}
-                          </h4>
-                          <span className="text-[9px] sm:text-[10px] text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
-                            <Clock size={10}/> {item.daysSinceSale} Days Unsold • {item.stock} units
-                            {item.lastSaleDate && (
-                              <span className="text-gray-400 ml-1">(Last sold: {item.lastSaleDate.toLocaleDateString()})</span>
-                            )}
-                            {!item.lastSaleDate && (
-                              <span className="text-gray-400 ml-1">(Never sold)</span>
-                            )}
-                            {discountBadge && (
-                              <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[8px] font-bold">
-                                {discountBadge}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                        <div className="text-[11px] sm:text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
-                          ₱{item.lockedCapital.toLocaleString()}
-                        </div>
-                      </div>
-                      
-                      <div className="border-t border-gray-100 pt-2">
-                        <p className="text-[8px] sm:text-[9px] font-medium text-gray-400 uppercase tracking-wider mb-1">
-                          {usingML && hasAISuggestion ? 'AI SUGGESTION (Click for details)' : 'STATUS'}
-                        </p>
-                        <div className={`${suggestionBgColor} border rounded p-2 min-h-[50px] flex items-center justify-between`}>
-                          <p className={`text-[9px] sm:text-xs ${suggestionType === 'critical' ? 'text-red-600' : suggestionType === 'warning' ? 'text-orange-600' : 'text-blue-600'} leading-relaxed flex-1`}>
-                            {suggestion.length > 150 ? suggestion.substring(0, 150) + '...' : suggestion}
-                          </p>
-                          <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-4 text-gray-400">
-                  <Package size={24} className="mx-auto mb-2 opacity-20"/>
-                  <p className="text-xs">No deadstock items identified</p>
-                  <p className="text-[10px] mt-1">Items with no sales in 30+ days will appear here</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
       </motion.div>
+
+      {/* Low Stock Modal */}
+      <AnimatePresence>
+        {showLowStockModal && (
+          <Modal
+            title="Low Stock Alerts"
+            onClose={() => setShowLowStockModal(false)}
+          >
+            <div className="space-y-3">
+              {lowStockItems.map((item) => (
+                <div key={item.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <div className="flex justify-between items-start gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-800 text-sm truncate">
+                        {item.name}
+                      </h3>
+                      <p className="text-xs text-gray-500">{item.category}</p>
+                    </div>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
+                      item.status === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                    }`}>
+                      {item.status === 'critical' ? 'OUT' : 'LOW'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div>
+                      <p className="text-gray-500 text-xs">Current</p>
+                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-gray-500 text-xs">Reorder Point</p>
+                      <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      {/* Deadstock Modal */}
+      <AnimatePresence>
+        {showDeadstockModal && (
+          <Modal
+            title="Deadstock Impact Analysis"
+            onClose={() => setShowDeadstockModal(false)}
+          >
+            <div className="space-y-3">
+              {DEADSTOCK_DATA.map((item) => {
+                const hasAISuggestion = usingML && item.aiSuggestion;
+                const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                
+                return (
+                  <div 
+                    key={item.id} 
+                    onClick={() => {
+                      setShowDeadstockModal(false);
+                      setSelectedDeadstock(item);
+                    }}
+                    className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="min-w-0 pr-3 flex-1">
+                        <h4 className="text-sm font-semibold text-gray-800 truncate">
+                          {item.name}
+                        </h4>
+                        <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
+                          <Clock size={12}/> {item.daysSinceSale} Days Unsold • {item.stock} units
+                        </span>
+                      </div>
+                      <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
+                        ₱{item.lockedCapital.toLocaleString()}
+                      </div>
+                    </div>
+                    
+                    <div className="border-t border-gray-100 pt-2">
+                      <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
+                        suggestionType === 'critical' ? 'border-red-200' : 
+                        suggestionType === 'warning' ? 'border-orange-200' : 
+                        'border-blue-200'
+                      }`}>
+                        <p className={`text-xs ${
+                          suggestionType === 'critical' ? 'text-red-600' : 
+                          suggestionType === 'warning' ? 'text-orange-600' : 
+                          'text-blue-600'
+                        } leading-relaxed flex-1`}>
+                          {item.aiSuggestion || `Item unsold for ${item.daysSinceSale} days`}
+                        </p>
+                        <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      {/* Forecast Modal */}
+      <AnimatePresence>
+        {showForecastModal && (
+          <Modal
+            title="Demand Forecasting - All Products"
+            onClose={() => setShowForecastModal(false)}
+          >
+            <div className="space-y-3">
+              {FORECAST_DATA.map((item, i) => (
+                <ForecastItem 
+                  key={i} 
+                  data={item} 
+                  currentDemand={getCurrentDisplayDemand(item)}
+                  forecastPeriod={forecastPeriod}
+                />
+              ))}
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
 
       {/* Deadstock Analysis Modal */}
       <AnimatePresence>
@@ -991,6 +1244,38 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// Modal Component
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+      >
+        <div className="sticky top-0 bg-gradient-to-r from-blue-50 to-white p-5 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <X size={20} className="text-gray-500" />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {children}
+        </div>
+        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -1060,7 +1345,7 @@ function DeadstockAnalysisModal({
                 <p className="text-lg font-bold text-gray-900">₱{analysis.baseCost.toLocaleString()}</p>
               </div>
               <div className="bg-gray-50 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Original/Retail Price</p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Retail Price</p>
                 <p className="text-lg font-bold text-gray-900">₱{analysis.originalPrice.toLocaleString()}</p>
               </div>
               <div className="bg-gray-50 rounded-lg p-3 text-center">
@@ -1231,19 +1516,19 @@ function StatCard({ data }: { data: StatData }) {
   return (
     <motion.div
       variants={itemVariants}
-      className="bg-white p-3 sm:p-5 rounded-xl shadow-sm border border-gray-100"
+      className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-gray-100"
     >
       <div className="flex justify-between items-start">
-        <div className={`p-2 sm:p-3 rounded-lg ${currentStyle.bg} mb-2 sm:mb-4`}>
-          <Icon size={18} className={`${currentStyle.icon} sm:w-6 sm:h-6`} />
+        <div className={`p-2 sm:p-3 rounded-lg ${currentStyle.bg} mb-3`}>
+          <Icon size={18} className={`${currentStyle.icon} sm:w-5 sm:h-5`} />
         </div>
         <span
-          className={`px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-bold ${currentStyle.badge}`}
+          className={`px-2 py-1 rounded text-xs font-bold ${currentStyle.badge}`}
         >
           {data.trend}
         </span>
       </div>
-      <h3 className="text-lg sm:text-2xl font-bold text-gray-800">{data.value}</h3>
+      <h3 className="text-xl sm:text-2xl font-bold text-gray-800">{data.value}</h3>
       <p className="text-xs sm:text-sm text-gray-500 mt-1">{data.label}</p>
     </motion.div>
   );
@@ -1258,22 +1543,22 @@ function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastD
       initial={{ x: -20, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.5 }}
-      className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-100"
+      className="bg-gray-50 p-3 rounded-lg border border-gray-100"
     >
       <div className="flex justify-between items-start gap-2 mb-3">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {data.trend === "up" ? (
-            <ArrowUpRight size={14} className="text-[#0B3C8A] sm:w-4 sm:h-4 flex-shrink-0" />
+            <ArrowUpRight size={14} className="text-[#0B3C8A] flex-shrink-0" />
           ) : data.trend === "down" ? (
-            <ArrowDownRight size={14} className="text-orange-500 sm:w-4 sm:h-4 flex-shrink-0" />
+            <ArrowDownRight size={14} className="text-orange-500 flex-shrink-0" />
           ) : (
             <div className="w-4 h-4 rounded-full bg-gray-400 flex-shrink-0" />
           )}
-          <h3 className="font-semibold text-gray-800 text-xs sm:text-sm break-words">
+          <h3 className="font-semibold text-gray-800 text-sm break-words">
             {data.name}
           </h3>
         </div>
-        <span className={`text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded flex-shrink-0 w-fit ${
+        <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
           data.priority === 'high' ? 'bg-red-100 text-red-700' :
           data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
           'bg-blue-100 text-blue-700'
@@ -1284,27 +1569,27 @@ function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastD
       
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div>
-          <p className="text-gray-500 text-[8px] sm:text-[9px]">Current</p>
-          <p className="font-bold text-gray-900 text-sm sm:text-base">
+          <p className="text-gray-500 text-xs">Current</p>
+          <p className="font-bold text-gray-900 text-sm">
             {data.currentStock} units
           </p>
         </div>
         <div>
-          <p className="text-gray-500 text-[8px] sm:text-[9px]">{forecastPeriod}d Demand</p>
-          <p className="font-bold text-[#0B3C8A] text-sm sm:text-base">
+          <p className="text-gray-500 text-xs">{forecastPeriod}d Demand</p>
+          <p className="font-bold text-[#0B3C8A] text-sm">
             {currentDemand} units
           </p>
         </div>
         <div>
-          <p className="text-gray-500 text-[8px] sm:text-[9px]">Order</p>
-          <p className="font-bold text-emerald-600 text-sm sm:text-base">
+          <p className="text-gray-500 text-xs">Order</p>
+          <p className="font-bold text-emerald-600 text-sm">
             {orderQuantity} units
           </p>
         </div>
       </div>
       
       <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-        <div className="flex items-center gap-1 text-[9px] sm:text-xs text-gray-600 font-medium">
+        <div className="flex items-center gap-1 text-xs text-gray-600 font-medium">
           <Package size={12} />
           {needsReorder ? `Order ${orderQuantity} Units` : "Stock Sufficient"}
         </div>
@@ -1342,15 +1627,15 @@ function ChartBarGroup({
 }: ChartBarGroupProps) {
   const actualHeight = `${Math.min((actual / maxVal) * 100, 100)}%`;
   const forecastHeight = usingML ? `${Math.min((forecast / maxVal) * 100, 100)}%` : '0%';
-  const barWidthClass = isWide ? "w-8 sm:w-16" : "w-4 sm:w-10";
+  const barWidthClass = isWide ? "w-12 sm:w-20" : "w-6 sm:w-12";
 
   return (
     <div 
-      className="flex flex-col items-center gap-1 sm:gap-2 flex-1 group relative cursor-pointer h-full justify-end min-w-[50px] sm:min-w-[80px]"
+      className="flex flex-col items-center gap-1 flex-1 group relative cursor-pointer h-full justify-end min-w-[60px] sm:min-w-[80px]"
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
     >
-      <div className="flex items-end gap-0.5 sm:gap-1 w-full justify-center h-full">
+      <div className="flex items-end gap-1 w-full justify-center h-full">
         <motion.div
           initial={{ height: 0 }}
           animate={{ height: actualHeight }}
@@ -1367,7 +1652,7 @@ function ChartBarGroup({
           ></motion.div>
         )}
       </div>
-      <span className="text-[10px] sm:text-xs font-medium text-gray-400 group-hover:text-gray-700 transition-colors">
+      <span className="text-xs font-medium text-gray-400 group-hover:text-gray-700 transition-colors">
         {label}
       </span>
     </div>

@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import jsPDF from "jspdf";
 import { motion, AnimatePresence, Variants } from "framer-motion"; 
 import { useNotification } from "@/components/NotificationProvider"; 
@@ -28,7 +29,9 @@ import {
   Calendar,
   QrCode,
   Banknote,
-  CreditCard
+  CreditCard,
+  Shield,
+  Clock
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
@@ -54,6 +57,7 @@ interface Product {
   specifications: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  availableStock?: number;
 }
 
 interface CartItem {
@@ -77,8 +81,14 @@ interface Transaction {
   staffId?: string;
   createdAt?: Timestamp;
   paymentMethod?: "cash" | "online";
-  amountGiven?: number;
+  amountReceive?: number;
   change?: number;
+  warrantyStartDate?: Date | string;
+  warrantyEndDate?: Date | string;
+  referenceNumber?: string;
+  voidReason?: string;
+  voidedAt?: Date;
+  voidedBy?: string;
 }
 
 const CATEGORIES = ["All", "Frames", "Lenses", "Contact Lenses", "Solutions", "Accessories"];
@@ -91,6 +101,30 @@ const containerVariants: Variants = {
 const itemVariants: Variants = {
   hidden: { y: 10, opacity: 0 },
   visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }
+};
+
+// Helper function to check if warranty is valid (date range based)
+const isWarrantyValid = (warrantyStartDate?: Date | string, warrantyEndDate?: Date | string): boolean => {
+  if (!warrantyStartDate || !warrantyEndDate) return false;
+  
+  const now = new Date();
+  const startDate = new Date(warrantyStartDate);
+  const endDate = new Date(warrantyEndDate);
+  
+  return now >= startDate && now <= endDate;
+};
+
+// Helper function to format warranty date range
+const formatWarrantyRange = (startDate?: Date | string, endDate?: Date | string): string => {
+  if (!startDate || !endDate) return "No warranty";
+  
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  const startStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const endStr = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  
+  return `${startStr} - ${endStr}`;
 };
 
 export default function SalesPage() {
@@ -115,15 +149,33 @@ export default function SalesPage() {
   const [patientName, setPatientName] = useState("");
   const [tempReservedStock, setTempReservedStock] = useState<Map<string, number>>(new Map());
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [showAddToCartModal, setShowAddToCartModal] = useState(false);
+  const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
   const [voidModalOpen, setVoidModalOpen] = useState(false);
   const [transactionToVoid, setTransactionToVoid] = useState<string | null>(null);
+  const [voidReason, setVoidReason] = useState<string>("");
+  const [warrantyWarning, setWarrantyWarning] = useState<{ show: boolean; message: string; transaction: Transaction | null }>({ show: false, message: "", transaction: null });
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "online">("cash");
-  const [amountGiven, setAmountGiven] = useState<string>("");
+  const [amountReceive, setAmountReceive] = useState<string>("");
   const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [viewByMonth, setViewByMonth] = useState<boolean>(false);
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
+  const [warrantyStartDate, setWarrantyStartDate] = useState<string>("");
+  const [warrantyEndDate, setWarrantyEndDate] = useState<string>("");
+  const [referenceNumber, setReferenceNumber] = useState<string>("");
+  const [showOnlineConfirm, setShowOnlineConfirm] = useState(false);
+
+  const searchParams = useSearchParams();
+
+  // Read tab parameter from URL
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'history') {
+      setActiveTab('history');
+    }
+  }, [searchParams]);
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
@@ -134,13 +186,11 @@ export default function SalesPage() {
       } else if (typeof transaction.date === 'string') {
         transactionDate = new Date(transaction.date);
       } else if (transaction.date && typeof transaction.date === 'object' && 'toDate' in transaction.date) {
-        // Handle Firestore Timestamp object (edge case)
         transactionDate = (transaction.date as any).toDate();
       } else {
-        return false; // Skip invalid dates
+        return false;
       }
       
-      // Format date in ISO format (YYYY-MM-DD) to avoid timezone issues
       const year = transactionDate.getFullYear();
       const month = String(transactionDate.getMonth() + 1).padStart(2, '0');
       const day = String(transactionDate.getDate()).padStart(2, '0');
@@ -179,7 +229,7 @@ export default function SalesPage() {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const total = subtotal;
 
-  const addToCart = (product: Product) => {
+  const handleAddToCartClick = (product: Product) => {
     const currentReserved = tempReservedStock.get(product.id) || 0;
     const actualStock = product.stock;
     const availableForThis = actualStock - currentReserved;
@@ -191,31 +241,56 @@ export default function SalesPage() {
       );
       return;
     }
+    
+    setPendingProduct(product);
+    setShowAddToCartModal(true);
+  };
 
-    setTempReservedStock(prev => {
-      const newMap = new Map(prev);
-      newMap.set(product.id, (prev.get(product.id) || 0) + 1);
-      return newMap;
-    });
-
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => 
-          item.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 } 
-            : item
+  const confirmAddToCart = () => {
+    if (pendingProduct) {
+      const currentReserved = tempReservedStock.get(pendingProduct.id) || 0;
+      const actualStock = pendingProduct.stock;
+      const availableForThis = actualStock - currentReserved;
+      
+      if (availableForThis <= 0) {
+        showToastOnly(
+          `❌ ${pendingProduct.name} is out of stock`,
+          "error"
         );
+        setShowAddToCartModal(false);
+        setPendingProduct(null);
+        return;
       }
-      return [...prev, { 
-        id: product.id, 
-        name: product.name, 
-        price: product.markupPrice, 
-        quantity: 1,
-        image: product.image,
-        imageColor: product.imageColor
-      }];
-    });
+
+      setTempReservedStock(prev => {
+        const newMap = new Map(prev);
+        newMap.set(pendingProduct.id, (prev.get(pendingProduct.id) || 0) + 1);
+        return newMap;
+      });
+
+      setCart(prev => {
+        const existing = prev.find(item => item.id === pendingProduct.id);
+        if (existing) {
+          return prev.map(item => 
+            item.id === pendingProduct.id 
+              ? { ...item, quantity: item.quantity + 1 } 
+              : item
+          );
+        }
+        return [...prev, { 
+          id: pendingProduct.id, 
+          name: pendingProduct.name, 
+          price: pendingProduct.markupPrice, 
+          quantity: 1,
+          image: pendingProduct.image,
+          imageColor: pendingProduct.imageColor
+        }];
+      });
+      
+      showToastOnly(`✓ ${pendingProduct.name} added to cart`, "success");
+      setShowAddToCartModal(false);
+      setPendingProduct(null);
+    }
   };
 
   const updateQuantity = (id: string, delta: number) => {
@@ -273,32 +348,16 @@ export default function SalesPage() {
     setTempReservedStock(new Map());
     setPatientName("");
     setPaymentMethod("cash");
-    setAmountGiven("");
+    setAmountReceive("");
+    setWarrantyStartDate("");
+    setWarrantyEndDate("");
+    setReferenceNumber("");
   };
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) {
-      showToastOnly("Cart is empty", "error");
-      return;
-    }
-
-    let parsedAmountGiven: number | undefined = undefined;
-    let calculatedChange: number | undefined = undefined;
-
-    if (paymentMethod === "cash") {
-      if (!amountGiven.trim()) {
-        showToastOnly("Please enter the amount given", "error");
-        return;
-      }
-
-      parsedAmountGiven = parseFloat(amountGiven);
-      if (isNaN(parsedAmountGiven) || parsedAmountGiven < total) {
-        showToastOnly("Amount given must be at least ₱" + total.toLocaleString(), "error");
-        return;
-      }
-      calculatedChange = parsedAmountGiven - total;
-    }
-
+  const processCheckout = async (
+    paymentMethodToUse: "cash" | "online",
+    amountReceivedForCash?: number
+  ) => {
     if (isProcessingCheckout) {
       return;
     }
@@ -314,7 +373,7 @@ export default function SalesPage() {
 
       const productsBecomingOutOfStock: Array<{ name: string; id: string }> = [];
 
-      // Create the transaction object dynamically to avoid undefined fields
+      // Create the transaction object
       const newTransactionData: any = {
         patientName: patientName || "Walk-in Patient",
         items: cart,
@@ -324,23 +383,34 @@ export default function SalesPage() {
         synced: isOnline,
         staffName: currentUser.name,
         staffId: currentUser.id,
-        paymentMethod: paymentMethod,
+        paymentMethod: paymentMethodToUse,
       };
 
       // Only add cash-related fields if they are defined
-      if (paymentMethod === "cash") {
-        newTransactionData.amountGiven = parsedAmountGiven;
-        newTransactionData.change = calculatedChange;
+      if (paymentMethodToUse === "cash" && amountReceivedForCash !== undefined) {
+        newTransactionData.amountReceive = amountReceivedForCash;
+        newTransactionData.change = amountReceivedForCash - total;
       }
 
-      // Add transaction FIRST to prevent stock deduction if DB write fails
+      // Only add online-related fields if they are defined
+      if (paymentMethodToUse === "online" && referenceNumber.trim()) {
+        newTransactionData.referenceNumber = referenceNumber;
+      }
+
+      // Add warranty information if dates are provided
+      if (warrantyStartDate && warrantyEndDate) {
+        newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
+        newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
+      }
+
+      // Add transaction FIRST
       const transactionId = await addTransaction(newTransactionData);
 
       if (!transactionId) {
         throw new Error("Failed to create transaction - no ID returned");
       }
 
-      // NOW update product stocks
+      // Update product stocks
       for (const cartItem of cart) {
         const product = (firebaseProducts as Product[]).find(p => p.id === cartItem.id);
         if (product) {
@@ -449,6 +519,39 @@ export default function SalesPage() {
     } finally {
       setIsProcessingCheckout(false);
     }
+  };
+
+  const handleCheckout = async () => {
+    if (cart.length === 0) {
+      showToastOnly("Cart is empty", "error");
+      return;
+    }
+
+    let parsedAmountReceive: number | undefined = undefined;
+
+    if (paymentMethod === "cash") {
+      if (!amountReceive.trim()) {
+        showToastOnly("Please enter the amount receive", "error");
+        return;
+      }
+
+      parsedAmountReceive = parseFloat(amountReceive);
+      if (isNaN(parsedAmountReceive) || parsedAmountReceive < total) {
+        showToastOnly("Amount receive must be at least ₱" + total.toLocaleString(), "error");
+        return;
+      }
+
+      // Proceed with cash checkout
+      await processCheckout("cash", parsedAmountReceive);
+    } else if (paymentMethod === "online") {
+      // Show confirmation modal for online payment
+      setShowOnlineConfirm(true);
+    }
+  };
+
+  const handleConfirmOnlinePayment = async () => {
+    setShowOnlineConfirm(false);
+    await processCheckout("online");
   };
 
   const toggleNetwork = () => {
@@ -570,8 +673,8 @@ export default function SalesPage() {
     doc.setFontSize(6);
     doc.setFont('Helvetica', 'normal');
     
-    if (trx.paymentMethod === 'cash' && trx.amountGiven !== undefined) {
-      const amountStr = trx.amountGiven.toLocaleString();
+    if (trx.paymentMethod === 'cash' && trx.amountReceive !== undefined) {
+      const amountStr = trx.amountReceive.toLocaleString();
       doc.text('Cash', leftMargin, currentY);
       doc.text(amountStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
       currentY += 2.3;
@@ -584,9 +687,35 @@ export default function SalesPage() {
       }
     } else if (trx.paymentMethod === 'online') {
       doc.text('Payment Method: Online', leftMargin, currentY);
+      currentY += 2.5;
+      if (trx.referenceNumber) {
+        doc.setFontSize(5);
+        doc.text(`Ref: ${trx.referenceNumber}`, leftMargin, currentY);
+      }
     }
-    currentY += 3;
+    currentY += 2;
 
+    // Add warranty information if present
+    if (trx.warrantyStartDate && trx.warrantyEndDate) {
+      drawDashedDivider(currentY);
+      currentY += 2.5;
+      
+      doc.setFontSize(6);
+      doc.setFont('Helvetica', 'bold');
+      doc.text('WARRANTY', leftMargin, currentY);
+      currentY += 2.3;
+      
+      doc.setFontSize(5);
+      doc.setFont('Helvetica', 'normal');
+      const warrantStart = new Date(trx.warrantyStartDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+      const warrantyEnd = new Date(trx.warrantyEndDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+      doc.text(`From: ${warrantStart}`, leftMargin, currentY);
+      currentY += 1.8;
+      doc.text(`To: ${warrantyEnd}`, leftMargin, currentY);
+      currentY += 2;
+    }
+
+    currentY += 1.5;
     drawDashedDivider(currentY);
     currentY += 2.5;
 
@@ -604,12 +733,37 @@ export default function SalesPage() {
     doc.save(`Receipt_${receiptId}.pdf`);
   };
 
+  const openVoidModal = (transaction: Transaction) => {
+    setTransactionToVoid(transaction.id);
+    
+    // Check if warranty is still valid
+    const warrantyValid = isWarrantyValid(transaction.warrantyStartDate, transaction.warrantyEndDate);
+    
+    if (warrantyValid) {
+      const endDate = transaction.warrantyEndDate ? new Date(transaction.warrantyEndDate).toLocaleDateString() : "N/A";
+      setWarrantyWarning({
+        show: true,
+        message: `⚠️ This transaction is still under warranty (expires ${endDate}). Voiding now will void the warranty as well.`,
+        transaction: transaction
+      });
+      setVoidModalOpen(true);
+    } else {
+      setWarrantyWarning({ show: false, message: "", transaction: null });
+      setVoidModalOpen(true);
+    }
+    
+    setVoidReason("");
+  };
+
   const handleVoid = async () => {
     if (transactionToVoid) {
       try {
         const trxToRefund = (firebaseTransactions as Transaction[]).find(t => t.id === transactionToVoid);
         
         if (trxToRefund) {
+          // Check warranty status for notification
+          const warrantyValid = isWarrantyValid(trxToRefund.warrantyStartDate, trxToRefund.warrantyEndDate);
+          
           for (const item of trxToRefund.items) {
             const product = (firebaseProducts as Product[]).find(p => p.id === item.id);
             if (product) {
@@ -619,13 +773,17 @@ export default function SalesPage() {
             }
           }
         }
-
+        
+        // Call voidTransaction with just the ID (the function will handle updating the transaction)
         await voidTransaction(transactionToVoid);
         
         setVoidModalOpen(false);
         setTransactionToVoid(null);
+        setVoidReason("");
+        setWarrantyWarning({ show: false, message: "", transaction: null });
+        
         showNotification(
-          `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided. Stock returned.`, 
+          `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided successfully. Stock returned.`, 
           "info", 
           "Transaction Voided"
         );
@@ -676,7 +834,9 @@ export default function SalesPage() {
       </div>
 
       {activeTab === "pos" ? (
+        // POS Content
         <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
+          {/* Product Grid Section */}
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
             <div className="shrink-0 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
               <div className="flex gap-2 sm:gap-3">
@@ -744,8 +904,8 @@ export default function SalesPage() {
                         exit={{ opacity: 0, scale: 0.8 }}
                         transition={{ duration: 0.2 }}
                         onClick={() => {
-                          if (product.availableStock > 0) {
-                            addToCart(product);
+                          if ((product.availableStock ?? 0) > 0) {
+                            handleAddToCartClick(product);
                           } else {
                             showToastOnly(
                               `❌ ${product.name} is out of stock`,
@@ -754,7 +914,7 @@ export default function SalesPage() {
                           }
                         }}
                         className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${
-                          product.availableStock === 0 
+                          (product.availableStock ?? 0) === 0 
                             ? 'hover:shadow-none hover:border-gray-200' 
                             : 'hover:shadow-md hover:border-blue-300'
                         }`}
@@ -768,14 +928,14 @@ export default function SalesPage() {
                                 fill
                                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                                 className={`object-cover transition-all duration-300 ${
-                                  product.availableStock <= 0 ? 'opacity-50 grayscale' : ''
+                                  (product.availableStock ?? 0) <= 0 ? 'opacity-50 grayscale' : ''
                                 }`}
                                 priority={false}
                               />
                             </div>
                           ) : (
                             <div className={`w-full h-full ${product.imageColor} flex items-center justify-center transition-colors duration-300`}>
-                              <Glasses className={`opacity-20 ${product.availableStock <= 0 ? 'text-gray-500' : 'text-[#0B3C8A]'} w-1/3 h-1/3`} />
+                              <Glasses className={`opacity-20 ${(product.availableStock ?? 0) <= 0 ? 'text-gray-500' : 'text-[#0B3C8A]'} w-1/3 h-1/3`} />
                             </div>
                           )}
                           
@@ -784,12 +944,12 @@ export default function SalesPage() {
                           </div>
                           
                           <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end z-10">
-                            {product.availableStock <= product.reorderPoint && product.availableStock > 0 && (
+                            {(product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 && (
                               <span className="bg-orange-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                                 LOW
                               </span>
                             )}
-                            {product.availableStock <= 0 && (
+                            {(product.availableStock ?? 0) <= 0 && (
                               <span className="bg-red-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                                 OUT
                               </span>
@@ -820,9 +980,9 @@ export default function SalesPage() {
                           <div className="flex justify-between items-center">
                             <span className="text-[9px] sm:text-[10px] font-medium text-gray-500">Stock:</span>
                             <span className={`text-[11px] sm:text-xs font-bold ${
-                              product.availableStock <= product.reorderPoint && product.availableStock > 0 
+                              (product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 
                                 ? 'text-orange-600' 
-                                : product.availableStock <= 0 
+                                : (product.availableStock ?? 0) <= 0 
                                   ? 'text-red-600' 
                                   : 'text-gray-800'
                             }`}>
@@ -848,6 +1008,7 @@ export default function SalesPage() {
             </div>
           </div>
 
+          {/* Cart Section */}
           <div className="w-full lg:w-95 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 shrink-0 lg:min-h-0">
             <div className="shrink-0 p-2.5 sm:p-4 border-b border-gray-100 bg-slate-50 flex flex-col gap-2 sm:gap-3">
               <div className="flex items-center justify-between">
@@ -994,39 +1155,77 @@ export default function SalesPage() {
                   </div>
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase flex items-center gap-1">
+                    <Shield size={12} />
+                    Warranty (Optional)
+                  </label>
+                  <div className="space-y-1">
+                    <input
+                      type="date"
+                      value={warrantyStartDate}
+                      onChange={(e) => setWarrantyStartDate(e.target.value)}
+                      className="w-full px-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                    />
+                    <input
+                      type="date"
+                      value={warrantyEndDate}
+                      onChange={(e) => setWarrantyEndDate(e.target.value)}
+                      className="w-full px-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                    />
+                  </div>
+                </div>
+
+                {paymentMethod === "online" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="referenceNumber" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase flex items-center gap-1">
+                      <CreditCard size={12} />
+                      Reference Number
+                    </label>
+                    <input
+                      id="referenceNumber"
+                      type="text"
+                      placeholder="Enter transaction reference number"
+                      value={referenceNumber}
+                      onChange={(e) => setReferenceNumber(e.target.value)}
+                      className="w-full px-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+                    />
+                  </div>
+                )}
+
                 {paymentMethod === "cash" && (
                   <div className="space-y-1.5">
-                    <label htmlFor="amountGiven" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Given</label>
+                    <label htmlFor="amountReceive" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Receive</label>
                     <div className="relative">
                       <span className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm sm:text-base">₱</span>
                       <input
-                        id="amountGiven"
+                        id="amountReceive"
                         type="number"
                         inputMode="decimal"
                         placeholder={`${total.toLocaleString()}`}
-                        value={amountGiven}
-                        onChange={(e) => setAmountGiven(e.target.value)}
+                        value={amountReceive}
+                        onChange={(e) => setAmountReceive(e.target.value)}
                         className="w-full pl-6 sm:pl-8 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border-2 border-gray-300 text-sm sm:text-base font-bold focus:outline-none focus:border-[#0B3C8A] text-gray-800"
                       />
                     </div>
 
-                    {amountGiven && !isNaN(parseFloat(amountGiven)) && parseFloat(amountGiven) >= total && (
+                    {amountReceive && !isNaN(parseFloat(amountReceive)) && parseFloat(amountReceive) >= total && (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 sm:p-2.5">
                         <div className="flex justify-between items-center text-xs sm:text-sm">
                           <span className="font-semibold text-emerald-800">Change:</span>
                           <span className="font-bold text-emerald-600">
-                            ₱{(parseFloat(amountGiven) - total).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            ₱{(parseFloat(amountReceive) - total).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                           </span>
                         </div>
                       </div>
                     )}
 
-                    {amountGiven && !isNaN(parseFloat(amountGiven)) && parseFloat(amountGiven) < total && (
+                    {amountReceive && !isNaN(parseFloat(amountReceive)) && parseFloat(amountReceive) < total && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-2 sm:p-2.5">
                         <div className="flex justify-between items-center text-xs sm:text-sm">
                           <span className="font-semibold text-red-800">Short by:</span>
                           <span className="font-bold text-red-600">
-                            ₱{(total - parseFloat(amountGiven)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            ₱{(total - parseFloat(amountReceive)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                           </span>
                         </div>
                       </div>
@@ -1056,6 +1255,7 @@ export default function SalesPage() {
         </div>
 
       ) : (
+        // Transaction History Section
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(99vh-180px)]">
           <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200">
             <div className="mb-3 sm:mb-4">
@@ -1135,71 +1335,143 @@ export default function SalesPage() {
                       <th className="p-2 sm:p-3">Items</th>
                       <th className="p-2 sm:p-3 text-right">Amount</th>
                       <th className="p-2 sm:p-3 text-center">Payment</th>
+                      <th className="p-2 sm:p-3 text-center">Warranty</th>
                       <th className="p-2 sm:p-3 text-center">Sync</th>
                       <th className="p-2 sm:p-3 text-center">Status</th>
                       <th className="p-2 sm:p-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filteredTransactions.map(trx => (
-                      <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
-                        <td className="p-2 sm:p-3 text-gray-600">
-                          <div className="flex items-center gap-1">
-                            <Calendar size={12} className="text-gray-400" />
-                            {formatDate(trx.date)}
-                          </div>
-                         </td>
-                        <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-                        <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
-                        <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
-                        <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
-                          <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
-                            {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
-                          </div>
-                         </td>
-                        <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
-                        <td className="p-2 sm:p-3 text-center">
-                          <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
-                            trx.paymentMethod === 'cash' 
-                              ? 'bg-blue-100 text-blue-700' 
-                              : trx.paymentMethod === 'online'
-                              ? 'bg-purple-100 text-purple-700'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}>
-                            {trx.paymentMethod || 'N/A'}
-                          </span>
-                         </td>
-                        <td className="p-2 sm:p-3 text-center">
-                          {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
-                         </td>
-                        <td className="p-2 sm:p-3 text-center">
-                          <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                            {trx.status}
-                          </span>
-                         </td>
-                        <td className="p-2 sm:p-3 text-right">
-                          <div className="flex items-center justify-end gap-1 sm:gap-1.5">
-                            <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
-                              <Receipt size={14}/>
-                            </button>
-                            {trx.status === 'completed' && (
-                              <button onClick={() => { setTransactionToVoid(trx.id); setVoidModalOpen(true); }} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
-                                <X size={14}/>
-                              </button>
+                    {filteredTransactions.map(trx => {
+                      const warrantyValid = trx.status === 'completed' && isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
+                      return (
+                        <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
+                          <td className="p-2 sm:p-3 text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Calendar size={12} className="text-gray-400" />
+                              {formatDate(trx.date)}
+                            </div>
+                          </td>
+                          <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                          <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
+                          <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
+                          <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
+                            <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
+                              {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+                            </div>
+                          </td>
+                          <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+                          <td className="p-2 sm:p-3 text-center">
+                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
+                              trx.paymentMethod === 'cash' 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : trx.paymentMethod === 'online'
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {trx.paymentMethod || 'N/A'}
+                            </span>
+                            {trx.referenceNumber && trx.paymentMethod === 'online' && (
+                              <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
                             )}
-                          </div>
-                         </td>
-                       </tr>
-                    ))}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            {trx.warrantyStartDate && trx.warrantyEndDate ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <Shield size={12} className={warrantyValid ? "text-green-600" : "text-gray-400"} />
+                                <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-gray-500"}`}>
+                                  {warrantyValid ? "Active" : "Expired"}
+                                </span>
+                                <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-[8px]">None</span>
+                            )}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                              {trx.status}
+                            </span>
+                          </td>
+                          <td className="p-2 sm:p-3 text-right">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                              <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
+                                <Receipt size={14}/>
+                              </button>
+                              {trx.status === 'completed' && (
+                                <button onClick={() => openVoidModal(trx)} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
+                                  <X size={14}/>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
-                 </table>
+                </table>
               </div>
             )}
           </div>
         </motion.div>
       )}
 
+      {/* Add to Cart Confirmation Modal */}
+      <AnimatePresence>
+        {showAddToCartModal && pendingProduct && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }} 
+              className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center"
+            >
+              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-blue-600">
+                <ShoppingCart size={24} className="sm:w-6 sm:h-6" />
+              </div>
+              <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2">Add to Cart</h3>
+              <p className="text-xs sm:text-sm text-gray-600 mb-4">
+                Are you sure you want to add <span className="font-bold text-blue-600">{pendingProduct.name}</span> to your cart?
+              </p>
+              <div className="bg-gray-50 rounded-lg p-3 mb-4">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Price:</span>
+                  <span className="font-bold text-gray-800">₱{pendingProduct.markupPrice.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span className="text-gray-600">Available Stock:</span>
+                  <span className={`font-bold ${(pendingProduct.availableStock ?? 0) <= pendingProduct.reorderPoint ? 'text-orange-600' : 'text-gray-800'}`}>
+                    {pendingProduct.availableStock}
+                  </span>
+                </div>
+              </div>
+              <div className="flex gap-2 sm:gap-3">
+                <button 
+                  onClick={() => {
+                    setShowAddToCartModal(false);
+                    setPendingProduct(null);
+                  }} 
+                  className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmAddToCart} 
+                  className={`flex-1 px-3 sm:px-4 py-1.5 sm:py-2 ${THEME_BG} text-white rounded-lg text-xs sm:text-sm font-medium ${THEME_HOVER} transition-colors shadow-md`}
+                >
+                  Add to Cart
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Checkout Success Modal */}
       <AnimatePresence>
         {showCheckoutModal && lastTransaction && lastTransaction.id && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -1217,11 +1489,11 @@ export default function SalesPage() {
                     <span className="text-gray-600">Payment Method:</span>
                     <span className="font-semibold text-gray-800 uppercase">{lastTransaction.paymentMethod}</span>
                   </div>
-                  {lastTransaction.paymentMethod === 'cash' && lastTransaction.amountGiven !== undefined && (
+                  {lastTransaction.paymentMethod === 'cash' && lastTransaction.amountReceive !== undefined && (
                     <>
                       <div className="border-t border-gray-300 pt-2 flex justify-between">
                         <span className="text-gray-600">Cash:</span>
-                        <span className="font-semibold text-gray-800">₱{lastTransaction.amountGiven.toLocaleString()}</span>
+                        <span className="font-semibold text-gray-800">₱{lastTransaction.amountReceive.toLocaleString()}</span>
                       </div>
                       {lastTransaction.change !== undefined && lastTransaction.change > 0 && (
                         <div className="flex justify-between text-emerald-700 font-bold">
@@ -1231,6 +1503,15 @@ export default function SalesPage() {
                       )}
                     </>
                   )}
+                </div>
+              )}
+              
+              {lastTransaction.warrantyStartDate && lastTransaction.warrantyEndDate && (
+                <div className="bg-blue-50 rounded-lg p-3 mb-5 sm:mb-6 border border-blue-200">
+                  <div className="flex items-center justify-center gap-2 text-blue-700">
+                    <Shield size={14} />
+                    <span className="text-xs font-semibold">Warranty: {formatWarrantyRange(lastTransaction.warrantyStartDate, lastTransaction.warrantyEndDate)}</span>
+                  </div>
                 </div>
               )}
               
@@ -1247,24 +1528,72 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
+      {/* Void Transaction Confirmation Modal with Reason */}
       <AnimatePresence>
-        {voidModalOpen && (
+        {voidModalOpen && transactionToVoid && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-red-600">
-                <AlertTriangle size={20} className="sm:w-6 sm:h-6" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-xl shadow-2xl p-5 sm:p-6 w-full max-w-md">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-red-600">
+                <AlertTriangle size={24} className="sm:w-6 sm:h-6" />
               </div>
-              <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-1 sm:mb-2">Refund Transaction?</h3>
-              <p className="text-[11px] sm:text-xs text-gray-500 mb-5 sm:mb-6">Are you sure you want to void receipt <span className="font-mono font-bold text-gray-700">{transactionToVoid?.slice(-8).toUpperCase()}</span>? This will record the sale as refunded and instantly return the items to stock.</p>
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-2 text-center">Refund Transaction?</h3>
+              
+              {warrantyWarning.show && warrantyWarning.transaction && (
+                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <Clock size={16} className="text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-yellow-800">
+                      <p className="font-semibold mb-1">Warranty Warning!</p>
+                      <p>{warrantyWarning.message}</p>
+                      <p className="mt-1 text-yellow-700">Are you sure you want to proceed?</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <p className="text-[11px] sm:text-xs text-gray-500 mb-4">
+                Are you sure you want to void receipt <span className="font-mono font-bold text-gray-700">{transactionToVoid.slice(-8).toUpperCase()}</span>? 
+                This will record the sale as refunded and instantly return the items to stock.
+              </p>
+              
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Reason for Void/Refund <span className="text-gray-400">(Optional)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Please provide a reason for voiding this transaction..."
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-700 placeholder-gray-400 resize-none"
+                />
+              </div>
+              
               <div className="flex gap-2 sm:gap-3">
-                <button onClick={() => setVoidModalOpen(false)} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm font-medium hover:bg-gray-50">Cancel</button>
-                <button onClick={handleVoid} className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 bg-red-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-red-700 shadow-md">Void & Refund</button>
+                <button 
+                  onClick={() => {
+                    setVoidModalOpen(false);
+                    setTransactionToVoid(null);
+                    setVoidReason("");
+                    setWarrantyWarning({ show: false, message: "", transaction: null });
+                  }} 
+                  className="flex-1 px-3 sm:px-4 py-2 border border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleVoid} 
+                  className="flex-1 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-red-700 transition-colors shadow-md"
+                >
+                  Confirm Void & Refund
+                </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
+      {/* QR Scanner Modal */}
       <AnimatePresence>
         {isQRScannerOpen && (
           <QRScannerModal
@@ -1274,11 +1603,68 @@ export default function SalesPage() {
             onProductFound={(productId) => {
               const product = productsWithAvailableStock.find(p => p.id === productId);
               if (product) {
-                addToCart(product);
+                handleAddToCartClick(product);
                 setIsQRScannerOpen(false);
               }
             }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Online Payment Confirmation Modal */}
+      <AnimatePresence>
+        {showOnlineConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 space-y-4"
+            >
+              <div className="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full">
+                <CreditCard className="w-6 h-6 text-[#0B3C8A]" />
+              </div>
+              
+              <div className="space-y-2 text-center">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">Confirm Online Payment</h3>
+                <p className="text-sm text-gray-600">Are you sure you want to complete this online payment?</p>
+              </div>
+
+              <div className="bg-slate-50 rounded-lg p-4 space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Customer Name:</span>
+                  <span className="font-semibold text-gray-900">{patientName || "Walk-in Patient"}</span>
+                </div>
+                {referenceNumber && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Reference Number:</span>
+                    <span className="font-mono font-semibold text-gray-900">{referenceNumber}</span>
+                  </div>
+                )}
+                <div className="border-t border-gray-200 pt-2.5">
+                  <div className="flex justify-between text-base">
+                    <span className="font-semibold text-gray-900">Total Amount:</span>
+                    <span className="font-bold text-[#0B3C8A]">₱{total.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  onClick={() => setShowOnlineConfirm(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm sm:text-base font-medium hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmOnlinePayment}
+                  className="flex-1 px-4 py-2 bg-[#0B3C8A] text-white rounded-lg text-sm sm:text-base font-medium hover:bg-[#0a2f6a] transition-colors shadow-md"
+                >
+                  Confirm Payment
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

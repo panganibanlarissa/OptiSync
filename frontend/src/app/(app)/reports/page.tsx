@@ -34,6 +34,7 @@ interface TransactionType {
   total: number;
   date: Date;
   status: "completed" | "voided";
+  paymentMethod?: "cash" | "online";
 }
 
 // Helper function to safely get date from Firestore Timestamp
@@ -230,7 +231,7 @@ export default function ReportsPage() {
     autoTable(doc, {
       startY: 40,
       margin: { top: 40, right: 14, left: 14, bottom: 20 },
-      head: [['Receipt No', 'Date', 'Staff', 'Patient Name', 'Items', 'Status', 'Amount (PHP)']],
+      head: [['Receipt No', 'Date', 'Staff', 'Patient Name', 'Items', 'Payment Method', 'Status', 'Amount (PHP)']],
       body: filteredTransactions.map(t => {
         const itemsStr = t.items.map(i => `${i.quantity}x ${i.name}`).join(', ');
         return [
@@ -239,6 +240,7 @@ export default function ReportsPage() {
           t.staffName || 'N/A',
           t.patientName, 
           itemsStr,
+          t.paymentMethod ? t.paymentMethod.toUpperCase() : 'N/A',
           t.status.toUpperCase(),
           t.total.toLocaleString()
         ];

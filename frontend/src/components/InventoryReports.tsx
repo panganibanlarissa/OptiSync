@@ -85,7 +85,7 @@ export default function InventoryReports({
     stockStatus: "all",
     priceRange: { min: 0, max: 999999 },
     searchQuery: "",
-    dateRange: { 
+    dateRange: {
       startDate: "",  // Reset to empty (no date filter)
       endDate: ""     // Reset to empty (no date filter)
     },
@@ -130,7 +130,7 @@ export default function InventoryReports({
     stockStatus: "all",
     priceRange: { min: 0, max: 999999 },
     searchQuery: "",
-    dateRange: { 
+    dateRange: {
       startDate:  "",
       endDate:  ""
     },
@@ -701,18 +701,6 @@ export default function InventoryReports({
               <span className="hidden sm:inline">Add Product</span>
               <span className="sm:hidden">Add</span>
             </button>
-            
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 border border-gray-300 bg-white text-gray-700 px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-gray-50 whitespace-nowrap"
-            >
-              <Filter size={14} />
-              <span>Filters</span>
-              <ChevronDown
-                size={12}
-                className={`transition-transform ${showFilters ? "rotate-180" : ""}`}
-              />
-            </button>
 
             {userRole === 'admin' && (
               <>
@@ -746,123 +734,184 @@ export default function InventoryReports({
             )}
           </div>
         </div>
+      </div>
 
-        {/* Filters Panel */}
+      {/* Search and Filters Section */}
+      <div className="shrink-0 px-3 sm:px-5 pt-3 sm:pt-4 bg-slate-50 border-b border-gray-100">
+        {/* Search input with Filters button integrated */}
+        <div className="relative mb-3">
+          <div className="flex items-stretch">
+            <div className="relative flex-grow">
+              <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+              <input
+                type="text"
+                placeholder="Search SKU or Item..."
+                value={effectiveSearchQuery}
+                onChange={(e) => {
+                  if (setSearchQuery) setSearchQuery(e.target.value);
+                  else handleFilterChange("searchQuery", e.target.value);
+                }}
+                className="w-full pl-8 sm:pl-9 pr-20 sm:pr-24 py-1.5 sm:py-2 rounded-l-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400"
+              />
+              {effectiveSearchQuery && (
+                <button
+                  onClick={() => {
+                    if (setSearchQuery) setSearchQuery("");
+                    else handleFilterChange("searchQuery", "");
+                  }}
+                  className="absolute right-12 sm:right-14 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setLocalScannerMode("search");
+                  setShowLocalScanner(true);
+                }}
+                className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0B3C8A] transition-colors p-1"
+                title="Scan QR code to search product"
+              >
+                <QrCode size={14} />
+              </button>
+            </div>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 border border-l-0 border-gray-300 rounded-r-md text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                showFilters 
+                  ? "bg-[#0B3C8A] text-white border-[#0B3C8A]" 
+                  : "bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <Filter size={14} />
+              <span>Filters</span>
+              <ChevronDown
+                size={12}
+                className={`transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Filters Panel - opens below the search bar */}
         {showFilters && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3"
+            className="mb-3 pb-3"
           >
-            {/* Category Filter */}
-            <div>
-              <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                Category
-              </label>
-              <select
-                value={filters.category}
-                onChange={(e) => handleFilterChange("category", e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
-              >
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              {/* Category Filter */}
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                  Category
+                </label>
+                <select
+                  value={filters.category}
+                  onChange={(e) => handleFilterChange("category", e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
+                >
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
                 </select>
-            </div>
+              </div>
 
-            {/* Stock Status Filter */}
-            <div>
-              <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                Stock Status
-              </label>
-              <select
-                value={filters.stockStatus}
-                onChange={(e) => handleFilterChange("stockStatus", e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
-              >
-                <option value="all">All Status</option>
-                <option value="healthy">Healthy Stock</option>
-                <option value="low">Low Stock</option>
-                <option value="out">Out of Stock</option>
-              </select>
-            </div>
+              {/* Stock Status Filter */}
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                  Stock Status
+                </label>
+                <select
+                  value={filters.stockStatus}
+                  onChange={(e) => handleFilterChange("stockStatus", e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
+                >
+                  <option value="all">All Status</option>
+                  <option value="healthy">Healthy Stock</option>
+                  <option value="low">Low Stock</option>
+                  <option value="out">Out of Stock</option>
+                </select>
+              </div>
 
-            {/* Price Range Filter */}
-            <div>
-              <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                Price Range
-              </label>
-              <div className="flex gap-2">
+              {/* Price Range Filter */}
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                  Price Range
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    placeholder="Min"
+                    value={minPrice}
+                    onChange={(e) => setMinPrice(e.target.value)}
+                    onBlur={handlePriceRangeChange}
+                    onKeyDown={handlePriceKeyDown}
+                    className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Max"
+                    value={maxPrice}
+                    onChange={(e) => setMaxPrice(e.target.value)}
+                    onBlur={handlePriceRangeChange}
+                    onKeyDown={handlePriceKeyDown}
+                    className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                  />
+                </div>
+              </div>
+
+              {/* Date Range Filter */}
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                  Start Date
+                </label>
                 <input
-                  type="number"
-                  placeholder="Min"
-                  value={minPrice}
-                  onChange={(e) => setMinPrice(e.target.value)}
-                  onBlur={handlePriceRangeChange}
-                  onKeyDown={handlePriceKeyDown}
-                  className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
-                />
-                <input
-                  type="number"
-                  placeholder="Max"
-                  value={maxPrice}
-                  onChange={(e) => setMaxPrice(e.target.value)}
-                  onBlur={handlePriceRangeChange}
-                  onKeyDown={handlePriceKeyDown}
-                  className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                  type="date"
+                  value={filters.dateRange.startDate}
+                  onChange={(e) =>
+                    handleFilterChange("dateRange", {
+                      ...filters.dateRange,
+                      startDate: e.target.value,
+                    })
+                  }
+                  onKeyDown={handleDateKeyDown}
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
                 />
               </div>
-            </div>
 
-            {/* Date Range Filter */}
-            <div>
-              <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                Start Date
-              </label>
-              <input
-                type="date"
-                value={filters.dateRange.startDate}
-                onChange={(e) =>
-                  handleFilterChange("dateRange", {
-                    ...filters.dateRange,
-                    startDate: e.target.value,
-                  })
-                }
-                onKeyDown={handleDateKeyDown}
-                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
-              />
-            </div>
+              {/* End Date Filter */}
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={filters.dateRange.endDate}
+                  onChange={(e) =>
+                    handleFilterChange("dateRange", {
+                      ...filters.dateRange,
+                      endDate: e.target.value,
+                    })
+                  }
+                  onKeyDown={handleDateKeyDown}
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                />
+              </div>
 
-            {/* End Date Filter */}
-            <div>
-              <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                End Date
-              </label>
-              <input
-                type="date"
-                value={filters.dateRange.endDate}
-                onChange={(e) =>
-                  handleFilterChange("dateRange", {
-                    ...filters.dateRange,
-                    endDate: e.target.value,
-                  })
-                }
-                onKeyDown={handleDateKeyDown}
-                className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
-              />
-            </div>
-
-            {/* Reset Button */}
-            <div className="flex items-end">
-              <button
-                onClick={resetFilters}
-                className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-              >
-                Reset Filters
-              </button>
+              {/* Reset Button */}
+              <div className="flex items-end">
+                <button
+                  onClick={resetFilters}
+                  className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Reset Filters
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -870,44 +919,6 @@ export default function InventoryReports({
 
       {/* Results Summary and Table */}
       <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
-        {/* Search placed above summary cards */}
-        <div className="mb-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-            <input
-              type="text"
-              placeholder="Search SKU or Item..."
-              value={effectiveSearchQuery}
-              onChange={(e) => {
-                if (setSearchQuery) setSearchQuery(e.target.value);
-                else handleFilterChange("searchQuery", e.target.value);
-              }}
-              className="w-full pl-8 sm:pl-9 pr-20 sm:pr-24 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400"
-            />
-            {effectiveSearchQuery && (
-              <button
-                onClick={() => {
-                  if (setSearchQuery) setSearchQuery("");
-                  else handleFilterChange("searchQuery", "");
-                }}
-                className="absolute right-12 sm:right-14 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
-                title="Clear search"
-              >
-                <X size={14} />
-              </button>
-            )}
-            <button
-              onClick={() => {
-                setLocalScannerMode("search");
-                setShowLocalScanner(true);
-              }}
-              className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0B3C8A] transition-colors p-1"
-              title="Scan QR code to search product"
-            >
-              <QrCode size={14} />
-            </button>
-          </div>
-        </div>
         {/* Summary Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
           <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">

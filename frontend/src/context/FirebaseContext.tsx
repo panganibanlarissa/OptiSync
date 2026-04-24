@@ -98,7 +98,21 @@ export interface Transaction {
   date: Date;
   status: "completed" | "voided";
   items: any[];
+  patientName?: string;
+  paymentMethod?: "cash" | "online";
+  amountReceive?: number;
+  change?: number;
+  warrantyStartDate?: Date | string;
+  warrantyEndDate?: Date | string;
+  referenceNumber?: string;
+  synced?: boolean;
+  staffName?: string;
+  staffId?: string;
+  voidReason?: string;
+  voidedAt?: Date;
+  voidedBy?: string;
   createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface StaffUser {
@@ -513,7 +527,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         return {
           id: d.id,
           ...rawData,
-          date: rawData.date?.toDate() || new Date()
+          date: rawData.date?.toDate() || new Date(),
+          warrantyStartDate: rawData.warrantyStartDate?.toDate?.() || rawData.warrantyStartDate,
+          warrantyEndDate: rawData.warrantyEndDate?.toDate?.() || rawData.warrantyEndDate
         };
       }) as Transaction[];
 
@@ -556,7 +572,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const fetchedTransactions = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
-        date: d.data().date?.toDate() || new Date()
+        date: d.data().date?.toDate() || new Date(),
+        warrantyStartDate: d.data().warrantyStartDate?.toDate?.() || d.data().warrantyStartDate,
+        warrantyEndDate: d.data().warrantyEndDate?.toDate?.() || d.data().warrantyEndDate
       })) as Transaction[];
 
       setTransactions(fetchedTransactions);
