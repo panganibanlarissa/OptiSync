@@ -197,6 +197,18 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
+  const todayTransactionCount = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return completedTransactions
+      .filter((t: any) => {
+        const transDate = new Date(t.date);
+        transDate.setHours(0, 0, 0, 0);
+        return transDate.getTime() === today.getTime();
+      }).length;
+  }, [completedTransactions]);
+
   const getDateFromTimestamp = (timestamp: any): Date | null => {
     if (!timestamp) return null;
     
@@ -404,11 +416,11 @@ export default function AdminDashboard() {
         trendType: "positive",
       },
       {
-        id: "low_stock",
-        label: "Low-Stock Items",
-        value: lowStockCount,
-        trend: lowStockCount > 0 ? "Action Needed" : "All Good",
-        trendType: lowStockCount > 0 ? "negative" : "positive",
+        id: "transaction_count",
+        label: "Today's Transactions",
+        value: todayTransactionCount,
+        trend: todayTransactionCount > 0 ? "Active" : "No Sales",
+        trendType: todayTransactionCount > 0 ? "positive" : "neutral",
       },
       {
         id: "gross_profit",
@@ -425,7 +437,7 @@ export default function AdminDashboard() {
         trendType: parseFloat(revenueTrend) >= 0 ? "positive" : "negative",
       },
     ];
-  }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
+  }, [todaySales, grossProfit, totalRevenue, todayTransactionCount, revenueTrend]);
 
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
@@ -671,10 +683,10 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">
-                      Low Stock Alerts
+                      Low Stock Items
                     </h2>
                     <p className="text-xs font-medium text-orange-600">
-                      Items below reorder point
+                      Products below reorder point
                     </p>
                   </div>
                 </div>
@@ -753,7 +765,7 @@ export default function AdminDashboard() {
                       Deadstock Items
                     </h2>
                     <p className="text-xs font-medium text-red-600">
-                      Items without sales (30+ days)
+                      Products without sales (30+ days)
                     </p>
                   </div>
                 </div>

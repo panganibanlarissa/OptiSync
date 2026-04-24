@@ -706,7 +706,7 @@ export default function InventoryReports({
               <>
                 <button
                   onClick={() => setShowArchiveList(true)}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-gray-300 bg-white text-gray-700 px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-gray-50 whitespace-nowrap"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-gray-50 whitespace-nowrap"
                 >
                   Archive List
                 </button>
