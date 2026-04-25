@@ -667,7 +667,7 @@ export default function InventoryReports({
             </div>
             <div>
               <h2 className="text-sm sm:text-lg font-bold text-gray-800 leading-tight">
-                Inventory List
+                Inventory
               </h2>
               <p className="text-[9px] sm:text-[11px] text-gray-500">
                 Browse and manage inventory items.
@@ -697,7 +697,7 @@ export default function InventoryReports({
               onClick={() => setAddingProduct({
                 sku: "",
                 name: "",
-                category: "Frames",
+                category: "",
                 specifications: "",
                 baseCost: 0,
                 markupPrice: 0,
@@ -706,13 +706,13 @@ export default function InventoryReports({
                 lastMovedDaysAgo: 0,
                 imageColor: "bg-slate-100",
                 image: null,
-                leadTimeDays: 7,
-                reorderPoint: 10,
+                leadTimeDays: 0,
+                reorderPoint: 0,
               })}
               className="flex items-center justify-center gap-1.5 sm:gap-2 bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-1 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
             >
               <span className="text-lg font-bold mr-1">+</span>
-              <span className="hidden sm:inline">Add Product</span>
+              <span className="hidden sm:inline">Add New Product</span>
               <span className="sm:hidden">Add</span>
             </button>
 
@@ -845,7 +845,7 @@ export default function InventoryReports({
                   <option value="healthy">Healthy Stock</option>
                   <option value="low">Low Stock</option>
                   <option value="out">Out of Stock</option>
-                  <option value="deadstock">Deadstock (30+ days unsold)</option>
+                  <option value="deadstock">Deadstock</option>
                 </select>
               </div>
 
@@ -888,7 +888,7 @@ export default function InventoryReports({
               <div className="flex items-end">
                 <button
                   onClick={resetFilters}
-                  className="w-full px-2.5 py-1.5 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 >
                   Reset Filters
                 </button>

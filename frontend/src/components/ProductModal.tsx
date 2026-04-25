@@ -419,6 +419,7 @@ export default function ProductModal({
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Category</label>
                 <select required name="category" value={formData.category} onChange={handleChange} className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700">
+                  <option value="" disabled>Select a category</option>
                   <option>Frames</option>
                   <option>Lenses</option>
                   <option>Contact Lenses</option>
@@ -457,11 +458,11 @@ export default function ProductModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Reorder Point</label>
-                <input name="reorderPoint" value={formData.reorderPoint || 10} onChange={handleChange} type="number" min="1" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
+                <input name="reorderPoint" value={formData.reorderPoint || ''} onChange={handleChange} type="number" min="0" placeholder="10" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700 placeholder-gray-400" />
               </div>
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">Lead Time (Days)</label>
-                <input name="leadTimeDays" value={formData.leadTimeDays || 7} onChange={handleChange} type="number" min="1" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" />
+                <input name="leadTimeDays" value={formData.leadTimeDays || ''} onChange={handleChange} type="number" min="0" placeholder="7" className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-[11px] sm:text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700 placeholder-gray-400" />
               </div>
             </div>
 

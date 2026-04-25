@@ -86,6 +86,7 @@ export interface Product {
   manufacturingDate?: Date;
   totalSold?: number;
   damageExchanged?: number;
+  restockCount?: number;
   deleted?: boolean;
   archived?: boolean;
   createdAt?: Timestamp;
@@ -943,11 +944,24 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
                                     reason?.toLowerCase().includes('exchange') ||
                                     reason?.toLowerCase().includes('return');
 
+        // Check if the adjustment is for restocking (stock increased)
+        const isRestock = !isDamageOrExchange && stockDifference > 0 && 
+                         (reason?.toLowerCase().includes('restock') ||
+                          reason?.toLowerCase().includes('qr scan') ||
+                          reason?.toLowerCase().includes('received'));
+
         if (isDamageOrExchange && stockDifference < 0) {
           const itemsRemoved = Math.abs(stockDifference);
           const currentDamageExchanged = currentProduct.damageExchanged || 0;
           updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
           console.log(`📝 Damage/Exchange recorded: +${itemsRemoved} units (total: ${currentDamageExchanged + itemsRemoved})`);
+        }
+
+        if (isRestock) {
+          const unitsAdded = stockDifference;
+          const currentRestockCount = currentProduct.restockCount || 0;
+          updateData.restockCount = currentRestockCount + unitsAdded;
+          console.log(`📦 Restock recorded: +${unitsAdded} units added (total: ${currentRestockCount + unitsAdded})`);
         }
 
         await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
@@ -972,6 +986,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
                 ...p,
                 stock: newStock,
                 damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged) ?? p.damageExchanged,
+                restockCount: (appliedUpdateData && appliedUpdateData.restockCount) ?? p.restockCount,
               }
             : p
         )
@@ -1032,22 +1047,28 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         if (productSnap.exists()) {
           const productData = productSnap.data();
           const currentStock = productData.stock || 0;
+          const currentTotalSold = productData.totalSold || 0;
+          const currentDamageExchanged = productData.damageExchanged || 0;
           
           if (isDamagedReturn) {
-            // For damaged returns: DO NOT return to stock, instead update damageExchanged
-            const currentDamage = productData.damageExchanged || 0;
+            // For damaged returns: 
+            // - Subtract from totalSold (undo the sale)
+            // - Add to damageExchanged (mark as damaged returned)
+            // - DO NOT return to stock (it stays out as it's damaged)
             await updateDoc(productRef, {
-              damageExchanged: currentDamage + item.quantity,
+              totalSold: Math.max(0, currentTotalSold - item.quantity),
+              damageExchanged: currentDamageExchanged + item.quantity,
               updatedAt: serverTimestamp()
             });
-            console.log(`📝 Damaged return recorded: +${item.quantity} units to damageExchanged for ${productData.name}`);
+            console.log(`📝 Damaged return recorded: -${item.quantity} from totalSold, +${item.quantity} to damageExchanged for ${productData.name}`);
           } else {
-            // For normal returns: return items to stock
+            // For normal returns: return items to stock and subtract from totalSold
             await updateDoc(productRef, {
               stock: currentStock + item.quantity,
+              totalSold: Math.max(0, currentTotalSold - item.quantity),
               updatedAt: serverTimestamp()
             });
-            console.log(`📝 Stock returned: +${item.quantity} units to ${productData.name}`);
+            console.log(`📝 Stock returned: +${item.quantity} units to ${productData.name}, -${item.quantity} from totalSold`);
           }
         }
       }

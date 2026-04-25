@@ -554,30 +554,38 @@ export default function SalesPage() {
     }
   };
 
+  const [showCashConfirm, setShowCashConfirm] = useState(false);
+
   const handleCheckout = async () => {
-    if (cart.length === 0) {
-      showToastOnly("Cart is empty", "error");
+  if (cart.length === 0) {
+    showToastOnly("Cart is empty", "error");
+    return;
+  }
+
+  if (paymentMethod === "cash") {
+    if (!amountReceive.trim()) {
+      showToastOnly("Please enter the amount receive", "error");
       return;
     }
 
-    let parsedAmountReceive: number | undefined = undefined;
-
-    if (paymentMethod === "cash") {
-      if (!amountReceive.trim()) {
-        showToastOnly("Please enter the amount receive", "error");
-        return;
-      }
-
-      parsedAmountReceive = parseFloat(amountReceive);
+    const parsedAmountReceive = parseFloat(amountReceive);
       if (isNaN(parsedAmountReceive) || parsedAmountReceive < total) {
         showToastOnly("Amount receive must be at least ₱" + total.toLocaleString(), "error");
         return;
       }
 
-      await processCheckout("cash", parsedAmountReceive);
-    } else if (paymentMethod === "online") {
-      setShowOnlineConfirm(true);
-    }
+        // Show confirmation modal for cash payments
+        setShowCashConfirm(true);
+      } else if (paymentMethod === "online") {
+        setShowOnlineConfirm(true);
+      }
+    };
+
+  // Add this new function to handle confirmed cash payment
+  const handleConfirmCashPayment = async () => {
+    setShowCashConfirm(false);
+    const parsedAmountReceive = parseFloat(amountReceive);
+    await processCheckout("cash", parsedAmountReceive);
   };
 
   const handleConfirmOnlinePayment = async () => {
@@ -1719,6 +1727,65 @@ export default function SalesPage() {
                   className="flex-1 px-4 py-2 bg-[#0B3C8A] text-white rounded-lg text-sm sm:text-base font-medium hover:bg-[#0a2f6a] transition-colors shadow-md"
                 >
                   Confirm Payment
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cash Payment Confirmation Modal */}
+      <AnimatePresence>
+        {showCashConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 space-y-4"
+            >
+              <div className="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full">
+                <Banknote className="w-6 h-6 text-[#0B3C8A]" />
+              </div>
+              
+              <div className="space-y-2 text-center">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900">Confirm Transaction</h3>
+                <p className="text-sm text-gray-600">Are you sure you want to complete this transaction?</p>
+              </div>
+
+              <div className="bg-slate-50 rounded-lg p-4 space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Customer Name:</span>
+                  <span className="font-semibold text-gray-900">{patientName || "Walk-in Patient"}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Payment Method:</span>
+                  <span className="font-semibold text-gray-900 uppercase">Cash</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Amount Receive:</span>
+                  <span className="font-semibold text-gray-900">₱{parseFloat(amountReceive).toLocaleString()}</span>
+                </div>
+                <div className="border-t border-gray-200 pt-2.5">
+                  <div className="flex justify-between text-base">
+                    <span className="font-semibold text-gray-900">Change:</span>
+                    <span className="font-bold text-[#0B3C8A]">₱{(parseFloat(amountReceive) - total).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  onClick={() => setShowCashConfirm(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg text-sm sm:text-base font-medium hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmCashPayment}
+                  className="flex-1 px-4 py-2 bg-[#0B3C8A] text-white rounded-lg text-sm sm:text-base font-medium hover:bg-[#0a2f6a] transition-colors shadow-md"
+                >
+                  Confirm
                 </button>
               </div>
             </motion.div>
