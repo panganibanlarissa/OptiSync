@@ -70,7 +70,6 @@ interface LowStockItem {
   name: string;
   category: string;
   currentStock: number;
-  reorderPoint: number;
   status: 'critical' | 'low';
 }
 
@@ -198,7 +197,6 @@ export default function StaffDashboard() {
         name: p.name,
         category: p.category,
         currentStock: p.stock,
-        reorderPoint: p.reorderPoint,
         status: p.stock === 0 ? 'critical' as const : 'low' as const
       }));
   }, [products]);
@@ -246,11 +244,12 @@ export default function StaffDashboard() {
         variants={containerVariants}
         className="min-h-screen bg-gray-50 p-4 space-y-4"
       >
-        {/* SCANNER BUTTONS - Quick Warehouse Operations */}
+        {/* SCANNER BUTTONS - Quick Warehouse Operations - Updated Colors */}
         <motion.div
           variants={itemVariants}
           className="grid grid-cols-2 gap-4"
         >
+          {/* Scan In Button - Changed to Blue theme */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -258,18 +257,19 @@ export default function StaffDashboard() {
               setScanMode('in');
               setIsQRScannerOpen(true);
             }}
-            className="bg-green-500 hover:bg-green-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
+            className="bg-gradient-to-r from-[#0B3C8A] to-blue-600 hover:from-[#082F6E] hover:to-blue-700 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
           >
-            <div className="p-4 bg-white/30 rounded-full">
+            <div className="p-4 bg-white/20 rounded-full backdrop-blur-sm">
               <ArrowUp className="text-white w-8 h-8" strokeWidth={2.5} />
             </div>
             <div className="text-center">
               <p className="font-bold text-lg text-white leading-tight">Scan In</p>
-              <p className="text-white/90 text-xs mt-0.5">Receive Stock</p>
+              <p className="text-white/80 text-xs mt-0.5">Receive Stock</p>
             </div>
-            <QrCode className="w-5 h-5 text-white/50 absolute top-2 right-2 opacity-60" />
+            <QrCode className="w-5 h-5 text-white/40 absolute top-2 right-2 opacity-60" />
           </motion.button>
 
+          {/* Scan Out Button - Changed to Orange/Amber theme */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -277,16 +277,16 @@ export default function StaffDashboard() {
               setScanMode('out');
               setIsQRScannerOpen(true);
             }}
-            className="bg-red-500 hover:bg-red-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
+            className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
           >
-            <div className="p-4 bg-white/30 rounded-full">
+            <div className="p-4 bg-white/20 rounded-full backdrop-blur-sm">
               <ArrowDown className="text-white w-8 h-8" strokeWidth={2.5} />
             </div>
             <div className="text-center">
               <p className="font-bold text-lg text-white leading-tight">Scan Out</p>
-              <p className="text-white/90 text-xs mt-0.5">Dispatch Stock</p>
+              <p className="text-white/80 text-xs mt-0.5">Dispatch Stock</p>
             </div>
-            <QrCode className="w-5 h-5 text-white/50 absolute top-2 right-2 opacity-60" />
+            <QrCode className="w-5 h-5 text-white/40 absolute top-2 right-2 opacity-60" />
           </motion.button>
         </motion.div>
 
@@ -417,7 +417,7 @@ export default function StaffDashboard() {
             <div className="mt-8"></div>
           </motion.div>
 
-          {/* LOW STOCK ALERTS - Show first 3 items */}
+          {/* LOW STOCK ALERTS - Show first 3 items - Removed reorder point */}
           <motion.div
             variants={itemVariants}
             className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -472,15 +472,9 @@ export default function StaffDashboard() {
                         {item.status === 'critical' ? 'OUT' : 'LOW'}
                       </span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <div>
-                        <p className="text-gray-500 text-xs">Current</p>
-                        <p className="font-bold text-gray-900">{item.currentStock} units</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-gray-500 text-xs">Reorder Point</p>
-                        <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
-                      </div>
+                    <div>
+                      <p className="text-gray-500 text-xs">Current Stock</p>
+                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
                     </div>
                   </motion.div>
                 ))}
@@ -630,7 +624,7 @@ export default function StaffDashboard() {
         </motion.div>
       </motion.div>
 
-      {/* Low Stock Modal */}
+      {/* Low Stock Modal - Removed reorder point */}
       <AnimatePresence>
         {showLowStockModal && (
           <Modal
@@ -653,15 +647,9 @@ export default function StaffDashboard() {
                       {item.status === 'critical' ? 'OUT' : 'LOW'}
                     </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <div>
-                      <p className="text-gray-500 text-xs">Current</p>
-                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-500 text-xs">Reorder Point</p>
-                      <p className="font-bold text-gray-900">{item.reorderPoint} units</p>
-                    </div>
+                  <div>
+                    <p className="text-gray-500 text-xs">Current Stock</p>
+                    <p className="font-bold text-gray-900">{item.currentStock} units</p>
                   </div>
                 </div>
               ))}

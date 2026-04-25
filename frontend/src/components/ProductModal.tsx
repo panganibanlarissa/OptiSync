@@ -69,6 +69,10 @@ export default function ProductModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showNotification, showToastOnly } = useNotification();
 
+  // Stock adjustment specific state
+  const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
+
   const isPerishable = formData.category === "Solutions" || formData.category === "Contact Lenses";
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -145,11 +149,11 @@ export default function ProductModal({
           
           console.log('Image upload successful:', imageUrl);
           showToastOnly('Image uploaded successfully', 'success');
-        } catch (uploadError) {
-          console.error('Image upload failed:', uploadError);
-          const errorMessage = uploadError instanceof Error ? uploadError.message : 'Image upload failed';
-          setUploadError(errorMessage);
-          showNotification(errorMessage, 'error');
+        } catch (uploadErr) {
+          console.error('Image upload failed:', uploadErr);
+          const uploadErrorMessage = uploadErr instanceof Error ? uploadErr.message : 'Image upload failed';
+          setUploadError(uploadErrorMessage);
+          showNotification(uploadErrorMessage, 'error');
           setUploading(false);
           return; // Stop here if image upload fails
         }
@@ -192,6 +196,41 @@ export default function ProductModal({
     onClose();
   };
 
+  const handleAdjustStockSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (adjustmentQuantity <= 0) {
+      showToastOnly("Quantity must be greater than 0", "error");
+      return;
+    }
+    
+    let newStock: number;
+    let reason: string;
+    
+    if (adjustmentType === "restock") {
+      // Restock: Add quantity to current stock
+      newStock = product.stock + adjustmentQuantity;
+      reason = `Restock: +${adjustmentQuantity} units added to inventory`;
+    } else {
+      // Damaged: Subtract quantity from current stock
+      if (adjustmentQuantity > product.stock) {
+        showToastOnly(`Cannot mark ${adjustmentQuantity} units as damaged. Only ${product.stock} units in stock.`, "error");
+        return;
+      }
+      newStock = product.stock - adjustmentQuantity;
+      reason = `Damaged Item: -${adjustmentQuantity} units marked as damaged and removed from inventory`;
+    }
+    
+    // Call onSave with the new stock value and reason
+    const dataToSave = {
+      ...product,
+      stock: newStock,
+      adjustmentReason: reason
+    };
+    
+    onSave(dataToSave);
+  };
+
   if (mode === 'adjust') {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -208,53 +247,97 @@ export default function ProductModal({
               <X size={16} className="text-gray-500 sm:w-5 sm:h-5" />
             </button>
           </div>
+          
           <div className="p-4 sm:p-5">
-            <p className="text-xs sm:text-sm font-semibold text-gray-800 mb-0.5 sm:mb-1">{formData.name}</p>
-            <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 font-mono">SKU: {formData.sku}</p>
-            {formData.batchNumber && (
-              <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 flex items-center gap-1">
-                <PackageIcon size={10} /> Batch: {formData.batchNumber}
+            <p className="text-xs sm:text-sm font-semibold text-gray-800 mb-0.5 sm:mb-1">{product.name}</p>
+            <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 font-mono">SKU: {product.sku}</p>
+            <p className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-4">
+              Current Stock: <span className="font-bold text-gray-800">{product.stock} units</span>
+            </p>
+            
+            {product.batchNumber && (
+              <p className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-4 flex items-center gap-1">
+                <PackageIcon size={10} /> Batch: {product.batchNumber}
               </p>
             )}
-            <form id="stock-form" onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+            
+            <form id="stock-adjustment-form" onSubmit={handleAdjustStockSubmit} className="space-y-4">
+              {/* Adjustment Type Options */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAdjustmentType("restock")}
+                  className={`flex-1 py-2 px-3 rounded-lg font-semibold text-xs sm:text-sm transition-all border-2 ${
+                    adjustmentType === "restock"
+                      ? "border-green-500 bg-green-50 text-green-700"
+                      : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                  }`}
+                >
+                  Restock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdjustmentType("damaged")}
+                  className={`flex-1 py-2 px-3 rounded-lg font-semibold text-xs sm:text-sm transition-all border-2 ${
+                    adjustmentType === "damaged"
+                      ? "border-red-500 bg-red-50 text-red-700"
+                      : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                  }`}
+                >
+                  Damaged Item
+                </button>
+              </div>
+              
+              {/* Quantity Input */}
               <div>
-                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
-                  New Physical Count
-                </label>
                 <input 
                   required 
-                  name="stock" 
-                  value={formData.stock || ''} 
-                  onChange={handleChange} 
                   type="number" 
-                  min="0" 
-                  className="w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700" 
+                  min="1"
+                  value={adjustmentQuantity}
+                  onChange={(e) => setAdjustmentQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full px-3 py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700"
+                  placeholder={adjustmentType === "restock" ? "Quantity to add" : "Quantity to remove"}
                 />
               </div>
-              <div>
-                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
-                  Reason for Adjustment
-                </label>
-                <select 
-                  name="adjustmentReason" 
-                  value={formData.adjustmentReason || "Manual Count"} 
-                  onChange={handleChange} 
-                  className="w-full px-3 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700"
-                >
-                  <option>Manual Count / Audit</option>
-                  <option>Damaged Item</option>
-                  <option>Return / Exchange</option>
-                  <option>Restock</option>
-                </select>
+              
+              {/* Summary Preview */}
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                {adjustmentType === "restock" ? (
+                  <p className="text-xs sm:text-sm text-gray-900">
+                    Current: <span className="font-bold text-gray-900">{product.stock}</span> → 
+                    New Stock: <span className="font-bold text-green-600">{product.stock + adjustmentQuantity}</span>
+                    <span className="text-gray-500 ml-2">(+{adjustmentQuantity})</span>
+                  </p>
+                ) : (
+                  <p className="text-xs sm:text-sm text-gray-900">
+                    Current: <span className="font-bold text-gray-900">{product.stock}</span> → 
+                    New Stock: <span className="font-bold text-red-600">{Math.max(0, product.stock - adjustmentQuantity)}</span>
+                    <span className="text-gray-500 ml-2">(-{adjustmentQuantity})</span>
+                  </p>
+                )}
               </div>
             </form>
           </div>
+          
           <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
-            <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100">
+            <button 
+              type="button" 
+              onClick={handleCancel} 
+              className="flex-1 px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Cancel
             </button>
-            <button type="submit" form="stock-form" className="flex-1 px-3 py-1.5 rounded-md bg-[#0B3C8A] text-white text-[11px] sm:text-sm font-medium hover:bg-[#082F6E]">
-              Update Stock
+            <button 
+              type="submit" 
+              form="stock-adjustment-form" 
+              className={`flex-1 px-3 py-1.5 rounded-md ${
+                adjustmentType === "restock" 
+                  ? "bg-green-600 hover:bg-green-700" 
+                  : "bg-red-600 hover:bg-red-700"
+              } text-white text-[11px] sm:text-sm font-medium transition-colors shadow-sm`}
+            >
+              {adjustmentType === "restock" ? "Confirm Restock" : "Confirm Damaged"}
             </button>
           </div>
         </motion.div>
@@ -382,7 +465,7 @@ export default function ProductModal({
               </div>
             </div>
 
-            {/* Batch Number Field - Fixed font color */}
+            {/* Batch Number Field */}
             <div>
               <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
                 <PackageIcon size={12} className="inline mr-1" /> Batch Number
@@ -397,7 +480,7 @@ export default function ProductModal({
               />
             </div>
 
-            {/* Expiry Date - Only for perishable items - Fixed font color */}
+            {/* Expiry Date - Only for perishable items */}
             {isPerishable && (
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
@@ -448,27 +531,29 @@ export default function ProductModal({
           </button>
         </div>
       </motion.div>
+
+      {/* Archive Confirmation Modal - Updated button colors */}
       {showArchiveConfirmation && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-4">
-            <h3 className="font-bold text-lg mb-2">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
+            <h3 className="font-bold text-xl text-gray-900 mb-3">
               {formData.archived ? "Confirm Unarchive" : "Confirm Archive"}
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Are you sure you want to {formData.archived ? "unarchive" : "archive"} &quot;{formData.name}&quot;?
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to {formData.archived ? "unarchive" : "archive"} &quot;<span className="font-semibold text-gray-800">{formData.name}</span>&quot;?
             </p>
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowArchiveConfirmation(false)}
-                className="px-3 py-1 rounded-md border border-gray-300"
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleArchiveConfirm}
-                className="px-3 py-1 rounded-md bg-[#0B3C8A] text-white"
+                className="px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-sm"
               >
-                Confirm
+                Confirm Archive
               </button>
             </div>
           </div>

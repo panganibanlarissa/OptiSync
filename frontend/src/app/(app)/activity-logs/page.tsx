@@ -550,7 +550,7 @@ export default function ActivityLogsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Custom Date Range</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Date Range</label>
                 <div className="relative">
                   <button
                     onClick={() => setShowDatePicker(!showDatePicker)}

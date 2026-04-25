@@ -242,8 +242,8 @@ function LoginContent() {
                   </div>
                 </div>
 
-                {/* Terms and Privacy Policy Statement */}
-                <div className="text-xs text-gray-600 leading-tight pt-2 pb-1">
+                {/* Terms and Privacy Policy Statement - CENTERED */}
+                <div className="text-xs text-gray-600 leading-tight pt-2 pb-1 text-center">
                   By logging in, you agree to OlasoSync&apos;s{" "}
                   <button 
                     type="button" 

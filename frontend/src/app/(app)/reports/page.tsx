@@ -70,6 +70,24 @@ const getLocalDateStamp = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+// Helper function to format date range for display (e.g., "Mar 14 – Apr 25")
+const formatDateRange = (fromDate: Date | null, toDate: Date | null): string => {
+  if (!fromDate && !toDate) return "";
+  
+  const formatDateShort = (date: Date): string => {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+  
+  if (fromDate && toDate) {
+    return `${formatDateShort(fromDate)} – ${formatDateShort(toDate)}`;
+  } else if (fromDate) {
+    return `From ${formatDateShort(fromDate)}`;
+  } else if (toDate) {
+    return `Until ${formatDateShort(toDate)}`;
+  }
+  return "";
+};
+
 // Helper function to check if a date is within a range
 const isDateInRange = (date: Date, fromDate: Date | null, toDate: Date | null): boolean => {
   if (!fromDate && !toDate) return true;
@@ -101,7 +119,7 @@ const isDateInRange = (date: Date, fromDate: Date | null, toDate: Date | null): 
 };
 
 // Calculate days since last sale using product ID matching
-const getDaysSinceLastSale = (product: any, transactions: TransactionType[], today: Date): { days: number; lastSaleDate: Date | null; hasSales: boolean } => {
+const getDaysSinceLastSale = (product: any, transactions: TransactionType[], today: Date): { days: number; lastSaleDate: Date | null; hasSales: boolean; totalSalesCount: number } => {
   const completedTransactions = transactions.filter(t => t.status === 'completed');
   
   const salesForProduct = completedTransactions
@@ -109,12 +127,13 @@ const getDaysSinceLastSale = (product: any, transactions: TransactionType[], tod
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
   const lastSale = salesForProduct[0];
+  const totalSalesCount = salesForProduct.length;
   
   if (lastSale) {
     const lastSaleDate = new Date(lastSale.date);
     lastSaleDate.setHours(0, 0, 0, 0);
     const days = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
-    return { days, lastSaleDate, hasSales: true };
+    return { days, lastSaleDate, hasSales: true, totalSalesCount };
   } else {
     const createdDate = getDateFromTimestamp(product.createdAt);
     
@@ -126,7 +145,7 @@ const getDaysSinceLastSale = (product: any, transactions: TransactionType[], tod
       days = product.lastMovedDaysAgo || 0;
     }
     
-    return { days, lastSaleDate: null, hasSales: false };
+    return { days, lastSaleDate: null, hasSales: false, totalSalesCount: 0 };
   }
 };
 
@@ -157,6 +176,19 @@ export default function ReportsPage() {
   const products = useMemo(() => {
     return firebaseProducts;
   }, [firebaseProducts]);
+
+  // Get the overall transaction date range (first to last transaction)
+  const transactionDateRange = useMemo(() => {
+    if (transactions.length === 0) return { firstDate: null, lastDate: null };
+    
+    const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d.getTime()));
+    if (dates.length === 0) return { firstDate: null, lastDate: null };
+    
+    const firstDate = new Date(Math.min(...dates.map(d => d.getTime())));
+    const lastDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    
+    return { firstDate, lastDate };
+  }, [transactions]);
 
   // Helper functions for filtering
   const getAvailableMonths = (transactions: TransactionType[]) => {
@@ -205,16 +237,34 @@ export default function ReportsPage() {
     return getAvailableDays(transactions, selectedYear, selectedMonth);
   }, [transactions, selectedYear, selectedMonth]);
 
-  // Helper to get date range display text
-  const getDateRangeText = (): string => {
+  // Helper to get date range display text for the filter
+  const getDateRangeDisplayText = (): string => {
+    const fromDateObj = fromDate ? new Date(fromDate) : null;
+    const toDateObj = toDate ? new Date(toDate) : null;
+    return formatDateRange(fromDateObj, toDateObj);
+  };
+
+  // Helper to get date range text for exports (without duplication)
+  const getPeriodText = (): string => {
     if (fromDate && toDate) {
       return `${new Date(fromDate).toLocaleDateString()} to ${new Date(toDate).toLocaleDateString()}`;
     } else if (fromDate) {
       return `From ${new Date(fromDate).toLocaleDateString()}`;
     } else if (toDate) {
       return `Until ${new Date(toDate).toLocaleDateString()}`;
+    } else if (selectedYear !== 0) {
+      if (selectedMonth !== "all") {
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const monthIndex = parseInt(selectedMonth.split('-')[1]) - 1;
+        if (selectedDay !== "all") {
+          return `${monthNames[monthIndex]} ${selectedDay}, ${selectedYear}`;
+        }
+        return `${monthNames[monthIndex]} ${selectedYear}`;
+      } else {
+        return `Year ${selectedYear}`;
+      }
     }
-    return "";
+    return "All Time";
   };
 
   const filteredTransactions = useMemo(() => {
@@ -295,29 +345,6 @@ export default function ReportsPage() {
     return filtered;
   };
 
-  // Helper to get period text for exports (without duplication)
-  const getPeriodText = (): string => {
-    if (fromDate && toDate) {
-      return `${new Date(fromDate).toLocaleDateString()} to ${new Date(toDate).toLocaleDateString()}`;
-    } else if (fromDate) {
-      return `From ${new Date(fromDate).toLocaleDateString()}`;
-    } else if (toDate) {
-      return `Until ${new Date(toDate).toLocaleDateString()}`;
-    } else if (selectedYear !== 0) {
-      if (selectedMonth !== "all") {
-        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const monthIndex = parseInt(selectedMonth.split('-')[1]) - 1;
-        if (selectedDay !== "all") {
-          return `${monthNames[monthIndex]} ${selectedDay}, ${selectedYear}`;
-        }
-        return `${monthNames[monthIndex]} ${selectedYear}`;
-      } else {
-        return `Year ${selectedYear}`;
-      }
-    }
-    return "All Time";
-  };
-
   const exportLedgerReport = () => {
     if (filteredTransactions.length === 0) {
       showNotification("No transactions found for this period to export.", "error");
@@ -336,7 +363,7 @@ export default function ReportsPage() {
     const voidedAmount = voidedTransactions.reduce((sum, trx) => sum + trx.total, 0);
 
     autoTable(doc, {
-      startY: 45, // Increased to avoid header overlap
+      startY: 45,
       margin: { top: 45, right: 14, left: 14, bottom: 20 },
       head: [['Receipt No', 'Date', 'Staff', 'Patient Name', 'Items', 'Payment Method', 'Status', 'Amount (PHP)']],
       body: filteredTransactions.map(t => {
@@ -349,14 +376,13 @@ export default function ReportsPage() {
           itemsStr,
           t.paymentMethod ? t.paymentMethod.toUpperCase() : 'N/A',
           t.status.toUpperCase(),
-          t.total.toLocaleString()
+          `₱${t.total.toLocaleString()}`
         ];
       }),
       theme: 'grid',
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
       styles: { fontSize: 9, textColor: [0, 0, 0] },
       didDrawPage: (data) => {
-        // Header - only draw on each page
         doc.setFontSize(16);
         doc.setTextColor(0, 0, 0);
         doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: 'center' });
@@ -414,7 +440,7 @@ export default function ReportsPage() {
     
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total Sales Revenue: PHP ${totalSales.toLocaleString()}`, 14, summaryStartY + 44);
+    doc.text(`Total Sales Revenue: ₱${totalSales.toLocaleString()}`, 14, summaryStartY + 44);
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
     doc.text("Sum of all completed transactions in this period.", 14, summaryStartY + 47);
@@ -422,7 +448,7 @@ export default function ReportsPage() {
     if (voidedTransactions.length > 0) {
       doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
-      doc.text(`Voided Amount: PHP ${voidedAmount.toLocaleString()}`, 14, summaryStartY + 54);
+      doc.text(`Voided Amount: ₱${voidedAmount.toLocaleString()}`, 14, summaryStartY + 54);
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text("Total value of canceled transactions; deducted from gross sales.", 14, summaryStartY + 57);
@@ -510,8 +536,8 @@ export default function ReportsPage() {
     const liquidationItems = products
       .filter(p => p.stock > 0)
       .map(p => {
-        const { days, lastSaleDate, hasSales } = getDaysSinceLastSale(p, rangeFilteredTransactions, today);
-        return { ...p, daysSinceSale: days, lastSaleDate, hasSales };
+        const { days, lastSaleDate, hasSales, totalSalesCount } = getDaysSinceLastSale(p, rangeFilteredTransactions, today);
+        return { ...p, daysSinceSale: days, lastSaleDate, hasSales, totalSalesCount };
       })
       .filter(p => p.daysSinceSale >= 30)
       .sort((a, b) => b.daysSinceSale - a.daysSinceSale);
@@ -580,8 +606,8 @@ export default function ReportsPage() {
           p.category,
           p.stock,
           p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
-          p.hasSales ? 'Unsold' : 'Never Sold',
-          (p.stock * p.markupPrice).toLocaleString()
+          p.hasSales ? (p.totalSalesCount > 0 ? `Unsold (${p.daysSinceSale} days)` : 'Never Sold') : 'Never Sold',
+          `₱${(p.stock * p.markupPrice).toLocaleString()}`
         ]),
         headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
         styles: { fontSize: 8, textColor: [0, 0, 0] },
@@ -612,7 +638,7 @@ export default function ReportsPage() {
     doc.setTextColor(60, 60, 60);
     doc.text(`• Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
     doc.text(`• Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
-    doc.text(`• Potential capital recovery from liquidation: PHP ${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
+    doc.text(`• Potential capital recovery from liquidation: ₱${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
     doc.text(`• Stock turnover rate: ${stockAccuracyRate.toFixed(1)}% of inventory has moved during the selected period.`, 14, summaryY + 22);
     
     doc.setFontSize(8);
@@ -662,59 +688,89 @@ export default function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Calculate aging data for ALL products with stock
     const allProductsData = products
-      .filter(p => p.stock > 0)
+      .filter(p => p.stock > 0) // Only products with positive stock
       .map(p => {
-        const { days, lastSaleDate, hasSales } = getDaysSinceLastSale(p, rangeFilteredTransactions, today);
+        // Get all completed transactions
+        const completedTransactions = rangeFilteredTransactions.filter(t => t.status === 'completed');
+        
+        // Find all sales for this product
+        const salesForProduct = completedTransactions
+          .filter(t => t.items.some(item => item.id === p.id))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        const lastSale = salesForProduct[0];
+        let daysSinceLastSale = 0;
+        let lastSaleDate: Date | null = null;
+        const hasSales = salesForProduct.length > 0;
+        
+        if (lastSale) {
+          lastSaleDate = new Date(lastSale.date);
+          lastSaleDate.setHours(0, 0, 0, 0);
+          daysSinceLastSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          // Product has NEVER been sold - calculate days since creation
+          const createdDate = getDateFromTimestamp(p.createdAt);
+          if (createdDate) {
+            createdDate.setHours(0, 0, 0, 0);
+            daysSinceLastSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          } else {
+            // If no creation date, mark as old stock
+            daysSinceLastSale = 999;
+          }
+        }
         
         const deadCapital = p.stock * p.markupPrice;
         
-        let daysIdleDisplay = `${days} days`;
-        if (days >= 365) {
-          daysIdleDisplay = `>1 Year (${days} days)`;
-        } else if (days >= 90) {
-          daysIdleDisplay = `${days} days (3+ months)`;
+        // Determine aging category and display
+        let daysIdleDisplay = '';
+        
+        if (!hasSales) {
+          daysIdleDisplay = `Never Sold (${daysSinceLastSale} days old)`;
+        } else if (daysSinceLastSale >= 365) {
+          daysIdleDisplay = `>1 Year (${daysSinceLastSale} days)`;
+        } else if (daysSinceLastSale >= 180) {
+          daysIdleDisplay = `6-12 months (${daysSinceLastSale} days)`;
+        } else if (daysSinceLastSale >= 90) {
+          daysIdleDisplay = `3-6 months (${daysSinceLastSale} days)`;
+        } else if (daysSinceLastSale >= 30) {
+          daysIdleDisplay = `1-3 months (${daysSinceLastSale} days)`;
+        } else {
+          daysIdleDisplay = `${daysSinceLastSale} days`;
         }
         
         return {
           id: p.id,
           name: p.name,
-          category: p.category,
+          category: p.category || 'Uncategorized',
           stock: p.stock,
           unitPrice: p.markupPrice,
-          daysSinceSale: days,
+          daysSinceLastSale,
           daysIdleDisplay,
           deadCapital,
           lastSaleDate,
-          hasSales
+          hasSales,
+          totalSalesCount: salesForProduct.length
         };
       });
     
-    const agingData = allProductsData
+    // Filter for deadstock - products with daysSinceLastSale >= 30 OR never sold
+    const deadstockData = allProductsData
       .filter(item => {
-        if (item.stock <= 0) return false;
-        if (item.daysSinceSale < 30) return false;
-        
-        if (item.hasSales && item.lastSaleDate) {
-          const calculatedDays = Math.floor((today.getTime() - item.lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
-          if (calculatedDays < 30) return false;
-        }
-        
-        return true;
+        // Include if never sold OR unsold for 30+ days
+        if (!item.hasSales) return true;
+        return item.daysSinceLastSale >= 30;
       })
-      .sort((a, b) => b.deadCapital - a.deadCapital);
+      .sort((a, b) => b.daysSinceLastSale - a.daysSinceLastSale);
 
-    if (agingData.length === 0) {
-      showNotification("No aging inventory (30+ days unsold) identified in this period.", "info");
+    if (deadstockData.length === 0) {
+      showNotification("No deadstock inventory (30+ days unsold or never sold) identified in this period.", "info");
       return;
     }
 
     const periodText = getPeriodText();
-    const totalDeadCapital = agingData.reduce((sum, item) => sum + item.deadCapital, 0);
-    
-    const itemsOver90Days = agingData.filter(i => i.daysSinceSale >= 90).length;
-    const itemsOver60Days = agingData.filter(i => i.daysSinceSale >= 60 && i.daysSinceSale < 90).length;
-    const itemsOver30Days = agingData.filter(i => i.daysSinceSale >= 30 && i.daysSinceSale < 60).length;
+    const totalDeadCapital = deadstockData.reduce((sum, item) => sum + item.deadCapital, 0);
 
     const addAgingHeader = (pageNumber: number) => {
       doc.setPage(pageNumber);
@@ -724,7 +780,7 @@ export default function ReportsPage() {
       
       doc.setFontSize(11);
       doc.setTextColor(40, 40, 40);
-      doc.text("Aging Inventory Report", pageWidth / 2, 23, { align: 'center' });
+      doc.text("Aging Inventory Report - Deadstock Analysis", pageWidth / 2, 23, { align: 'center' });
       
       doc.setFontSize(9);
       doc.setTextColor(60, 60, 60);
@@ -736,21 +792,25 @@ export default function ReportsPage() {
 
     addAgingHeader(1);
 
+    // Create table with deadstock data only - no executive summary or recommendations
     autoTable(doc, {
       startY: 45,
       margin: { top: 45, right: 14, left: 14, bottom: 20 },
-      head: [['Product Name', 'Category', 'Stock', 'Days Idle', 'Status', 'Value (PHP)']],
-      body: agingData.map(item => [
+      head: [['Product Name', 'Category', 'Stock', 'Days Idle', 'Status', 'Value']],
+      body: deadstockData.map(item => [
         item.name,
         item.category,
         item.stock,
         item.daysIdleDisplay,
-        item.hasSales ? 'Unsold' : 'Never Sold',
-        item.deadCapital.toLocaleString()
+        item.hasSales ? `Unsold (Last sale: ${item.lastSaleDate?.toLocaleDateString() || 'N/A'})` : 'NEVER SOLD',
+        `₱${item.deadCapital.toLocaleString()}`
       ]),
       theme: 'grid',
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
       styles: { fontSize: 9, textColor: [0, 0, 0] },
+      columnStyles: {
+        5: { cellWidth: 35, halign: 'right' } // Value column fixed width and right-aligned
+      },
       didDrawPage: (data) => {
         if (data.pageNumber > 1) {
           addAgingHeader(data.pageNumber);
@@ -758,75 +818,7 @@ export default function ReportsPage() {
       }
     });
 
-    const finalY = (doc as any).lastAutoTable?.finalY || 45;
-    let summaryStartY = finalY + 15;
-    
-    if (summaryStartY + 70 > pageHeight - 20) {
-      doc.addPage();
-      summaryStartY = 45;
-    }
-
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Executive Summary", 14, summaryStartY);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(40, 40, 40);
-    doc.text(`Total Aging Items (30+ days unsold): ${agingData.length}`, 14, summaryStartY + 8);
-    
-    doc.setFontSize(9);
-    doc.setTextColor(60, 60, 60);
-    
-    let summaryYOffset = summaryStartY + 16;
-    
-    if (itemsOver90Days > 0) {
-      doc.text(`• ${itemsOver90Days} item(s) have been unsold for 90+ days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-    }
-    if (itemsOver60Days > 0) {
-      doc.text(`• ${itemsOver60Days} item(s) have been unsold for 60-89 days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-    }
-    if (itemsOver30Days > 0) {
-      doc.text(`• ${itemsOver30Days} item(s) have been unsold for 30-59 days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-    }
-    
-    summaryYOffset += 5;
-    
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text(`Total Dead Inventory: PHP ${totalDeadCapital.toLocaleString()}`, 14, summaryYOffset);
-    summaryYOffset += 5;
-    
-    doc.setFontSize(8);
-    doc.setTextColor(100, 100, 100);
-    doc.text("* Dead inventory represents the locked value of inventory that has not moved in 30+ days.", 14, summaryYOffset + 3);
-    
-    summaryYOffset += 12;
-    
-    // Recommendation based on aging data
-    doc.setFontSize(9);
-    if (itemsOver90Days > 0) {
-      doc.setTextColor(200, 0, 0);
-      doc.text(`⚠️ URGENT: ${itemsOver90Days} item(s) have been unsold for 90+ days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-      doc.setTextColor(100, 0, 0);
-      doc.text(`   Immediate liquidation recommended to recover capital.`, 14, summaryYOffset);
-    } else if (itemsOver60Days > 0) {
-      doc.setTextColor(200, 100, 0);
-      doc.text(`⚠️ WARNING: ${itemsOver60Days} item(s) have been unsold for 60+ days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-      doc.setTextColor(140, 70, 0);
-      doc.text(`   Consider markdown strategy or promotional pricing.`, 14, summaryYOffset);
-    } else if (itemsOver30Days > 0) {
-      doc.setTextColor(100, 100, 100);
-      doc.text(`ℹ️ INFO: ${itemsOver30Days} item(s) have been unsold for 30+ days.`, 14, summaryYOffset);
-      summaryYOffset += 5;
-      doc.setTextColor(80, 80, 80);
-      doc.text(`   Consider promotion or bundle deals to move inventory.`, 14, summaryYOffset);
-    }
-
+    // Add footer to all pages
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
@@ -877,12 +869,12 @@ export default function ReportsPage() {
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20 space-y-4">
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {/* Header with Title and Action Buttons */}
-        <div className="p-4 border-b border-gray-100">
+        {/* Header with Title and Action Buttons - Updated with gradient background */}
+        <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 sm:p-2 bg-blue-50 rounded-lg">
-                <Receipt className={THEME_TEXT} size={24} />
+              <div className="p-1.5 sm:p-2 bg-[#0B3C8A] rounded-xl shadow-md">
+                <Receipt className="text-white" size={24} />
               </div>
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Reports</h1>
@@ -950,7 +942,6 @@ export default function ReportsPage() {
                 setSelectedYear(yearValue);
                 setSelectedMonth("all");
                 setSelectedDay("all");
-                // Clear date range when year filter is selected
                 if (yearValue !== 0) {
                   setFromDate("");
                   setToDate("");
@@ -970,7 +961,6 @@ export default function ReportsPage() {
               onChange={(e) => {
                 setSelectedMonth(e.target.value);
                 setSelectedDay("all");
-                // Clear date range when month filter is selected
                 if (e.target.value !== "all") {
                   setFromDate("");
                   setToDate("");
@@ -996,7 +986,6 @@ export default function ReportsPage() {
               value={selectedDay}
               onChange={(e) => {
                 setSelectedDay(e.target.value);
-                // Clear date range when day filter is selected
                 if (e.target.value !== "all") {
                   setFromDate("");
                   setToDate("");
@@ -1019,7 +1008,6 @@ export default function ReportsPage() {
                 value={fromDate}
                 onChange={(e) => {
                   setFromDate(e.target.value);
-                  // Clear month/day/year filters when date range is set
                   if (e.target.value) {
                     setSelectedYear(0);
                     setSelectedMonth("all");
@@ -1039,7 +1027,6 @@ export default function ReportsPage() {
                 value={toDate}
                 onChange={(e) => {
                   setToDate(e.target.value);
-                  // Clear month/day/year filters when date range is set
                   if (e.target.value) {
                     setSelectedYear(0);
                     setSelectedMonth("all");
@@ -1110,26 +1097,14 @@ export default function ReportsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs text-gray-500 font-medium">Revenue</p>
-                  <p className="text-xl font-bold mt-1">₱{summaryStats.totalRevenue.toLocaleString()}</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">₱{summaryStats.totalRevenue.toLocaleString()}</p>
                 </div>
-                <div className="p-2 bg-white/20 rounded-lg">
-                  <TrendingUp size={20} className="text-white" />
+                <div className="p-2 bg-blue-50 rounded-lg">
+                  <TrendingUp size={20} className="text-[#0B3C8A]" />
                 </div>
               </div>
             </div>
           </div>
-          
-          {/* Active filters indicator */}
-          {hasActiveFilters && (fromDate || toDate || selectedMonth !== "all" || selectedYear !== new Date().getFullYear() || selectedDay !== "all") && (
-            <div className="mt-3 text-xs text-gray-500 flex flex-wrap gap-2 items-center">
-              <span className="font-medium">Active Period:</span>
-              {fromDate || toDate ? (
-                <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">📅 {getDateRangeText()}</span>
-              ) : (
-                <span className="text-[#0B3C8A] bg-blue-50 px-2 py-0.5 rounded">📆 {getPeriodText()}</span>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Transactions Table */}
@@ -1167,26 +1142,26 @@ export default function ReportsPage() {
                       </td>
                       <td className="p-4 font-semibold text-gray-800">
                         {trx.patientName.length > 20 ? trx.patientName.substring(0, 20) + '...' : trx.patientName}
-                       </td>
+                      </td>
                       <td className="p-4 text-gray-600 max-w-xs">
                         <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
                           {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
                         </div>
-                       </td>
+                      </td>
                       <td className="p-4 text-right font-bold text-gray-800">
                         ₱{trx.total.toLocaleString()}
-                       </td>
+                      </td>
                       <td className="p-4 text-center">
                         {trx.status === 'completed' ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">
-                            <CheckCircle2 size={10}/> OK
+                            <CheckCircle2 size={10}/> Completed
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-red-700 bg-red-50 px-2 py-0.5 rounded text-[10px] font-bold">
-                            <XCircle size={10}/> VOID
+                            <XCircle size={10}/> Voided
                           </span>
                         )}
-                       </td>
+                      </td>
                     </tr>
                   );
                 })
@@ -1203,7 +1178,7 @@ export default function ReportsPage() {
                         Clear filters
                       </button>
                     )}
-                   </td>
+                  </td>
                 </tr>
               )}
             </tbody>

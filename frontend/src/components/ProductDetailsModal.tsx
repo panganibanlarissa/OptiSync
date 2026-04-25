@@ -130,7 +130,7 @@ export default function ProductDetailsModal({ product, onClose }: ProductDetails
             </div>
           </div>
 
-          {/* Inventory Information */}
+          {/* Inventory Information - Removed reorderPoint and leadTimeDays */}
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 sm:p-5">
             <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base">Inventory Information</h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -143,7 +143,7 @@ export default function ProductDetailsModal({ product, onClose }: ProductDetails
                 <p className="text-lg sm:text-xl font-bold text-gray-800">{product.totalSold || 0} {pluralize(product.totalSold || 0, 'unit', 'units')}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Damage Item</p>
+                <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Damaged Item</p>
                 <p className="text-lg sm:text-xl font-bold text-gray-800">{product.damageExchanged || 0} {pluralize(product.damageExchanged || 0, 'unit', 'units')}</p>
               </div>
               <div className="sm:col-span-1">
@@ -156,19 +156,11 @@ export default function ProductDetailsModal({ product, onClose }: ProductDetails
                   {product.stock} {pluralize(product.stock, 'unit', 'units')}
                 </p>
               </div>
-              <div className="sm:col-span-1">
-                <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Reorder Point</p>
-                <p className="text-lg sm:text-xl font-bold text-gray-800">{product.reorderPoint} {pluralize(product.reorderPoint, 'unit', 'units')}</p>
-              </div>
-              <div className="sm:col-span-1">
-                <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Lead Time</p>
-                <p className="text-lg sm:text-xl font-bold text-gray-800">{product.leadTimeDays} {pluralize(product.leadTimeDays, 'day', 'days')}</p>
-              </div>
             </div>
           </div>
 
           {/* Additional Details */}
-          {product.expiryDate && (
+          {(product.expiryDate || product.batchNumber) && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 sm:p-5">
               <h3 className="font-bold text-gray-800 mb-4 text-sm sm:text-base">Additional Details</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

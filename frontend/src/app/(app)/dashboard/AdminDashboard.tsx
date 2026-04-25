@@ -30,7 +30,11 @@ import {
   AlertCircle,
   CheckCircle2,
   Eye,
-  Maximize2
+  Maximize2,
+  Brain,
+  Info,
+  Zap,
+  History
 } from "lucide-react";
 
 interface StatData {
@@ -48,17 +52,17 @@ interface ForecastDisplayData {
   predictedDemand60d: number;
   predictedDemand90d: number;
   trend: 'up' | 'down' | 'stable';
-  priority: 'high' | 'medium' | 'low';
 }
 
-interface ChartDataPoint {
-  label: string;
-  fullLabel: string;
-  actual: number;
-  forecast: number;
-  lower?: number;
-  upper?: number;
-  date: Date;
+interface ForecastExplanation {
+  productId: string;
+  productName: string;
+  currentStock: number;
+  monthlyForecasts: Array<{
+    month: string;
+    predictedDemand: number;
+  }>;
+  trend: 'up' | 'down' | 'stable';
 }
 
 interface DeadstockItem {
@@ -73,13 +77,6 @@ interface DeadstockItem {
   aiSuggestion?: string | null;
   aiSuggestionType?: 'critical' | 'warning' | 'info' | null;
   recommendedDiscount?: number | null;
-  mlFactors?: {
-    daysFactor: number;
-    capitalFactor: number;
-    categoryUrgency: number;
-    velocityFactor: number;
-    finalDiscount: number;
-  } | null;
   baseCost?: number;
   markupPrice?: number;
   historicalVelocity?: number;
@@ -111,7 +108,6 @@ interface LowStockItem {
   name: string;
   category: string;
   currentStock: number;
-  reorderPoint: number;
   status: 'critical' | 'low';
 }
 
@@ -160,14 +156,22 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const FULL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const SHORT_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEK_DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const WEEK_DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Helper to get next three months starting from current month
+const getNextThreeMonths = (currentDate: Date = new Date()): string[] => {
+  const months: string[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const nextMonth = new Date(currentDate);
+    nextMonth.setMonth(currentDate.getMonth() + i);
+    months.push(FULL_MONTH_NAMES[nextMonth.getMonth()]);
+  }
+  return months;
+};
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<"weekly" | "monthly">("monthly");
-  const [forecastPeriod, setForecastPeriod] = useState<30 | 60 | 90>(30);
-  const [hoveredBar, setHoveredBar] = useState<{ label: string; fullLabel: string; actual: number; forecast: number } | null>(null);
+  const [selectedForecastMonth, setSelectedForecastMonth] = useState<number>(0);
+  const [selectedForecastProduct, setSelectedForecastProduct] = useState<ForecastDisplayData | null>(null);
+  const [showForecastExplanationModal, setShowForecastExplanationModal] = useState(false);
   const [selectedDeadstock, setSelectedDeadstock] = useState<DeadstockItem | null>(null);
   const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [showDeadstockModal, setShowDeadstockModal] = useState(false);
@@ -175,6 +179,8 @@ export default function AdminDashboard() {
   
   const { products, transactions } = useFirebase();
   const { loading, recommendations, forecastData, usingML, dataLoaded, deadstockSuggestions } = useMLForecasting();
+
+  const nextThreeMonths = useMemo(() => getNextThreeMonths(), []);
 
   const completedTransactions = useMemo(() => {
     return transactions.filter((t: any) => t.status === 'completed');
@@ -197,149 +203,6 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
-  const getDateFromTimestamp = (timestamp: any): Date | null => {
-    if (!timestamp) return null;
-    
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    
-    if (typeof timestamp === 'object' && timestamp.toDate) {
-      return timestamp.toDate();
-    }
-    
-    if (timestamp.seconds) {
-      return new Date(timestamp.seconds * 1000);
-    }
-    
-    if (typeof timestamp === 'string') {
-      return new Date(timestamp);
-    }
-    
-    if (typeof timestamp === 'number') {
-      return new Date(timestamp);
-    }
-    
-    return null;
-  };
-
-  const weeklySalesData = useMemo(() => {
-    const today = new Date();
-    const result: ChartDataPoint[] = [];
-    
-    const dayMultipliers: Record<string, number> = {
-      'Sun': 0.7, 'Mon': 1.0, 'Tue': 1.0, 'Wed': 1.0, 'Thu': 1.1, 'Fri': 1.3, 'Sat': 1.2,
-    };
-    
-    const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
-    const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
-    const useMLForWeekly = hasMLForecastData && monthlyForecasts.length > 0;
-    
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
-      date.setHours(0, 0, 0, 0);
-      
-      const nextDate = new Date(date);
-      nextDate.setDate(date.getDate() + 1);
-      
-      const daySales = completedTransactions
-        .filter((t: any) => {
-          const transDate = new Date(t.date);
-          return transDate >= date && transDate < nextDate;
-        })
-        .reduce((sum: number, t: any) => sum + t.total, 0);
-      
-      const dayOfWeek = date.getDay();
-      const dayName = WEEK_DAYS_SHORT[dayOfWeek];
-      const fullDayName = WEEK_DAYS_FULL[dayOfWeek];
-      
-      let forecastValue = 0;
-      
-      if (useMLForWeekly) {
-        const avgMonthlyForecast = monthlyForecasts.reduce((sum, f) => sum + f.value, 0) / monthlyForecasts.length;
-        const avgDailyForecast = avgMonthlyForecast / 30;
-        const dayMultiplier = dayMultipliers[dayName] || 1.0;
-        forecastValue = Math.round(avgDailyForecast * dayMultiplier);
-        const positionVariation = 0.9 + (i * 0.03);
-        forecastValue = Math.round(forecastValue * positionVariation);
-      }
-      
-      result.push({
-        label: dayName,
-        fullLabel: fullDayName,
-        actual: daySales,
-        forecast: forecastValue,
-        date: date
-      });
-    }
-    
-    return result;
-  }, [completedTransactions, forecastData, usingML]);
-
-  const monthlySalesData = useMemo(() => {
-    const year = new Date().getFullYear();
-    const result: ChartDataPoint[] = [];
-    
-    const actualSalesByMonth: number[] = new Array(12).fill(0);
-    for (let month = 0; month < 12; month++) {
-      const monthStart = new Date(year, month, 1);
-      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59);
-      
-      actualSalesByMonth[month] = completedTransactions
-        .filter((t: any) => {
-          const transDate = new Date(t.date);
-          return transDate >= monthStart && transDate <= monthEnd;
-        })
-        .reduce((sum: number, t: any) => sum + t.total, 0);
-    }
-    
-    const hasMLForecastData = usingML && forecastData && forecastData.length > 0;
-    const monthlyForecasts = hasMLForecastData ? forecastData.filter((f: ForecastDataPoint) => f.type === 'forecast') : [];
-    const useMLForMonthly = hasMLForecastData && monthlyForecasts.length > 0;
-    
-    for (let month = 0; month < 12; month++) {
-      const actualSales = actualSalesByMonth[month];
-      
-      let predictedValue = 0;
-      
-      let mlForecastValue = null;
-      if (useMLForMonthly) {
-        const forecastPoint = forecastData.find((f: ForecastDataPoint) => f.month === SHORT_MONTH_NAMES[month]);
-        if (forecastPoint && forecastPoint.type === 'forecast') {
-          mlForecastValue = forecastPoint.value;
-        }
-      }
-      
-      if (mlForecastValue) {
-        predictedValue = mlForecastValue;
-      }
-      
-      result.push({
-        label: SHORT_MONTH_NAMES[month],
-        fullLabel: FULL_MONTH_NAMES[month],
-        actual: actualSales,
-        forecast: predictedValue,
-        lower: Math.round(predictedValue * 0.7),
-        upper: Math.round(predictedValue * 1.3),
-        date: new Date(year, month, 1)
-      });
-    }
-    
-    return result;
-  }, [completedTransactions, forecastData, usingML]);
-
-  const chartData = activeTab === "weekly" ? weeklySalesData : monthlySalesData;
-  
-  const chartMaxValue = useMemo(() => {
-    if (!chartData || chartData.length === 0) return 100000;
-    const maxActual = Math.max(...chartData.map((d: ChartDataPoint) => d.actual));
-    const maxForecast = usingML ? Math.max(...chartData.map((d: ChartDataPoint) => d.forecast)) : 0;
-    const max = Math.max(maxActual, maxForecast);
-    const roundedMax = Math.ceil(max / 20000) * 20000 || 100000;
-    return roundedMax;
-  }, [chartData, usingML]);
-
   const lowStockCount = useMemo(() => {
     return products.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
   }, [products]);
@@ -353,7 +216,6 @@ export default function AdminDashboard() {
         name: p.name,
         category: p.category,
         currentStock: p.stock,
-        reorderPoint: p.reorderPoint,
         status: p.stock === 0 ? 'critical' as const : 'low' as const
       }));
   }, [products]);
@@ -429,30 +291,28 @@ export default function AdminDashboard() {
 
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
-      return recommendations.map((r: Recommendation) => {
-        const predictedDemand30d = typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) 
-          ? r.predictedDemand30d 
-          : 0;
-        const predictedDemand60d = typeof r.predictedDemand60d === 'number' && !isNaN(r.predictedDemand60d) 
-          ? r.predictedDemand60d 
-          : 0;
-        const predictedDemand90d = typeof r.predictedDemand90d === 'number' && !isNaN(r.predictedDemand90d) 
-          ? r.predictedDemand90d 
-          : 0;
-        
-        return {
-          name: r.productName,
-          currentStock: r.currentStock,
-          predictedDemand30d: predictedDemand30d,
-          predictedDemand60d: predictedDemand60d,
-          predictedDemand90d: predictedDemand90d,
-          trend: r.trend,
-          priority: r.confidence
-        };
-      });
+      return recommendations.map((r: Recommendation) => ({
+        name: r.productName,
+        currentStock: r.currentStock,
+        predictedDemand30d: typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) ? r.predictedDemand30d : 0,
+        predictedDemand60d: typeof r.predictedDemand60d === 'number' && !isNaN(r.predictedDemand60d) ? r.predictedDemand60d : 0,
+        predictedDemand90d: typeof r.predictedDemand90d === 'number' && !isNaN(r.predictedDemand90d) ? r.predictedDemand90d : 0,
+        trend: r.trend
+      }));
     }
     return [];
   }, [usingML, hasEnoughDataForML, recommendations]);
+
+  const getCurrentDisplayDemand = (item: ForecastDisplayData) => {
+    switch (selectedForecastMonth) {
+      case 1:
+        return item.predictedDemand60d;
+      case 2:
+        return item.predictedDemand90d;
+      default:
+        return item.predictedDemand30d;
+    }
+  };
 
   const HEATMAP_DATA = useMemo(() => {
     const categoryStats = products.reduce((acc: any, product: any) => {
@@ -480,6 +340,32 @@ export default function AdminDashboard() {
       color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Unknown']
     }));
   }, [products]);
+
+  const getDateFromTimestamp = (timestamp: any): Date | null => {
+    if (!timestamp) return null;
+    
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
+    if (typeof timestamp === 'object' && timestamp.toDate) {
+      return timestamp.toDate();
+    }
+    
+    if (timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000);
+    }
+    
+    if (typeof timestamp === 'string') {
+      return new Date(timestamp);
+    }
+    
+    if (typeof timestamp === 'number') {
+      return new Date(timestamp);
+    }
+    
+    return null;
+  };
 
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
@@ -537,7 +423,6 @@ export default function AdminDashboard() {
           aiSuggestion: mlSuggestion?.suggestion || null,
           aiSuggestionType: mlSuggestion?.suggestionType || null,
           recommendedDiscount: mlSuggestion?.recommendedDiscount || null,
-          mlFactors: mlSuggestion?.mlFactors || null,
           baseCost: p.baseCost,
           markupPrice: p.markupPrice,
           historicalVelocity: historicalVelocity
@@ -549,6 +434,22 @@ export default function AdminDashboard() {
     return deadstockItems;
   }, [products, completedTransactions, usingML, deadstockSuggestions]);
 
+  const generateForecastExplanation = (item: ForecastDisplayData): ForecastExplanation => {
+    const monthlyForecasts = [
+      { month: nextThreeMonths[0], predictedDemand: item.predictedDemand30d },
+      { month: nextThreeMonths[1], predictedDemand: item.predictedDemand60d },
+      { month: nextThreeMonths[2], predictedDemand: item.predictedDemand90d }
+    ];
+    
+    return {
+      productId: item.name,
+      productName: item.name,
+      currentStock: item.currentStock,
+      monthlyForecasts,
+      trend: item.trend
+    };
+  };
+
   if (loading && !dataLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -557,67 +458,9 @@ export default function AdminDashboard() {
     );
   }
 
-  const getCurrentDisplayDemand = (item: ForecastDisplayData) => {
-    switch (forecastPeriod) {
-      case 60:
-        return item.predictedDemand60d;
-      case 90:
-        return item.predictedDemand90d;
-      default:
-        return item.predictedDemand30d;
-    }
-  };
-
-  const handleBarHover = (label: string, fullLabel: string, actual: number, forecast: number) => {
-    setHoveredBar({ label, fullLabel, actual, forecast });
-  };
-
-  const handleBarLeave = () => {
-    setHoveredBar(null);
-  };
-
-  const calculateDetailedAnalysis = (item: DeadstockItem) => {
-    if (!item) return null;
-    
-    const originalPrice = item.markupPrice || 0;
-    const baseCost = item.baseCost || 0;
-    const discountPercent = item.recommendedDiscount || 0;
-    const discountedPrice = originalPrice * (1 - discountPercent / 100);
-    const profitPerUnit = originalPrice - baseCost;
-    const profitAfterDiscount = discountedPrice - baseCost;
-    const totalProfitOriginal = profitPerUnit * item.stock;
-    const totalProfitAfterDiscount = profitAfterDiscount * item.stock;
-    const totalRecovered = discountedPrice * item.stock;
-    const totalBaseCost = baseCost * item.stock;
-    
-    const profitMargin = (profitPerUnit / originalPrice) * 100;
-    const maxAllowedDiscount = Math.min(profitMargin * 0.8, 50);
-    const recoversCost = profitAfterDiscount > 0;
-    
-    const daysFactor = item.mlFactors?.daysFactor || Math.min(1, item.daysSinceSale / 120);
-    const capitalFactor = item.mlFactors?.capitalFactor || Math.min(1, item.lockedCapital / 200000);
-    const categoryUrgency = item.mlFactors?.categoryUrgency || 1.0;
-    const velocityFactor = item.mlFactors?.velocityFactor || 0;
-    
-    return {
-      originalPrice,
-      baseCost,
-      discountedPrice,
-      profitPerUnit,
-      profitAfterDiscount,
-      totalProfitOriginal,
-      totalProfitAfterDiscount,
-      totalRecovered,
-      totalBaseCost,
-      discountPercentage: discountPercent,
-      daysFactor,
-      capitalFactor,
-      categoryUrgency,
-      velocityFactor,
-      profitMargin,
-      maxAllowedDiscount,
-      recoversCost
-    };
+  const openForecastExplanation = (item: ForecastDisplayData) => {
+    setSelectedForecastProduct(item);
+    setShowForecastExplanationModal(true);
   };
 
   return (
@@ -634,7 +477,7 @@ export default function AdminDashboard() {
             className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
           >
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            AI-Powered Forecasts Active (Time Series Analysis)
+            AI-Powered Forecasts Active
           </motion.div>
         )}
 
@@ -644,7 +487,7 @@ export default function AdminDashboard() {
             className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2"
           >
             <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-            Showing actual sales only. AI predictions unavailable.
+            Showing actual sales only.
           </motion.div>
         )}
 
@@ -658,7 +501,7 @@ export default function AdminDashboard() {
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Low Stock Alerts - Show first 5 items */}
+          {/* Low Stock Alerts */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -674,11 +517,11 @@ export default function AdminDashboard() {
                       Low Stock Alerts
                     </h2>
                     <p className="text-xs font-medium text-orange-600">
-                      Products below reorder point
+                      Items below reorder point
                     </p>
                   </div>
                 </div>
-                {lowStockItems.length > 5 && (
+                {lowStockItems.length > 3 && (
                   <button
                     onClick={() => setShowLowStockModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
@@ -692,7 +535,7 @@ export default function AdminDashboard() {
             
             <div className="p-4 sm:p-5 pt-0">
               <div className="space-y-3">
-                {lowStockItems.slice(0, 4).map((item) => (
+                {lowStockItems.slice(0, 3).map((item) => (
                   <motion.div
                     key={item.id}
                     initial={{ x: -20, opacity: 0 }}
@@ -713,13 +556,13 @@ export default function AdminDashboard() {
                         {item.status === 'critical' ? 'OUT' : 'LOW'}
                       </span>
                     </div>
-                    <div className="text-sm">
+                    <div>
                       <p className="text-gray-500 text-xs">Current Stock</p>
                       <p className="font-bold text-gray-900">{item.currentStock} units</p>
                     </div>
                   </motion.div>
                 ))}
-                {lowStockItems.length === 4 && (
+                {lowStockItems.length === 0 && (
                   <div className="text-center py-8">
                     <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
                     <p className="text-sm text-gray-500">All stock levels healthy</p>
@@ -730,7 +573,7 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
 
-          {/* Deadstock Impact Card - Show first 3 items */}
+          {/* Deadstock Impact Card */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden flex flex-col relative"
@@ -747,7 +590,7 @@ export default function AdminDashboard() {
                       Deadstock Items
                     </h2>
                     <p className="text-xs font-medium text-red-600">
-                      Products without sales (30+ days)
+                      Items without sales (30+ days)
                     </p>
                   </div>
                 </div>
@@ -772,6 +615,7 @@ export default function AdminDashboard() {
                 {DEADSTOCK_DATA.slice(0, 2).map((item: DeadstockItem) => {
                   const hasAISuggestion = usingML && item.aiSuggestion;
                   const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                  const daysToShow = item.daysSinceSale;
                   
                   return (
                     <div 
@@ -785,7 +629,7 @@ export default function AdminDashboard() {
                             {item.name}
                           </h4>
                           <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
-                            <Clock size={12}/> {item.daysSinceSale} Days Unsold • {item.stock} units
+                            <Clock size={12}/> {daysToShow} Days Unsold • {item.stock} units
                           </span>
                         </div>
                         <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
@@ -795,7 +639,7 @@ export default function AdminDashboard() {
                       
                       <div className="border-t border-gray-100 pt-2">
                         <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
-                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : 'STATUS'}
+                          {usingML && hasAISuggestion ? 'SUGGESTION' : 'STATUS'}
                         </p>
                         <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
                           suggestionType === 'critical' ? 'border-red-200' : 
@@ -807,7 +651,7 @@ export default function AdminDashboard() {
                             suggestionType === 'warning' ? 'text-orange-600' : 
                             'text-blue-600'
                           } leading-relaxed flex-1`}>
-                            {item.aiSuggestion || `Item unsold for ${item.daysSinceSale} days`}
+                            {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
                           </p>
                           <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
                         </div>
@@ -828,7 +672,7 @@ export default function AdminDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Demand Forecasting Card - Show first 3 items */}
+          {/* Demand Forecasting Card - Updated with clickable product cards */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -844,7 +688,7 @@ export default function AdminDashboard() {
                       Demand Forecasting
                     </h2>
                     <p className="text-xs font-medium text-blue-600">
-                      {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'AI Unavailable'}
+                      {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'Data Analysis'}
                     </p>
                   </div>
                 </div>
@@ -861,17 +705,17 @@ export default function AdminDashboard() {
               
               {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
                 <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
-                  {[30, 60, 90].map((period: number) => (
+                  {nextThreeMonths.map((month, idx) => (
                     <button
-                      key={period}
-                      onClick={() => setForecastPeriod(period as 30 | 60 | 90)}
+                      key={idx}
+                      onClick={() => setSelectedForecastMonth(idx)}
                       className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                        forecastPeriod === period 
+                        selectedForecastMonth === idx 
                           ? "bg-white text-[#0B3C8A] shadow-sm" 
                           : "text-gray-400 hover:text-gray-600"
                       }`}
                     >
-                      {period}d
+                      {month.slice(0, 3)}
                     </button>
                   ))}
                 </div>
@@ -882,11 +726,12 @@ export default function AdminDashboard() {
               {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
                 <div className="space-y-3">
                   {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
-                    <ForecastItem 
-                      key={i} 
+                    <ForecastCard 
+                      key={i}
                       data={item} 
                       currentDemand={getCurrentDisplayDemand(item)}
-                      forecastPeriod={forecastPeriod}
+                      selectedMonth={nextThreeMonths[selectedForecastMonth]}
+                      onClick={() => openForecastExplanation(item)}
                     />
                   ))}
                 </div>
@@ -897,14 +742,14 @@ export default function AdminDashboard() {
                   </div>
                   <p className="text-sm text-gray-500">
                     {!usingML 
-                      ? "AI prediction service is currently unavailable" 
+                      ? "Prediction service is currently unavailable" 
                       : !hasEnoughDataForML 
-                      ? "Insufficient data for AI recommendations"
-                      : "No reorder recommendations at this time"}
+                      ? "Insufficient data for predictions"
+                      : "No recommendations at this time"}
                   </p>
                   {!hasEnoughDataForML && usingML && (
                     <p className="text-xs text-gray-400 mt-2">
-                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for AI predictions
+                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for accurate predictions
                     </p>
                   )}
                 </div>
@@ -912,6 +757,7 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
 
+          {/* Performance Heatmap */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
@@ -974,137 +820,6 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
         </div>
-
-        {/* Trend Visualization - Full Width */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
-        >
-          <div className="p-4 sm:p-6 border-b border-gray-100">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="p-2 bg-[#0B3C8A] rounded-lg">
-                    <Activity className="text-white w-5 h-5" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-800">
-                    Trend Visualization
-                  </h2>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-gray-500 ml-1">
-                  <BarChart3 size={12} />
-                  <span>Actual {usingML ? 'vs. AI Predicted Sales' : 'Sales Only'}</span>
-                </div>
-              </div>
-
-              <div className="bg-gray-100 p-1 rounded-lg flex text-sm font-medium">
-                <button
-                  onClick={() => setActiveTab("weekly")}
-                  className={`px-4 py-1.5 rounded-md transition-all text-sm ${
-                    activeTab === "weekly"
-                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  Weekly Sales
-                </button>
-                <button
-                  onClick={() => setActiveTab("monthly")}
-                  className={`px-4 py-1.5 rounded-md transition-all text-sm ${
-                    activeTab === "monthly"
-                      ? "bg-white text-[#0B3C8A] shadow-sm font-semibold"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  Monthly Sales
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-6 pt-0">
-            <div className="relative min-h-[300px]">
-              {chartData && chartData.length > 0 ? (
-                <div>
-                  <div className="flex gap-4 overflow-x-auto pb-4">
-                    <div className="flex flex-col justify-between h-64 pb-6 text-xs text-gray-400 font-medium text-right w-12 border-r border-gray-100 pr-3 pt-4 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                      <span>{(chartMaxValue / 1000).toFixed(0)}k</span>
-                      <span>{Math.round(chartMaxValue * 0.75 / 1000)}k</span>
-                      <span>{Math.round(chartMaxValue * 0.5 / 1000)}k</span>
-                      <span>{Math.round(chartMaxValue * 0.25 / 1000)}k</span>
-                      <span>0</span>
-                    </div>
-
-                    <div className="flex-1 h-64 flex items-end justify-between gap-2 px-2 border-b border-dashed border-gray-200 pb-2 min-w-[800px]">
-                      {chartData.map((data: ChartDataPoint, idx: number) => (
-                        <ChartBarGroup
-                          key={`${activeTab}-${idx}`}
-                          label={data.label}
-                          fullLabel={data.fullLabel}
-                          actual={data.actual}
-                          forecast={data.forecast}
-                          lower={data.lower}
-                          upper={data.upper}
-                          maxVal={chartMaxValue}
-                          delay={idx * 0.03}
-                          isWide={activeTab === "monthly"}
-                          onHover={() => handleBarHover(data.label, data.fullLabel, data.actual, data.forecast)}
-                          onLeave={handleBarLeave}
-                          usingML={usingML}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {hoveredBar && (
-                    <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded-lg py-2 px-3 shadow-xl z-20 whitespace-nowrap">
-                      <div className="font-bold mb-1 text-center">{hoveredBar.fullLabel}</div>
-                      <div className="flex gap-4">
-                        <div>
-                          <span className="text-gray-400">Actual:</span>
-                          <span className="ml-1 font-bold">₱{hoveredBar.actual.toLocaleString()}</span>
-                        </div>
-                        {usingML && hoveredBar.forecast > 0 && (
-                          <div>
-                            <span className="text-gray-400">AI Predicted:</span>
-                            <span className="ml-1 font-bold text-blue-300">₱{hoveredBar.forecast.toLocaleString()}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col items-center mt-6">
-                    <div className="flex justify-center items-center gap-6 text-sm bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded bg-[#0B3C8A]"></span>
-                        <span className="text-gray-700 font-medium">
-                          Actual Sales
-                        </span>
-                      </div>
-                      {usingML && (
-                        <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded bg-blue-300"></span>
-                          <span className="text-gray-700 font-medium">
-                            AI Predicted
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                  <Database size={48} className="mb-3 opacity-20" />
-                  <p className="text-sm font-medium">No transaction data available</p>
-                  <p className="text-xs mt-1 text-center max-w-xs">
-                    Complete sales transactions to see sales velocity forecasts.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </motion.div>
       </motion.div>
 
       {/* Low Stock Modal */}
@@ -1130,7 +845,7 @@ export default function AdminDashboard() {
                       {item.status === 'critical' ? 'OUT' : 'LOW'}
                     </span>
                   </div>
-                  <div className="text-sm">
+                  <div>
                     <p className="text-gray-500 text-xs">Current Stock</p>
                     <p className="font-bold text-gray-900">{item.currentStock} units</p>
                   </div>
@@ -1152,6 +867,7 @@ export default function AdminDashboard() {
               {DEADSTOCK_DATA.map((item) => {
                 const hasAISuggestion = usingML && item.aiSuggestion;
                 const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                const daysToShow = item.daysSinceSale;
                 
                 return (
                   <div 
@@ -1168,7 +884,7 @@ export default function AdminDashboard() {
                           {item.name}
                         </h4>
                         <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
-                          <Clock size={12}/> {item.daysSinceSale} Days Unsold • {item.stock} units
+                          <Clock size={12}/> {daysToShow} Days Unsold • {item.stock} units
                         </span>
                       </div>
                       <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
@@ -1187,7 +903,7 @@ export default function AdminDashboard() {
                           suggestionType === 'warning' ? 'text-orange-600' : 
                           'text-blue-600'
                         } leading-relaxed flex-1`}>
-                          {item.aiSuggestion || `Item unsold for ${item.daysSinceSale} days`}
+                          {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
                         </p>
                         <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
                       </div>
@@ -1200,7 +916,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Forecast Modal */}
+      {/* Forecast Modal - Using clickable cards */}
       <AnimatePresence>
         {showForecastModal && (
           <Modal
@@ -1209,15 +925,29 @@ export default function AdminDashboard() {
           >
             <div className="space-y-3">
               {FORECAST_DATA.map((item, i) => (
-                <ForecastItem 
-                  key={i} 
+                <ForecastCard 
+                  key={i}
                   data={item} 
                   currentDemand={getCurrentDisplayDemand(item)}
-                  forecastPeriod={forecastPeriod}
+                  selectedMonth={nextThreeMonths[selectedForecastMonth]}
+                  onClick={() => {
+                    setShowForecastModal(false);
+                    openForecastExplanation(item);
+                  }}
                 />
               ))}
             </div>
           </Modal>
+        )}
+      </AnimatePresence>
+
+      {/* Simplified Forecast Explanation Modal */}
+      <AnimatePresence>
+        {showForecastExplanationModal && selectedForecastProduct && (
+          <SimplifiedForecastExplanationModal
+            explanation={generateForecastExplanation(selectedForecastProduct)}
+            onClose={() => setShowForecastExplanationModal(false)}
+          />
         )}
       </AnimatePresence>
 
@@ -1233,6 +963,38 @@ export default function AdminDashboard() {
       </AnimatePresence>
     </>
   );
+}
+
+// Helper function for deadstock analysis
+function calculateDetailedAnalysis(item: DeadstockItem) {
+  if (!item) return null;
+  
+  const originalPrice = item.markupPrice || 0;
+  const baseCost = item.baseCost || 0;
+  const discountPercent = item.recommendedDiscount || 0;
+  const discountedPrice = originalPrice * (1 - discountPercent / 100);
+  const profitPerUnit = originalPrice - baseCost;
+  const profitAfterDiscount = discountedPrice - baseCost;
+  const totalProfitOriginal = profitPerUnit * item.stock;
+  const totalProfitAfterDiscount = profitAfterDiscount * item.stock;
+  const totalRecovered = discountedPrice * item.stock;
+  const totalBaseCost = baseCost * item.stock;
+  
+  const recoversCost = profitAfterDiscount > 0;
+  
+  return {
+    originalPrice,
+    baseCost,
+    discountedPrice,
+    profitPerUnit,
+    profitAfterDiscount,
+    totalProfitOriginal,
+    totalProfitAfterDiscount,
+    totalRecovered,
+    totalBaseCost,
+    discountPercentage: discountPercent,
+    recoversCost
+  };
 }
 
 // Modal Component
@@ -1267,6 +1029,234 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
+// Forecast Card Component - Clickable card (similar to Deadstock Impact design)
+function ForecastCard({ data, currentDemand, selectedMonth, onClick }: { 
+  data: ForecastDisplayData; 
+  currentDemand: number; 
+  selectedMonth: string;
+  onClick: () => void;
+}) {
+  const orderQuantity = Math.max(0, currentDemand - data.currentStock);
+  const needsReorder = orderQuantity > 0;
+
+  return (
+    <div 
+      onClick={onClick}
+      className="bg-white border border-gray-200 rounded-lg p-3 space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
+    >
+      <div className="flex justify-between items-start">
+        <div className="min-w-0 pr-3 flex-1">
+          <h4 className="text-sm font-semibold text-gray-800 truncate">
+            {data.name}
+          </h4>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-3 gap-2 pt-1">
+        <div>
+          <p className="text-gray-500 text-[10px] font-medium">Current Stock</p>
+          <p className="font-bold text-gray-900 text-sm">
+            {data.currentStock} units
+          </p>
+        </div>
+        <div>
+          <p className="text-gray-500 text-[10px] font-medium">{selectedMonth} Forecast</p>
+          <p className="font-bold text-[#0B3C8A] text-sm">
+            {currentDemand} units
+          </p>
+        </div>
+        <div>
+          <p className="text-gray-500 text-[10px] font-medium">Order</p>
+          <p className="font-bold text-emerald-600 text-sm">
+            {orderQuantity} units
+          </p>
+        </div>
+      </div>
+      
+      <div className="border-t border-gray-100 pt-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <Package size={12} />
+            {needsReorder ? `Order ${orderQuantity} Units for ${selectedMonth}` : "Stock Sufficient"}
+          </div>
+          <ChevronRight size={14} className="text-gray-400" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Simplified Forecast Explanation Modal
+function SimplifiedForecastExplanationModal({ 
+  explanation, 
+  onClose 
+}: { 
+  explanation: ForecastExplanation; 
+  onClose: () => void;
+}) {
+  const recommendedOrder = Math.max(0, explanation.monthlyForecasts[0].predictedDemand - explanation.currentStock);
+  
+  const getTrendDisplay = () => {
+    if (explanation.trend === 'up') {
+      return { icon: <TrendingUp size={20} className="text-green-600" />, text: 'Increasing', color: 'text-green-600', bg: 'bg-green-50' };
+    } else if (explanation.trend === 'down') {
+      return { icon: <TrendingDown size={20} className="text-red-600" />, text: 'Decreasing', color: 'text-red-600', bg: 'bg-red-50' };
+    } else {
+      return { icon: <Minus size={20} className="text-gray-500" />, text: 'Stable', color: 'text-gray-600', bg: 'bg-gray-50' };
+    }
+  };
+  
+  const trendDisplay = getTrendDisplay();
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+      >
+        <div className="sticky top-0 bg-gradient-to-r from-blue-50 to-white p-5 border-b border-gray-200">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Package size={18} className="text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Forecast Details</h2>
+                <p className="text-xs text-gray-500">{explanation.productName}</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+              <X size={18} className="text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Current Stock Summary */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-semibold text-gray-600">Current Stock</span>
+              <span className="text-xl font-bold text-gray-800">{explanation.currentStock} units</span>
+            </div>
+          </div>
+
+          {/* Monthly Forecasts */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Monthly Forecast</h3>
+            <div className="space-y-3">
+              {explanation.monthlyForecasts.map((forecast, idx) => (
+                <div key={idx} className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-gray-800">{forecast.month}</span>
+                    <span className="text-xl font-bold text-blue-600">{forecast.predictedDemand} units</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Trend Summary */}
+          <div className={`${trendDisplay.bg} rounded-xl p-4 border border-gray-200`}>
+            <div className="flex items-center gap-2">
+              {trendDisplay.icon}
+              <span className={`text-sm font-semibold ${trendDisplay.color}`}>
+                {trendDisplay.text} Demand
+              </span>
+            </div>
+            <p className="text-xs text-gray-600 mt-2">
+              {explanation.trend === 'up' 
+                ? "Based on recent sales patterns, demand for this product is expected to grow."
+                : explanation.trend === 'down'
+                ? "Based on recent sales patterns, demand for this product is expected to decline."
+                : "Based on recent sales patterns, demand for this product is expected to remain steady."}
+            </p>
+          </div>
+
+          {/* Action Recommendation */}
+          <div className="bg-gradient-to-r from-[#0B3C8A] to-blue-700 rounded-xl p-4 text-white">
+            <div className="flex items-center gap-2 mb-2">
+              <Package size={16} />
+              <h3 className="text-sm font-bold">Recommended Action</h3>
+            </div>
+            <p className="text-base font-bold">
+              {explanation.trend === 'up' 
+                ? `Order ${recommendedOrder} units for ${explanation.monthlyForecasts[0].month}`
+                : explanation.trend === 'down'
+                ? "Review stock levels - reducing orders recommended"
+                : "Maintain current stock levels"}
+            </p>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function StatCard({ data }: { data: StatData }) {
+  let Icon = Banknote;
+  let themeColor = "blue";
+
+  if (data.id === "low_stock") {
+    Icon = AlertTriangle;
+    themeColor = "orange";
+  } else if (data.id === "gross_profit") {
+    Icon = Banknote;
+    themeColor = "emerald";
+  } else if (data.id === "total_revenue") {
+    Icon = Banknote;
+    themeColor = "blue";
+  }
+
+  const styles: Record<string, { icon: string; bg: string; badge: string }> = {
+    blue: {
+      icon: "text-[#0B3C8A]",
+      bg: "bg-blue-50",
+      badge: "bg-blue-100 text-[#0B3C8A]",
+    },
+    emerald: {
+      icon: "text-emerald-700",
+      bg: "bg-emerald-50",
+      badge: "bg-emerald-100 text-emerald-700",
+    },
+    orange: {
+      icon: "text-orange-600",
+      bg: "bg-orange-50",
+      badge: "bg-orange-100 text-orange-700",
+    },
+  };
+
+  const currentStyle = styles[themeColor] || styles.blue;
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-gray-100"
+    >
+      <div className="flex justify-between items-start">
+        <div className={`p-2 sm:p-3 rounded-lg ${currentStyle.bg} mb-3`}>
+          <Icon size={18} className={`${currentStyle.icon} sm:w-5 sm:h-5`} />
+        </div>
+        <span
+          className={`px-2 py-1 rounded text-xs font-bold ${currentStyle.badge}`}
+        >
+          {data.trend}
+        </span>
+      </div>
+      <h3 className="text-xl sm:text-2xl font-bold text-gray-800">{data.value}</h3>
+      <p className="text-xs sm:text-sm text-gray-500 mt-1">{data.label}</p>
+    </motion.div>
+  );
+}
+
 // Deadstock Analysis Modal Component
 function DeadstockAnalysisModal({ 
   item, 
@@ -1279,7 +1269,14 @@ function DeadstockAnalysisModal({
 }) {
   if (!analysis) return null;
   
-  const profitMarginColor = analysis.profitMargin >= 30 ? 'text-green-700' : analysis.profitMargin >= 15 ? 'text-yellow-700' : 'text-red-700';
+  const getDiscountProgression = () => {
+    const days = item.daysSinceSale;
+    if (days >= 90) return "Maximum discount range (22-25%)";
+    if (days >= 70) return "Accelerated discount range (18-20%)";
+    if (days >= 50) return "Moderate discount range (12-15%)";
+    if (days >= 30) return "Initial discount range (5-8%)";
+    return "No discount recommended";
+  };
   
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1371,71 +1368,75 @@ function DeadstockAnalysisModal({
           </div>
 
           <div className="border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-1.5 bg-purple-100 rounded-lg">
-                <Calculator size={18} className="text-purple-600" />
-              </div>
-              <h3 className="font-bold text-gray-800">ML Factor Breakdown</h3>
-            </div>
-
             <div className="space-y-4">
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-medium text-gray-700">Days Unsold Factor</span>
-                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.daysFactor * 100)}%</span>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-semibold text-gray-800">Days Unsold</span>
+                  <span className="text-lg font-bold text-orange-600">{item.daysSinceSale} days</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${analysis.daysFactor * 100}%` }}></div>
+                <p className="text-xs text-gray-600">
+                  {item.daysSinceSale >= 90 
+                    ? "Product has been unsold for over 3 months - maximum discount urgency" 
+                    : item.daysSinceSale >= 60 
+                    ? "Product has been unsold for 2-3 months - high discount urgency"
+                    : item.daysSinceSale >= 30 
+                    ? "Product has been unsold for 1-2 months - moderate discount urgency"
+                    : "Product recently sold - minimal discount needed"}
+                </p>
+                <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
+                  <div className="bg-orange-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, (item.daysSinceSale / 90) * 100)}%` }}></div>
                 </div>
-                <p className="text-[10px] text-gray-500 mt-1">Higher days unsold = higher discount urgency</p>
+                <p className="text-[10px] text-gray-500 mt-1">{getDiscountProgression()}</p>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-medium text-gray-700">Capital Locked Factor</span>
-                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.capitalFactor * 100)}%</span>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-semibold text-gray-800">Capital Locked</span>
+                  <span className="text-lg font-bold text-red-600">₱{item.lockedCapital.toLocaleString()}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-red-500 h-2 rounded-full" style={{ width: `${analysis.capitalFactor * 100}%` }}></div>
-                </div>
-                <p className="text-[10px] text-gray-500 mt-1">Higher locked capital increases discount recommendation</p>
+                <p className="text-xs text-gray-600">
+                  {item.lockedCapital > 100000 
+                    ? "High capital exposure - faster recovery recommended" 
+                    : item.lockedCapital > 50000 
+                    ? "Moderate capital exposure - recovery encouraged"
+                    : "Lower capital exposure - flexible timeline"}
+                </p>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Locked capital = {item.stock} units × ₱{item.markupPrice?.toLocaleString()}
+                </p>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-medium text-gray-700">Category Urgency Multiplier</span>
-                  <span className="text-xs font-bold text-gray-900">{analysis.categoryUrgency.toFixed(2)}x</span>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-semibold text-gray-800">Product Category</span>
+                  <span className="text-lg font-bold text-yellow-600">{item.category}</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-yellow-500 h-2 rounded-full" style={{ width: `${Math.min(analysis.categoryUrgency * 100, 100)}%` }}></div>
-                </div>
-                <p className="text-[10px] text-gray-500 mt-1">Perishable categories (Contacts, Solutions) get higher urgency</p>
+                <p className="text-xs text-gray-600">
+                  {item.category === 'Contact Lenses' || item.category === 'Solutions' 
+                    ? "Perishable category - urgency factor applied to prevent expiry losses" 
+                    : "Standard category - normal discount progression"}
+                </p>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-medium text-gray-700">Historical Velocity Factor</span>
-                  <span className="text-xs font-bold text-gray-900">{Math.round(analysis.velocityFactor * 100)}%</span>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-semibold text-gray-800">Historical Sales Velocity</span>
+                  <span className="text-lg font-bold text-green-600">{item.historicalVelocity?.toFixed(0) || 0} units/month</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div className="bg-green-500 h-2 rounded-full" style={{ width: `${analysis.velocityFactor * 100}%` }}></div>
-                </div>
-                <p className="text-[10px] text-gray-500 mt-1">Products that sold well previously get lower discounts</p>
+                <p className="text-xs text-gray-600">
+                  {item.historicalVelocity && item.historicalVelocity > 10 
+                    ? "Strong historical sales - conservative discount approach" 
+                    : item.historicalVelocity && item.historicalVelocity > 5
+                    ? "Average historical sales - standard discount approach"
+                    : "Limited historical sales - standard discount approach"}
+                </p>
               </div>
-            </div>
 
-            <div className="mt-5 pt-4 border-t border-gray-200">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-gray-700">Profit Margin</span>
-                <span className={`font-bold ${profitMarginColor}`}>{analysis.profitMargin.toFixed(1)}%</span>
-              </div>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-sm font-medium text-gray-700">Max Allowed Discount (Cost Recovery)</span>
-                <span className="font-bold text-blue-700">{analysis.maxAllowedDiscount.toFixed(1)}%</span>
-              </div>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-sm font-medium text-gray-700">Final Recommended Discount</span>
-                <span className="font-bold text-red-700">{analysis.discountPercentage}%</span>
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
+                <p className="text-xs text-gray-700 leading-relaxed">
+                  The AI evaluates days unsold, capital exposure and historical sales performance to recommend 
+                  an optimal discount that balances inventory clearance with business profitability.
+                </p>
               </div>
             </div>
           </div>
@@ -1449,8 +1450,8 @@ function DeadstockAnalysisModal({
               )}
               <p className="text-sm font-semibold text-gray-800">
                 {analysis.recoversCost 
-                  ? "✅ This discount recommendation ensures cost recovery while maintaining profitability." 
-                  : "⚠️ This product has low profit margin. Recommended discount is minimal to avoid loss."}
+                  ? "This discount recommendation ensures cost recovery while maintaining profitability." 
+                  : "This product has low profit margin. Recommended discount is minimal to avoid loss."}
               </p>
             </div>
           </div>
@@ -1462,187 +1463,6 @@ function DeadstockAnalysisModal({
           </button>
         </div>
       </motion.div>
-    </div>
-  );
-}
-
-function StatCard({ data }: { data: StatData }) {
-  let Icon = Banknote;
-  let themeColor = "blue";
-
-  if (data.id === "low_stock") {
-    Icon = AlertTriangle;
-    themeColor = "orange";
-  } else if (data.id === "gross_profit") {
-    Icon = Banknote;
-    themeColor = "emerald";
-  } else if (data.id === "total_revenue") {
-    Icon = Banknote;
-    themeColor = "blue";
-  }
-
-  const styles: Record<string, { icon: string; bg: string; badge: string }> = {
-    blue: {
-      icon: "text-[#0B3C8A]",
-      bg: "bg-blue-50",
-      badge: "bg-blue-100 text-[#0B3C8A]",
-    },
-    emerald: {
-      icon: "text-emerald-700",
-      bg: "bg-emerald-50",
-      badge: "bg-emerald-100 text-emerald-700",
-    },
-    orange: {
-      icon: "text-orange-600",
-      bg: "bg-orange-50",
-      badge: "bg-orange-100 text-orange-700",
-    },
-  };
-
-  const currentStyle = styles[themeColor] || styles.blue;
-
-  return (
-    <motion.div
-      variants={itemVariants}
-      className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-gray-100"
-    >
-      <div className="flex justify-between items-start">
-        <div className={`p-2 sm:p-3 rounded-lg ${currentStyle.bg} mb-3`}>
-          <Icon size={18} className={`${currentStyle.icon} sm:w-5 sm:h-5`} />
-        </div>
-        <span
-          className={`px-2 py-1 rounded text-xs font-bold ${currentStyle.badge}`}
-        >
-          {data.trend}
-        </span>
-      </div>
-      <h3 className="text-xl sm:text-2xl font-bold text-gray-800">{data.value}</h3>
-      <p className="text-xs sm:text-sm text-gray-500 mt-1">{data.label}</p>
-    </motion.div>
-  );
-}
-
-function ForecastItem({ data, currentDemand, forecastPeriod }: { data: ForecastDisplayData; currentDemand: number; forecastPeriod: number }) {
-  const orderQuantity = Math.max(0, currentDemand - data.currentStock);
-  const needsReorder = orderQuantity > 0;
-
-  return (
-    <motion.div
-      initial={{ x: -20, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      transition={{ duration: 0.5 }}
-      className="bg-gray-50 p-3 rounded-lg border border-gray-100"
-    >
-      <div className="flex justify-between items-start gap-2 mb-3">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {data.trend === "up" ? (
-            <ArrowUpRight size={14} className="text-[#0B3C8A] flex-shrink-0" />
-          ) : data.trend === "down" ? (
-            <ArrowDownRight size={14} className="text-orange-500 flex-shrink-0" />
-          ) : (
-            <div className="w-4 h-4 rounded-full bg-gray-400 flex-shrink-0" />
-          )}
-          <h3 className="font-semibold text-gray-800 text-sm break-words">
-            {data.name}
-          </h3>
-        </div>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
-          data.priority === 'high' ? 'bg-red-100 text-red-700' :
-          data.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
-          'bg-blue-100 text-blue-700'
-        }`}>
-          {data.priority.toUpperCase()}
-        </span>
-      </div>
-      
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div>
-          <p className="text-gray-500 text-xs">Current</p>
-          <p className="font-bold text-gray-900 text-sm">
-            {data.currentStock} units
-          </p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs">{forecastPeriod}d Demand</p>
-          <p className="font-bold text-[#0B3C8A] text-sm">
-            {currentDemand} units
-          </p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs">Order</p>
-          <p className="font-bold text-emerald-600 text-sm">
-            {orderQuantity} units
-          </p>
-        </div>
-      </div>
-      
-      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-        <div className="flex items-center gap-1 text-xs text-gray-600 font-medium">
-          <Package size={12} />
-          {needsReorder ? `Order ${orderQuantity} Units` : "Stock Sufficient"}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-interface ChartBarGroupProps {
-  label: string;
-  fullLabel: string;
-  actual: number;
-  forecast: number;
-  lower?: number;
-  upper?: number;
-  maxVal: number;
-  delay: number;
-  isWide?: boolean;
-  onHover: () => void;
-  onLeave: () => void;
-  usingML: boolean;
-}
-
-function ChartBarGroup({
-  label,
-  fullLabel,
-  actual,
-  forecast,
-  maxVal,
-  delay,
-  isWide = false,
-  onHover,
-  onLeave,
-  usingML,
-}: ChartBarGroupProps) {
-  const actualHeight = `${Math.min((actual / maxVal) * 100, 100)}%`;
-  const forecastHeight = usingML ? `${Math.min((forecast / maxVal) * 100, 100)}%` : '0%';
-  const barWidthClass = isWide ? "w-12 sm:w-20" : "w-6 sm:w-12";
-
-  return (
-    <div 
-      className="flex flex-col items-center gap-1 flex-1 group relative cursor-pointer h-full justify-end min-w-[60px] sm:min-w-[80px]"
-      onMouseEnter={onHover}
-      onMouseLeave={onLeave}
-    >
-      <div className="flex items-end gap-1 w-full justify-center h-full">
-        <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: actualHeight }}
-          transition={{ duration: 0.5, delay: delay, ease: "easeOut" }}
-          className={`${barWidthClass} bg-[#0B3C8A] rounded-t-sm origin-bottom opacity-90 group-hover:opacity-100 shadow-sm transition-opacity`}
-        ></motion.div>
-        
-        {usingML && (
-          <motion.div
-            initial={{ height: 0 }}
-            animate={{ height: forecastHeight }}
-            transition={{ duration: 0.5, delay: delay + 0.1, ease: "easeOut" }}
-            className={`${barWidthClass} bg-blue-300 rounded-t-sm origin-bottom opacity-70 group-hover:opacity-90 shadow-sm transition-opacity`}
-          ></motion.div>
-        )}
-      </div>
-      <span className="text-xs font-medium text-gray-400 group-hover:text-gray-700 transition-colors">
-        {label}
-      </span>
     </div>
   );
 }

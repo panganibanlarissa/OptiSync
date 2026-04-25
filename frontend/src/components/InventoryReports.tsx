@@ -22,37 +22,17 @@ import ProductModal, { ProductFormData } from "./ProductModal";
 import QRCodeModal from "./QRCodeModal";
 import QRScannerModal from "./QRScannerModal";
 import ProductDetailsModal from "./ProductDetailsModal";
+import { useFirebase } from "@/context/FirebaseContext";
+import { useNotification } from "./NotificationProvider";
 
-interface InventoryData {
-  id: string;
-  sku: string;
-  name: string;
-  category: string;
-  specifications: string;
-  baseCost: number;
-  markupPrice: number;
-  supplierInfo: string;
-  stock: number;
-  lastMovedDaysAgo: number;
-  imageColor: string;
-  image: string | null;
-  leadTimeDays: number;
-  reorderPoint: number;
-  expiryDate?: string | null;
-  batchNumber?: string;
-  totalSold?: number;
-  beginningInventory?: number;
-  damageExchanged?: number;
-  isDead?: boolean;
-  is_dead?: boolean;
-  createdAt?: any;
-  updatedAt?: any;
-}
+// Use the Product type from FirebaseContext to ensure consistency
+import type { Product } from "@/context/FirebaseContext";
+
+type InventoryData = Product;
 
 interface ReportFilters {
   category: string;
-  stockStatus: string; // "all", "low", "out", "healthy"
-  priceRange: { min: number; max: number };
+  stockStatus: string; // "all", "low", "out", "healthy", "deadstock"
   searchQuery: string;
   dateRange: { startDate: string; endDate: string };
 }
@@ -78,68 +58,35 @@ export default function InventoryReports({
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
 }) {
+  const { updateProduct, transactions } = useFirebase();
+  const { showNotification, showToastOnly } = useNotification();
 
   const resetFilters = () => {
-  setFilters({
-    category: "All Categories",
-    stockStatus: "all",
-    priceRange: { min: 0, max: 999999 },
-    searchQuery: "",
-    dateRange: {
-      startDate: "",  // Reset to empty (no date filter)
-      endDate: ""     // Reset to empty (no date filter)
-    },
-  });
-  
-  if (setSearchQuery) setSearchQuery("");
-  setMinPrice("0");
-  setMaxPrice("999999");
-};
-
-  const earliestProductDate = useMemo<string>(() => {
-    const parsedDates: Date[] = products.map((product) => {
-      try {
-        if (product.createdAt) {
-          if (typeof (product as any).createdAt.toDate === 'function') {
-            return (product as any).createdAt.toDate();
-          }
-          if (typeof product.createdAt === 'string') {
-            const d = new Date(product.createdAt);
-            if (!isNaN(d.getTime())) return d;
-          }
-          if (product.createdAt instanceof Date) {
-            return product.createdAt;
-          }
-        }
-      } catch (e) {
-        // ignore
-      }
-      return null as any;
-    }).filter(Boolean) as Date[];
-
-    if (parsedDates.length === 0) {
-      return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    }
-
-    const min = parsedDates.reduce((a, b) => (a < b ? a : b));
-    return min.toISOString().split('T')[0];
-  }, [products]);
+    setFilters({
+      category: "All Categories",
+      stockStatus: "all",
+      searchQuery: "",
+      dateRange: {
+        startDate: "",
+        endDate: ""
+      },
+    });
+    
+    if (setSearchQuery) setSearchQuery("");
+  };
 
   const [filters, setFilters] = useState<ReportFilters>({
     category: "All Categories",
     stockStatus: "all",
-    priceRange: { min: 0, max: 999999 },
     searchQuery: "",
     dateRange: {
-      startDate:  "",
-      endDate:  ""
+      startDate: "",
+      endDate: ""
     },
   });
 
   const [showFilters, setShowFilters] = useState(false);
   const [showArchiveList, setShowArchiveList] = useState(false);
-  const [minPrice, setMinPrice] = useState("0");
-  const [maxPrice, setMaxPrice] = useState("999999");
   const [editingProduct, setEditingProduct] = useState<ProductFormData | null>(null);
   const [adjustingProduct, setAdjustingProduct] = useState<ProductFormData | null>(null);
   const [viewingProduct, setViewingProduct] = useState<InventoryData | null>(null);
@@ -150,11 +97,67 @@ export default function InventoryReports({
   const [pendingArchive, setPendingArchive] = useState<null | { id: string; archived: boolean; name?: string }>(null);
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
 
+  // Helper function to calculate days since last sale for a product
+  const getDaysSinceLastSale = (product: InventoryData, today: Date): number => {
+    // Get completed transactions
+    const completedTransactions = (transactions || []).filter(t => t.status === 'completed');
+    
+    // Find all sales for this product
+    const salesForProduct = completedTransactions
+      .filter(t => t.items.some((item: any) => item.id === product.id))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
+    const lastSale = salesForProduct[0];
+    
+    if (lastSale) {
+      const lastSaleDate = new Date(lastSale.date);
+      lastSaleDate.setHours(0, 0, 0, 0);
+      return Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
+    } else {
+      // Never sold - use creation date or fallback
+      let createdDate: Date | null = null;
+      
+      if (product.createdAt) {
+        try {
+          if (typeof (product as any).createdAt.toDate === 'function') {
+            createdDate = (product as any).createdAt.toDate();
+          } else if (product.createdAt instanceof Date) {
+            createdDate = product.createdAt;
+          } else if (typeof product.createdAt === 'string') {
+            createdDate = new Date(product.createdAt);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      
+      if (createdDate) {
+        createdDate.setHours(0, 0, 0, 0);
+        return Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+      }
+      
+      return product.lastMovedDaysAgo || 0;
+    }
+  };
+
+  // Check if a product is deadstock (30+ days without sales)
+  const isProductDeadstock = (product: InventoryData, today: Date): boolean => {
+    // Archived or deleted products are not considered for deadstock status
+    if ((product as any).archived === true) return false;
+    
+    const daysSinceSale = getDaysSinceLastSale(product, today);
+    return daysSinceSale >= 30;
+  };
+
   // Filter products based on selected filters
   const filteredProducts = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
     return products.filter((product) => {
       // Exclude archived products from the main report list
       if ((product as any).archived === true) return false;
+      
       // Category filter
       const categoryMatch =
         filters.category === "All Categories" ||
@@ -166,73 +169,66 @@ export default function InventoryReports({
         product.sku.toLowerCase().includes(effectiveSearchQuery.toLowerCase()) ||
         product.id.toLowerCase().includes(effectiveSearchQuery.toLowerCase());
 
-      // Stock status filter
+      // Check deadstock status
+      const isDeadstock = isProductDeadstock(product, today);
+      
+      // Stock status filter (updated to include deadstock)
       let stockStatusMatch = true;
       if (filters.stockStatus !== "all") {
-        const isLowStock = product.stock <= product.reorderPoint;
-        const isOutOfStock = product.stock === 0;
+        const isLowStock = product.stock <= product.reorderPoint && product.stock > 0 && !isDeadstock;
+        const isOutOfStock = product.stock === 0 && !isDeadstock;
 
         if (filters.stockStatus === "low") {
-          stockStatusMatch = isLowStock && !isOutOfStock;
+          stockStatusMatch = isLowStock;
         } else if (filters.stockStatus === "out") {
           stockStatusMatch = isOutOfStock;
         } else if (filters.stockStatus === "healthy") {
-          stockStatusMatch = !isLowStock && !isOutOfStock;
+          stockStatusMatch = !isLowStock && !isOutOfStock && product.stock > 0 && !isDeadstock;
+        } else if (filters.stockStatus === "deadstock") {
+          stockStatusMatch = isDeadstock && product.stock > 0;
         }
       }
 
-      // Price range filter
-      const priceMatch =
-        product.markupPrice >= filters.priceRange.min &&
-        product.markupPrice <= filters.priceRange.max;
-
-        // Date range filter
-        let dateMatch = true;
-        if (filters.dateRange.startDate || filters.dateRange.endDate) {
-          let createdDate: string | null = null;
-          
-          if (product.createdAt) {
-            try {
-              let date: Date | null = null;
-              
-              // Handle Firestore Timestamp (has toDate method)
-              if (product.createdAt && typeof product.createdAt.toDate === 'function') {
-                date = product.createdAt.toDate();
-              }
-              // Handle string dates
-              else if (typeof product.createdAt === 'string') {
-                date = new Date(product.createdAt);
-              }
-              // Handle Date objects
-              else if (product.createdAt instanceof Date) {
-                date = product.createdAt;
-              }
-              
-              if (date && !isNaN(date.getTime())) {
-                createdDate = date.toISOString().split('T')[0];
-              }
-            } catch (e) {
-              createdDate = null;
+      // Date range filter
+      let dateMatch = true;
+      if (filters.dateRange.startDate || filters.dateRange.endDate) {
+        let createdDate: string | null = null;
+        
+        if (product.createdAt) {
+          try {
+            let date: Date | null = null;
+            
+            if (product.createdAt && typeof product.createdAt.toDate === 'function') {
+              date = product.createdAt.toDate();
+            } else if (typeof product.createdAt === 'string') {
+              date = new Date(product.createdAt);
+            } else if (product.createdAt instanceof Date) {
+              date = product.createdAt;
             }
+            
+            if (date && !isNaN(date.getTime())) {
+              createdDate = date.toISOString().split('T')[0];
+            }
+          } catch (e) {
+            createdDate = null;
           }
-          
-          // Only filter if we have a valid date from the product AND date filters are applied
-          if (createdDate) {
-            if (filters.dateRange.startDate) {
-              dateMatch = dateMatch && createdDate >= filters.dateRange.startDate;
-            }
-            if (filters.dateRange.endDate) {
-              dateMatch = dateMatch && createdDate <= filters.dateRange.endDate;
-            }
-          } else if (filters.dateRange.startDate || filters.dateRange.endDate) {
-            // If product has no valid date but date filters are active, exclude it
-            dateMatch = false;
+        }
+        
+        if (createdDate) {
+          if (filters.dateRange.startDate) {
+            dateMatch = dateMatch && createdDate >= filters.dateRange.startDate;
           }
+          if (filters.dateRange.endDate) {
+            dateMatch = dateMatch && createdDate <= filters.dateRange.endDate;
+          }
+        } else if (filters.dateRange.startDate || filters.dateRange.endDate) {
+          dateMatch = false;
+        }
       }
 
-      return categoryMatch && searchMatch && stockStatusMatch && priceMatch && dateMatch;
+      return categoryMatch && searchMatch && stockStatusMatch && dateMatch;
     });
-  }, [products, filters, effectiveSearchQuery]);
+  }, [products, filters, effectiveSearchQuery, transactions]);
 
   const handleFilterChange = (key: keyof ReportFilters, value: any) => {
     setFilters((prev) => ({
@@ -241,24 +237,8 @@ export default function InventoryReports({
     }));
   };
 
-  const handlePriceRangeChange = () => {
-    const min = parseFloat(minPrice) || 0;
-    const max = parseFloat(maxPrice) || 999999;
-    setFilters((prev) => ({
-      ...prev,
-      priceRange: { min, max },
-    }));
-  };
-
-  const handlePriceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handlePriceRangeChange();
-    }
-  };
-
   const handleDateKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      // Filter is already applied on change, just blur to confirm
       e.currentTarget.blur();
     }
   };
@@ -269,7 +249,7 @@ export default function InventoryReports({
       sku: product.sku,
       name: product.name,
       category: product.category,
-      specifications: product.specifications,
+      specifications: product.specifications || "",
       baseCost: product.baseCost,
       markupPrice: product.markupPrice,
       supplierInfo: product.supplierInfo,
@@ -280,6 +260,7 @@ export default function InventoryReports({
       leadTimeDays: product.leadTimeDays,
       reorderPoint: product.reorderPoint,
       expiryDate: product.expiryDate ?? undefined,
+      batchNumber: product.batchNumber,
     });
   };
 
@@ -289,7 +270,7 @@ export default function InventoryReports({
       sku: product.sku,
       name: product.name,
       category: product.category,
-      specifications: product.specifications,
+      specifications: product.specifications || "",
       baseCost: product.baseCost,
       markupPrice: product.markupPrice,
       supplierInfo: product.supplierInfo,
@@ -300,93 +281,130 @@ export default function InventoryReports({
       leadTimeDays: product.leadTimeDays,
       reorderPoint: product.reorderPoint,
       expiryDate: product.expiryDate ?? undefined,
+      batchNumber: product.batchNumber,
       adjustmentReason: "Manual Count",
     });
   };
 
   const handleSaveProduct = async (formData: ProductFormData) => {
     try {
-      // Handle adjust stock mode
       if (adjustingProduct && onProductAdjust) {
         onProductAdjust(formData.id!, Number(formData.stock), formData.adjustmentReason || "Manual adjustment");
         setAdjustingProduct(null);
+        showToastOnly(`Stock updated for ${formData.name}`, "success");
         return;
       }
 
-      // Handle edit mode
-      const response = await fetch(`/api/products/${formData.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
+      if (formData.id) {
+        const updates: Partial<Product> = {
+          sku: formData.sku,
+          name: formData.name,
+          category: formData.category,
+          specifications: formData.specifications,
+          baseCost: formData.baseCost,
+          markupPrice: formData.markupPrice,
+          supplierInfo: formData.supplierInfo,
+          stock: formData.stock,
+          lastMovedDaysAgo: formData.lastMovedDaysAgo,
+          imageColor: formData.imageColor,
+          image: formData.image,
+          leadTimeDays: formData.leadTimeDays,
+          reorderPoint: formData.reorderPoint,
+        };
+        
+        if (formData.expiryDate) {
+          updates.expiryDate = formData.expiryDate;
+        }
+        
+        if (formData.batchNumber) {
+          updates.batchNumber = formData.batchNumber;
+        }
+        
+        Object.keys(updates).forEach(key => {
+          if (updates[key as keyof Product] === undefined) {
+            delete updates[key as keyof Product];
+          }
+        });
+        
+        await updateProduct(formData.id, updates);
+        
         setEditingProduct(null);
-        // Optionally, you can trigger a refresh of the products list here
-      } else {
-        console.error('Failed to save product');
+        showToastOnly(`Product "${formData.name}" updated successfully`, "success");
       }
     } catch (error) {
       console.error('Error saving product:', error);
+      showNotification('Failed to save product', 'error');
     }
   };
 
   const handleDeleteProduct = (id: string) => {
-    // Close the viewing product modal if the deleted product is being viewed
     if (viewingProduct?.id === id) {
       setViewingProduct(null);
     }
-    // Call the parent delete callback if provided
     if (onProductDelete) {
       onProductDelete(id);
     }
   };
 
-  // Helper function to calculate product status
+  // Helper function to calculate product status (updated to include Deadstock)
   const getProductStatus = (product: InventoryData) => {
     const statuses: string[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    // Check expiry status first - if expired/expiring, only show expiry status
+    // Check if product is deadstock (30+ days without sales) - PRIORITY 1
+    const isDeadstock = isProductDeadstock(product, today);
+    if (isDeadstock && product.stock > 0) {
+      statuses.push("Deadstock");
+    }
+    
+    // Check expiry status - if expired/expiring, show expiry status
     if (product.expiryDate) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
       const expiryDate = new Date(product.expiryDate);
       expiryDate.setHours(0, 0, 0, 0);
       
       const daysUntilExpiry = Math.floor((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       
       if (daysUntilExpiry < 0) {
-        return ["Expired"];
+        if (statuses.length === 0 || statuses[0] !== "Deadstock") {
+          statuses.unshift("Expired");
+        }
       } else if (daysUntilExpiry <= 30) {
-        return ["Expiring"];
+        if (statuses.length === 0 || statuses[0] !== "Deadstock") {
+          statuses.unshift("Expiring");
+        }
       }
     }
     
-    // Check if dead
-    const isDead = product.isDead || (product as any).is_dead;
-    if (isDead) {
+    // Check if dead (legacy flag)
+    const isDead = (product as any).isDead || (product as any).is_dead;
+    if (isDead && !statuses.includes("Deadstock")) {
       statuses.push("Dead");
     }
     
-    // Check stock status
-    const isLowStock = product.stock <= product.reorderPoint;
-    const isOutOfStock = product.stock === 0;
-    
-    if (isOutOfStock) {
-      statuses.push("Out");
-    } else if (isLowStock) {
-      statuses.push("Low");
-    } else {
-      statuses.push("OK");
+    // Check stock status (only if not deadstock)
+    if (!isDeadstock) {
+      const isLowStock = product.stock <= product.reorderPoint;
+      const isOutOfStock = product.stock === 0;
+      
+      if (isOutOfStock) {
+        statuses.push("Out");
+      } else if (isLowStock) {
+        statuses.push("Low");
+      } else if (statuses.length === 0) {
+        statuses.push("OK");
+      }
+    } else if (statuses.length === 0) {
+      statuses.push("Deadstock");
     }
     
     return statuses;
   };
 
   const getStatusColor = (statuses: string[]) => {
-    // Priority: Expired > Dead > Out > Expiring > Low > OK
+    if (statuses.includes("Deadstock")) {
+      return "text-gray-700 bg-gray-200 border border-gray-400";
+    }
     if (statuses.includes("Expired")) {
       return "text-red-700 bg-red-100 border border-red-300";
     }
@@ -416,7 +434,6 @@ export default function InventoryReports({
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
 
-    // Prepare table data
     const tableData = filteredProducts.map((product) => {
       const marginRaw = product.markupPrice - product.baseCost;
       const marginPercent = product.baseCost > 0 ? ((marginRaw / product.baseCost) * 100).toFixed(1) : "0";
@@ -426,9 +443,9 @@ export default function InventoryReports({
         product.name,
         product.category,
         product.specifications || "N/A",
-        (product.beginningInventory || 0).toString(),
-        (product.totalSold || 0).toString(),
-        (product.damageExchanged || 0).toString(),
+        ((product as any).beginningInventory || 0).toString(),
+        ((product as any).totalSold || 0).toString(),
+        ((product as any).damageExchanged || 0).toString(),
         product.stock.toString(),
         `PHP ${product.baseCost.toLocaleString()}`,
         `PHP ${product.markupPrice.toLocaleString()}`,
@@ -455,19 +472,13 @@ export default function InventoryReports({
       doc.line(14, 30, pageWidth - 14, 30);
     };
 
-    // Add filter summary
     let filterSummary = [];
     if (filters.category !== "All Categories") {
       filterSummary.push(`Category: ${filters.category}`);
     }
     if (filters.stockStatus !== "all") {
       filterSummary.push(
-        `Stock Status: ${filters.stockStatus.charAt(0).toUpperCase() + filters.stockStatus.slice(1)}`
-      );
-    }
-    if (filters.priceRange.min > 0 || filters.priceRange.max < 999999) {
-      filterSummary.push(
-        `Price Range: PHP ${filters.priceRange.min} - PHP ${filters.priceRange.max}`
+        `Stock Status: ${filters.stockStatus === 'deadstock' ? 'Deadstock' : filters.stockStatus.charAt(0).toUpperCase() + filters.stockStatus.slice(1)}`
       );
     }
     if (filters.dateRange.startDate || filters.dateRange.endDate) {
@@ -487,7 +498,6 @@ export default function InventoryReports({
       doc.text(`Filters: ${filterSummary.join(" | ")}`, 14, 37);
     }
 
-    // Add table using autoTable
     autoTable(doc, {
       head: [
         [
@@ -517,33 +527,33 @@ export default function InventoryReports({
         textColor: [0, 0, 0],
       },
       headStyles: {
-        fillColor: [0, 0, 0], // Pure black
-        textColor: [255, 255, 255], // Pure white
+        fillColor: [0, 0, 0],
+        textColor: [255, 255, 255],
         fontStyle: "bold",
         halign: "center",
       },
       columnStyles: {
-        0: { cellWidth: 20 }, // SKU
-        1: { cellWidth: "auto" }, // Name
-        2: { cellWidth: 25 }, // Category
-        3: { cellWidth: 25 }, // Specs
-        4: { halign: "center", cellWidth: 15 }, // Beg
-        5: { halign: "center", cellWidth: 15 }, // Sold
-        6: { halign: "center", cellWidth: 15 }, // Damage
-        7: { halign: "center", cellWidth: 15 }, // Stock
-        8: { halign: "right", cellWidth: 20 }, // Cost
-        9: { halign: "right", cellWidth: 20 }, // Price
-        10: { halign: "center", cellWidth: 22 }, // Expiry
-        11: { cellWidth: 25 }, // Status
+        0: { cellWidth: 20 },
+        1: { cellWidth: "auto" },
+        2: { cellWidth: 25 },
+        3: { cellWidth: 25 },
+        4: { halign: "center", cellWidth: 15 },
+        5: { halign: "center", cellWidth: 15 },
+        6: { halign: "center", cellWidth: 15 },
+        7: { halign: "center", cellWidth: 15 },
+        8: { halign: "right", cellWidth: 20 },
+        9: { halign: "right", cellWidth: 20 },
+        10: { halign: "center", cellWidth: 22 },
+        11: { cellWidth: 25 },
       },
       bodyStyles: {
         fillColor: [255, 255, 255],
         textColor: [0, 0, 0],
-        lineColor: [200, 200, 200], // light gray borders
+        lineColor: [200, 200, 200],
         lineWidth: 0.1,
       },
       alternateRowStyles: {
-        fillColor: [250, 250, 250], // very light gray
+        fillColor: [250, 250, 250],
       },
     });
 
@@ -567,7 +577,6 @@ export default function InventoryReports({
       doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, lineY + 5, { align: "right" });
     }
 
-    // Add summary
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
@@ -587,11 +596,13 @@ export default function InventoryReports({
     doc.text(`Total Inventory Value: PHP ${totalValue.toLocaleString()}`, 14, finalY + 20);
     
     const lowStockCount = filteredProducts.filter(
-      (p) => p.stock <= p.reorderPoint && p.stock > 0
+      (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
     ).length;
     doc.text(`Low Stock Items: ${lowStockCount}`, 14, finalY + 26);
+    
+    const deadstockCount = filteredProducts.filter(p => isProductDeadstock(p, new Date()) && p.stock > 0).length;
+    doc.text(`Deadstock Items (30+ days unsold): ${deadstockCount}`, 14, finalY + 32);
 
-    // Save PDF
     doc.save(
       `Inventory_Report_${new Date().toISOString().split("T")[0]}.pdf`
     );
@@ -605,9 +616,9 @@ export default function InventoryReports({
         "Product Name": product.name,
         Category: product.category,
         Specifications: product.specifications || "N/A",
-        "Beginning Inventory": product.beginningInventory || 0,
-        "Sold": product.totalSold || 0,
-        "Damage": product.damageExchanged || 0,
+        "Beginning Inventory": (product as any).beginningInventory || 0,
+        "Sold": (product as any).totalSold || 0,
+        "Damage": (product as any).damageExchanged || 0,
         "Total Stock": product.stock,
         "Base Cost": product.baseCost,
         "Retail Price": product.markupPrice,
@@ -635,32 +646,35 @@ export default function InventoryReports({
 
   const categories = ["All Categories", ...new Set(products.map((p) => p.category))];
 
+  const deadstockCount = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return products.filter(p => !(p as any).archived && isProductDeadstock(p, today) && p.stock > 0).length;
+  }, [products, transactions]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
     >
-      {/* Header */}
-      <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-slate-50">
-        {/* Flex container that stacks on mobile, row on larger screens */}
+      {/* Header - UPDATED with gradient background to match Activity Logs */}
+      <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
-          {/* Left side: Icon and Inventory List text */}
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden sm:flex p-2 bg-[#0B3C8A] rounded-lg shadow-lg shadow-blue-900/20">
+            <div className="p-2 bg-[#0B3C8A] rounded-lg shadow-md">
               <BarChart3 className="text-white" size={18} />
             </div>
             <div>
               <h2 className="text-sm sm:text-lg font-bold text-gray-800 leading-tight">
                 Inventory List
               </h2>
-              <p className="text-[9px] sm:text-[11px] text-gray-500 hidden sm:block">
+              <p className="text-[9px] sm:text-[11px] text-gray-500">
                 Browse and manage inventory items.
               </p>
             </div>
           </div>
 
-          {/* Right side: Buttons group - side by side on all screens, wraps on very small */}
           <div className="flex flex-row flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               onClick={() => {
@@ -738,7 +752,6 @@ export default function InventoryReports({
 
       {/* Search and Filters Section */}
       <div className="shrink-0 px-3 sm:px-5 pt-3 sm:pt-4 bg-slate-50 border-b border-gray-100">
-        {/* Search input with Filters button integrated */}
         <div className="relative mb-3">
           <div className="flex items-stretch">
             <div className="relative flex-grow">
@@ -794,7 +807,6 @@ export default function InventoryReports({
           </div>
         </div>
 
-        {/* Filters Panel - opens below the search bar */}
         {showFilters && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -802,8 +814,7 @@ export default function InventoryReports({
             exit={{ opacity: 0, height: 0 }}
             className="mb-3 pb-3"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-              {/* Category Filter */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div>
                 <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
                   Category
@@ -821,7 +832,6 @@ export default function InventoryReports({
                 </select>
               </div>
 
-              {/* Stock Status Filter */}
               <div>
                 <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
                   Stock Status
@@ -835,37 +845,10 @@ export default function InventoryReports({
                   <option value="healthy">Healthy Stock</option>
                   <option value="low">Low Stock</option>
                   <option value="out">Out of Stock</option>
+                  <option value="deadstock">Deadstock (30+ days unsold)</option>
                 </select>
               </div>
 
-              {/* Price Range Filter */}
-              <div>
-                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                  Price Range
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    placeholder="Min"
-                    value={minPrice}
-                    onChange={(e) => setMinPrice(e.target.value)}
-                    onBlur={handlePriceRangeChange}
-                    onKeyDown={handlePriceKeyDown}
-                    className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Max"
-                    value={maxPrice}
-                    onChange={(e) => setMaxPrice(e.target.value)}
-                    onBlur={handlePriceRangeChange}
-                    onKeyDown={handlePriceKeyDown}
-                    className="w-1/2 px-2 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
-                  />
-                </div>
-              </div>
-
-              {/* Date Range Filter */}
               <div>
                 <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
                   Start Date
@@ -880,11 +863,10 @@ export default function InventoryReports({
                     })
                   }
                   onKeyDown={handleDateKeyDown}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
                 />
               </div>
 
-              {/* End Date Filter */}
               <div>
                 <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
                   End Date
@@ -899,15 +881,14 @@ export default function InventoryReports({
                     })
                   }
                   onKeyDown={handleDateKeyDown}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A]"
+                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
                 />
               </div>
 
-              {/* Reset Button */}
               <div className="flex items-end">
                 <button
                   onClick={resetFilters}
-                  className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  className="w-full px-2.5 py-1.5 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 >
                   Reset Filters
                 </button>
@@ -919,8 +900,7 @@ export default function InventoryReports({
 
       {/* Results Summary and Table */}
       <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
-        {/* Summary Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
           <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
             <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
               Total Products
@@ -955,19 +935,26 @@ export default function InventoryReports({
             </p>
             <p className="text-lg sm:text-2xl font-bold text-orange-600 mt-1">
               {filteredProducts.filter(
-                (p) => p.stock <= p.reorderPoint && p.stock > 0
+                (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
               ).length}
+            </p>
+          </div>
+          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+              Deadstock
+            </p>
+            <p className="text-lg sm:text-2xl font-bold text-gray-600 mt-1">
+              {deadstockCount}
             </p>
           </div>
         </div>
 
-        {/* Products Table */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           {filteredProducts.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-[10px] sm:text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-gray-200">
+                <thead className="bg-slate-50 border-b border-gray-200">
+                  <tr>
                     <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
                       SKU
                     </th>
@@ -976,9 +963,6 @@ export default function InventoryReports({
                     </th>
                     <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
                       Category
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Beginning Inventory
                     </th>
                     <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
                       Sold
@@ -997,7 +981,7 @@ export default function InventoryReports({
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {filteredProducts.map((product) => {
                     const statuses = getProductStatus(product);
                     const statusColor = getStatusColor(statuses);
@@ -1008,7 +992,7 @@ export default function InventoryReports({
                     return (
                       <tr
                         key={product.id}
-                        className={`border-b border-gray-100 transition-colors ${isDimmed ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
+                        className={`transition-colors ${isDimmed ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
                       >
                         <td className="px-2 sm:px-4 py-2 sm:py-3 font-mono text-gray-600">
                           {product.sku}
@@ -1020,19 +1004,18 @@ export default function InventoryReports({
                           {product.category}
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
-                          {product.beginningInventory || 0}
+                          {(product as any).totalSold || 0}
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
-                          {product.totalSold || 0}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
-                          {product.damageExchanged || 0}
+                          {(product as any).damageExchanged || 0}
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
                           {product.stock}
                         </td>
-                        <td className={`px-2 sm:px-4 py-2 sm:py-3 text-center font-bold ${statusColor} rounded`}>
-                          {statusText}
+                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
+                          <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
+                            {statusText}
+                          </span>
                         </td>
                         <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
@@ -1087,31 +1070,40 @@ export default function InventoryReports({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-auto max-h-[80vh]">
             <div className="flex justify-between items-center p-3 border-b">
-              <h3 className="font-bold">Archive List</h3>
-              <button onClick={() => setShowArchiveList(false)} className="text-gray-500 px-2 py-1">Close</button>
+              <h3 className="font-bold text-gray-800 text-lg">Archive List</h3>
+              <button onClick={() => setShowArchiveList(false)} className="text-gray-500 px-2 py-1 hover:text-gray-700 transition-colors">Close</button>
             </div>
             <div className="p-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-gray-600">
-                    <th className="py-2">SKU</th>
-                    <th className="py-2">Name</th>
-                    <th className="py-2">Category</th>
-                    <th className="py-2">Status</th>
-                    <th className="py-2">Actions</th>
+                  <tr className="text-left text-gray-700 border-b border-gray-200">
+                    <th className="py-2 font-semibold">SKU</th>
+                    <th className="py-2 font-semibold">Name</th>
+                    <th className="py-2 font-semibold">Category</th>
+                    <th className="py-2 font-semibold">Status</th>
+                    <th className="py-2 font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {products.filter(p => (p as any).archived === true).map((p) => (
-                    <tr key={p.id} className="border-t">
-                      <td className="py-2 font-mono">{p.sku}</td>
-                      <td className="py-2">{p.name}</td>
-                      <td className="py-2">{p.category}</td>
-                      <td className="py-2">{(p as any).deleted ? 'Deleted' : 'Archived'}</td>
-                        <td className="py-2">
+                    <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
+                      <td className="py-2 font-mono text-gray-800">{p.sku}</td>
+                      <td className="py-2 text-gray-800 font-medium">{p.name}</td>
+                      <td className="py-2 text-gray-700">{p.category}</td>
+                      <td className="py-2">
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
+                          {(p as any).deleted ? 'Deleted' : 'Archived'}
+                        </span>
+                      </td>
+                      <td className="py-2">
                         <div className="flex gap-2">
                           {userRole === 'admin' ? (
-                            <button onClick={() => setPendingArchive({ id: p.id, archived: false, name: p.name })} className="px-2 py-1 bg-green-50 text-green-700 rounded">Unarchive</button>
+                            <button 
+                              onClick={() => setPendingArchive({ id: p.id, archived: false, name: p.name })} 
+                              className="px-3 py-1 bg-green-50 text-green-700 rounded-md text-xs font-medium hover:bg-green-100 transition-colors"
+                            >
+                              Unarchive
+                            </button>
                           ) : (
                             <span className="text-sm text-gray-500">N/A</span>
                           )}
@@ -1129,22 +1121,36 @@ export default function InventoryReports({
       {/* Archive Confirmation Modal */}
       {pendingArchive && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-4">
-            <h3 className="font-bold text-lg mb-2">{pendingArchive.archived ? 'Confirm Archive' : 'Confirm Unarchive'}</h3>
-            <p className="text-sm text-gray-600 mb-4">Are you sure you want to {pendingArchive.archived ? 'archive' : 'unarchive'} &quot;{pendingArchive.name || pendingArchive.id}&quot;?</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setPendingArchive(null)} className="px-3 py-1 rounded-md border border-gray-300">Cancel</button>
-              <button onClick={async () => {
-                if (onProductArchive) {
-                  try {
-                    await onProductArchive(pendingArchive.id, pendingArchive.archived);
-                  } catch (err) {
-                    console.error('Archive action failed', err);
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
+            <h3 className="font-bold text-xl text-gray-900 mb-3">
+              {pendingArchive.archived ? "Confirm Archive" : "Confirm Unarchive"}
+            </h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to {pendingArchive.archived ? "archive" : "unarchive"} "<span className="font-semibold text-gray-800">{pendingArchive.name || pendingArchive.id}</span>"?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setPendingArchive(null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (onProductArchive) {
+                    try {
+                      await onProductArchive(pendingArchive.id, pendingArchive.archived);
+                    } catch (err) {
+                      console.error('Archive action failed', err);
+                    }
                   }
-                }
-                setPendingArchive(null);
-                setShowArchiveList(false);
-              }} className="px-3 py-1 rounded-md bg-[#0B3C8A] text-white">Confirm</button>
+                  setPendingArchive(null);
+                  setShowArchiveList(false);
+                }}
+                className="px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-sm"
+              >
+                {pendingArchive.archived ? "Confirm Archive" : "Confirm Unarchive"}
+              </button>
             </div>
           </div>
         </div>
@@ -1178,7 +1184,7 @@ export default function InventoryReports({
         />
       )}
 
-      {/* Add Product Modal (from Reports header) */}
+      {/* Add Product Modal */}
       {addingProduct && (
         <ProductModal
           mode="add"
@@ -1190,7 +1196,6 @@ export default function InventoryReports({
               if (onAddProduct) {
                 await onAddProduct(data);
               } else {
-                // Fallback: send to API
                 await fetch('/api/products', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -1207,7 +1212,7 @@ export default function InventoryReports({
         />
       )}
 
-      {/* Local QR Scanner (only if parent didn't handle scanner) */}
+      {/* Local QR Scanner */}
       {showLocalScanner && (
         <QRScannerModal
           onClose={() => setShowLocalScanner(false)}

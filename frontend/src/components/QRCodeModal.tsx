@@ -223,7 +223,7 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
           </p>
 
           <p className="text-[10px] sm:text-xs text-gray-500 text-center px-2">
-            Scan this QR code to quickly add stock or edit this product
+            Scan this QR code to quickly add stock
           </p>
 
           <div className="text-[9px] sm:text-[10px] text-gray-400 bg-gray-50 p-2 sm:p-3 rounded text-center font-mono break-all w-full">

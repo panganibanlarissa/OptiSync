@@ -31,7 +31,8 @@ import {
   Banknote,
   CreditCard,
   Shield,
-  Clock
+  Clock,
+  Repeat
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
@@ -60,6 +61,7 @@ interface Product {
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   availableStock?: number;
+  archived?: boolean;
 }
 
 interface CartItem {
@@ -106,14 +108,22 @@ const itemVariants: Variants = {
 };
 
 // Helper function to check if warranty is valid (date range based)
+// Warranty is valid from start date up to and INCLUDING the end date
 const isWarrantyValid = (warrantyStartDate?: Date | string, warrantyEndDate?: Date | string): boolean => {
   if (!warrantyStartDate || !warrantyEndDate) return false;
   
   const now = new Date();
-  const startDate = new Date(warrantyStartDate);
-  const endDate = new Date(warrantyEndDate);
+  // Set current time to the end of the day (23:59:59.999) for comparison
+  // This ensures the entire end date is considered valid
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   
-  return now >= startDate && now <= endDate;
+  const startDate = new Date(warrantyStartDate);
+  startDate.setHours(0, 0, 0, 0);
+  
+  const endDate = new Date(warrantyEndDate);
+  endDate.setHours(23, 59, 59, 999);
+  
+  return today >= startDate && today <= endDate;
 };
 
 // Helper function to format warranty date range
@@ -154,9 +164,9 @@ export default function SalesPage() {
   const [showAddToCartModal, setShowAddToCartModal] = useState(false);
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
-  const [voidModalOpen, setVoidModalOpen] = useState(false);
-  const [transactionToVoid, setTransactionToVoid] = useState<string | null>(null);
-  const [voidReason, setVoidReason] = useState<string>("");
+  const [replacementModalOpen, setReplacementModalOpen] = useState(false);
+  const [transactionToReplace, setTransactionToReplace] = useState<Transaction | null>(null);
+  const [replacementReason, setReplacementReason] = useState<string>("");
   const [warrantyWarning, setWarrantyWarning] = useState<{ show: boolean; message: string; transaction: Transaction | null }>({ show: false, message: "", transaction: null });
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "online">("cash");
@@ -170,6 +180,11 @@ export default function SalesPage() {
   const [showOnlineConfirm, setShowOnlineConfirm] = useState(false);
 
   const searchParams = useSearchParams();
+
+  // Filter out archived products - EXCLUDE archived products from being displayed in POS
+  const activeProducts = useMemo(() => {
+    return (firebaseProducts as Product[]).filter(product => !product.archived);
+  }, [firebaseProducts]);
 
   // Read tab parameter from URL
   useEffect(() => {
@@ -208,11 +223,12 @@ export default function SalesPage() {
   }, [firebaseTransactions, filterDate, viewByMonth]);
 
   const productsWithAvailableStock = useMemo(() => {
-    return (firebaseProducts as Product[]).map(product => ({
+    // Only use active products (non-archived) for stock calculation
+    return activeProducts.map(product => ({
       ...product,
       availableStock: Math.max(0, product.stock - (tempReservedStock.get(product.id) || 0))
     }));
-  }, [firebaseProducts, tempReservedStock]);
+  }, [activeProducts, tempReservedStock]);
 
   const filteredProducts = productsWithAvailableStock.filter((product) => {
     const searchLower = searchQuery.toLowerCase();
@@ -231,6 +247,12 @@ export default function SalesPage() {
   const total = subtotal;
 
   const handleAddToCartClick = (product: Product) => {
+    // Check if product is archived before adding to cart
+    if (product.archived) {
+      showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
+      return;
+    }
+    
     const currentReserved = tempReservedStock.get(product.id) || 0;
     const actualStock = product.stock;
     const availableForThis = actualStock - currentReserved;
@@ -249,6 +271,14 @@ export default function SalesPage() {
 
   const confirmAddToCart = () => {
     if (pendingProduct) {
+      // Double-check product is not archived before adding to cart
+      if (pendingProduct.archived) {
+        showToastOnly(`❌ ${pendingProduct.name} is archived and cannot be sold`, "error");
+        setShowAddToCartModal(false);
+        setPendingProduct(null);
+        return;
+      }
+      
       const currentReserved = tempReservedStock.get(pendingProduct.id) || 0;
       const actualStock = pendingProduct.stock;
       const availableForThis = actualStock - currentReserved;
@@ -303,7 +333,7 @@ export default function SalesPage() {
       
       if (newQty < 1) return prevCart;
       
-      const product = (firebaseProducts as Product[]).find(p => p.id === id);
+      const product = activeProducts.find(p => p.id === id);
       if (!product) return prevCart;
       
       const currentReservedForOthers = prevCart
@@ -410,7 +440,7 @@ export default function SalesPage() {
 
       // Update product stocks AND totalSold
       for (const cartItem of cart) {
-        const product = (firebaseProducts as Product[]).find(p => p.id === cartItem.id);
+        const product = activeProducts.find(p => p.id === cartItem.id);
         if (product) {
           const newStock = product.stock - cartItem.quantity;
           
@@ -734,56 +764,48 @@ export default function SalesPage() {
     doc.save(`Receipt_${receiptId}.pdf`);
   };
 
-  const openVoidModal = (transaction: Transaction) => {
-    setTransactionToVoid(transaction.id);
-    
-    // Check if warranty is still valid
+  const openReplacementModal = (transaction: Transaction) => {
+    // Check if warranty is valid before allowing replacement
     const warrantyValid = isWarrantyValid(transaction.warrantyStartDate, transaction.warrantyEndDate);
     
-    if (warrantyValid) {
-      const endDate = transaction.warrantyEndDate ? new Date(transaction.warrantyEndDate).toLocaleDateString() : "N/A";
-      setWarrantyWarning({
-        show: true,
-        message: `⚠️ This transaction is still under warranty (expires ${endDate}). Voiding now will void the warranty as well.`,
-        transaction: transaction
-      });
-      setVoidModalOpen(true);
-    } else {
-      setWarrantyWarning({ show: false, message: "", transaction: null });
-      setVoidModalOpen(true);
+    if (!warrantyValid) {
+      showToastOnly("Replacement is only available for transactions with an active warranty.", "error");
+      return;
     }
     
-    setVoidReason("");
+    setTransactionToReplace(transaction);
+    
+    const endDate = transaction.warrantyEndDate ? new Date(transaction.warrantyEndDate).toLocaleDateString() : "N/A";
+    setWarrantyWarning({
+      show: true,
+      message: `⚠️ This transaction is under warranty (expires ${endDate}). Processing a replacement will void the warranty.`,
+      transaction: transaction
+    });
+    
+    setReplacementModalOpen(true);
+    setReplacementReason("");
   };
 
-  const handleVoid = async () => {
-    if (transactionToVoid) {
+  const handleReplacement = async () => {
+    if (transactionToReplace) {
       try {
-        // Call voidTransaction with the reason
-        await voidTransaction(transactionToVoid, voidReason, userName || "Staff");
+        // Call voidTransaction with the replacement reason
+        await voidTransaction(transactionToReplace.id, replacementReason || "Item replacement processed", userName || "Staff");
         
-        setVoidModalOpen(false);
-        setTransactionToVoid(null);
-        setVoidReason("");
+        setReplacementModalOpen(false);
+        setTransactionToReplace(null);
+        setReplacementReason("");
         setWarrantyWarning({ show: false, message: "", transaction: null });
         
-        // Show appropriate message based on void reason
-        if (voidReason?.toLowerCase().includes('damage') || voidReason?.toLowerCase().includes('damaged')) {
-          showNotification(
-            `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided. Items marked as damaged (not returned to stock).`, 
-            "warning", 
-            "Transaction Voided (Damaged)"
-          );
-        } else {
-          showNotification(
-            `Transaction #${transactionToVoid.slice(-8).toUpperCase()} voided successfully. Stock returned.`, 
-            "info", 
-            "Transaction Voided"
-          );
-        }
+        // Show appropriate message for replacement
+        showNotification(
+          `Transaction #${transactionToReplace.id.slice(-8).toUpperCase()} processed as replacement. Items have been marked for exchange.`, 
+          "info", 
+          "Replacement Processed"
+        );
       } catch (error) {
-        console.error("Void error:", error);
-        showToastOnly("Failed to void transaction.", "error");
+        console.error("Replacement error:", error);
+        showToastOnly("Failed to process replacement.", "error");
       }
     }
   };
@@ -898,8 +920,13 @@ export default function SalesPage() {
                         exit={{ opacity: 0, scale: 0.8 }}
                         transition={{ duration: 0.2 }}
                         onClick={() => {
-                          if ((product.availableStock ?? 0) > 0) {
+                          if ((product.availableStock ?? 0) > 0 && !product.archived) {
                             handleAddToCartClick(product);
+                          } else if (product.archived) {
+                            showToastOnly(
+                              `❌ ${product.name} is archived and cannot be sold`,
+                              "error"
+                            );
                           } else {
                             showToastOnly(
                               `❌ ${product.name} is out of stock`,
@@ -908,9 +935,11 @@ export default function SalesPage() {
                           }
                         }}
                         className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${
-                          (product.availableStock ?? 0) === 0 
-                            ? 'hover:shadow-none hover:border-gray-200' 
-                            : 'hover:shadow-md hover:border-blue-300'
+                          product.archived 
+                            ? 'opacity-50 bg-gray-100 cursor-not-allowed hover:shadow-none hover:border-gray-200' 
+                            : (product.availableStock ?? 0) === 0 
+                              ? 'hover:shadow-none hover:border-gray-200' 
+                              : 'hover:shadow-md hover:border-blue-300'
                         }`}
                       >
                         <div className="relative aspect-4/3 sm:aspect-square w-full overflow-hidden bg-slate-50 rounded-lg mb-1.5 sm:mb-2">
@@ -922,6 +951,7 @@ export default function SalesPage() {
                                 fill
                                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                                 className={`object-cover transition-all duration-300 ${
+                                  product.archived ? 'opacity-30 grayscale' :
                                   (product.availableStock ?? 0) <= 0 ? 'opacity-50 grayscale' : ''
                                 }`}
                                 priority={false}
@@ -929,7 +959,7 @@ export default function SalesPage() {
                             </div>
                           ) : (
                             <div className={`w-full h-full ${product.imageColor} flex items-center justify-center transition-colors duration-300`}>
-                              <Glasses className={`opacity-20 ${(product.availableStock ?? 0) <= 0 ? 'text-gray-500' : 'text-[#0B3C8A]'} w-1/3 h-1/3`} />
+                              <Glasses className={`opacity-20 ${product.archived ? 'text-gray-500' : (product.availableStock ?? 0) <= 0 ? 'text-gray-500' : 'text-[#0B3C8A]'} w-1/3 h-1/3`} />
                             </div>
                           )}
                           
@@ -938,12 +968,17 @@ export default function SalesPage() {
                           </div>
                           
                           <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end z-10">
-                            {(product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 && (
+                            {product.archived && (
+                              <span className="bg-gray-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
+                                ARCHIVED
+                              </span>
+                            )}
+                            {!product.archived && (product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 && (
                               <span className="bg-orange-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                                 LOW
                               </span>
                             )}
-                            {(product.availableStock ?? 0) <= 0 && (
+                            {!product.archived && (product.availableStock ?? 0) <= 0 && (
                               <span className="bg-red-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                                 OUT
                               </span>
@@ -974,6 +1009,7 @@ export default function SalesPage() {
                           <div className="flex justify-between items-center">
                             <span className="text-[9px] sm:text-[10px] font-medium text-gray-500">Stock:</span>
                             <span className={`text-[11px] sm:text-xs font-bold ${
+                              product.archived ? 'text-gray-500' :
                               (product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 
                                 ? 'text-orange-600' 
                                 : (product.availableStock ?? 0) <= 0 
@@ -1249,12 +1285,12 @@ export default function SalesPage() {
         </div>
 
       ) : (
-        // Transaction History Section
+        // Transaction History Section with Replacement only available for valid warranty
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(99vh-180px)]">
           <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200">
             <div className="mb-3 sm:mb-4">
               <h2 className="text-base sm:text-lg font-bold text-gray-800">Transactions</h2>
-              <p className="text-[10px] sm:text-[11px] text-gray-500">View daily sales, generate receipts, and process refunds.</p>
+              <p className="text-[10px] sm:text-[11px] text-gray-500">View daily sales, generate receipts, and process replacements for items under warranty.</p>
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex gap-2">
@@ -1318,106 +1354,121 @@ export default function SalesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-  <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
-    <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
-      <tr>
-        <th className="p-2 sm:p-3">Receipt No.</th>
-        <th className="p-2 sm:p-3">Date</th>
-        <th className="p-2 sm:p-3">Time</th>
-        <th className="p-2 sm:p-3">Patient Name</th>
-        <th className="p-2 sm:p-3">User</th>
-        <th className="p-2 sm:p-3">Items</th>
-        <th className="p-2 sm:p-3 text-right">Amount</th>
-        <th className="p-2 sm:p-3 text-center">Payment</th>
-        <th className="p-2 sm:p-3 text-center">Warranty</th>
-        <th className="p-2 sm:p-3 text-center">Sync</th>
-        <th className="p-2 sm:p-3 text-center">Status</th>
-        <th className="p-2 sm:p-3 text-right">Actions</th>
-      </tr>
-    </thead>
-    <tbody className="divide-y divide-gray-100">
-      {filteredTransactions.length === 0 ? (
-        <tr>
-          <td colSpan={12} className="py-20 text-center text-gray-400">
-            <History size={36} className="mx-auto mb-3 opacity-20" />
-            <p className="text-xs sm:text-sm">No transactions found for this period.</p>
-          </td>
-        </tr>
-      ) : (
-        filteredTransactions.map(trx => {
-          const warrantyValid = trx.status === 'completed' && isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
-          return (
-            <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
-              <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
-              <td className="p-2 sm:p-3 text-gray-600">
-                <div className="flex items-center gap-1">
-                  <Calendar size={12} className="text-gray-400" />
-                  {formatDate(trx.date)}
-                </div>
-              </td>
-              <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
-              <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
-              <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
-              <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
-                <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
-                  {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
-                </div>
-              </td>
-              <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
-              <td className="p-2 sm:p-3 text-center">
-                <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
-                  trx.paymentMethod === 'cash' 
-                    ? 'bg-blue-100 text-blue-700' 
-                    : trx.paymentMethod === 'online'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'bg-gray-100 text-gray-600'
-                }`}>
-                  {trx.paymentMethod || 'N/A'}
-                </span>
-                {trx.referenceNumber && trx.paymentMethod === 'online' && (
-                  <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
-                )}
-              </td>
-              <td className="p-2 sm:p-3 text-center">
-                {trx.warrantyStartDate && trx.warrantyEndDate ? (
-                  <div className="flex flex-col items-center gap-0.5">
-                    <Shield size={12} className={warrantyValid ? "text-green-600" : "text-gray-400"} />
-                    <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-gray-500"}`}>
-                      {warrantyValid ? "Active" : "Expired"}
-                    </span>
-                    <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
-                  </div>
-                ) : (
-                  <span className="text-gray-400 text-[8px]">None</span>
-                )}
-              </td>
-              <td className="p-2 sm:p-3 text-center">
-                {trx.synced ? <CloudCheckIcon /> : <CloudPendingIcon />}
-              </td>
-              <td className="p-2 sm:p-3 text-center">
-                <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                  {trx.status}
-                </span>
-              </td>
-              <td className="p-2 sm:p-3 text-right">
-                <div className="flex items-center justify-end gap-1 sm:gap-1.5">
-                  <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
-                    <Receipt size={14}/>
-                  </button>
-                  {trx.status === 'completed' && (
-                    <button onClick={() => openVoidModal(trx)} className="p-1 sm:p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Void / Refund Transaction">
-                      <X size={14}/>
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          );
-        })
-      )}
-    </tbody>
-  </table>
-</div>
+                <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
+                    <tr>
+                      <th className="p-2 sm:p-3">Receipt No.</th>
+                      <th className="p-2 sm:p-3">Date</th>
+                      <th className="p-2 sm:p-3">Time</th>
+                      <th className="p-2 sm:p-3">Patient Name</th>
+                      <th className="p-2 sm:p-3">User</th>
+                      <th className="p-2 sm:p-3">Items</th>
+                      <th className="p-2 sm:p-3 text-right">Amount</th>
+                      <th className="p-2 sm:p-3 text-center">Payment</th>
+                      <th className="p-2 sm:p-3 text-center">Warranty</th>
+                      <th className="p-2 sm:p-3 text-center">Sync</th>
+                      <th className="p-2 sm:p-3 text-center">Status</th>
+                      <th className="p-2 sm:p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredTransactions.map(trx => {
+                      const warrantyValid = trx.status === 'completed' && isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
+                      const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
+                      
+                      return (
+                        <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
+                          <td className="p-2 sm:p-3 text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Calendar size={12} className="text-gray-400" />
+                              {formatDate(trx.date)}
+                            </div>
+                          </td>
+                          <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                          <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
+                          <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
+                          <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
+                            <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
+                              {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+                            </div>
+                          </td>
+                          <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+                          <td className="p-2 sm:p-3 text-center">
+                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
+                              trx.paymentMethod === 'cash' 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : trx.paymentMethod === 'online'
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {trx.paymentMethod || 'N/A'}
+                            </span>
+                            {trx.referenceNumber && trx.paymentMethod === 'online' && (
+                              <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
+                            )}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            {trx.warrantyStartDate && trx.warrantyEndDate ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <Shield size={12} className={warrantyValid ? "text-green-600" : "text-red-600"} />
+                                <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-red-600"}`}>
+                                  {warrantyValid ? "Active" : "Expired"}
+                                </span>
+                                <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-[8px]">No Warranty</span>
+                            )}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            {trx.synced ? <CheckCircle2 size={12} className="sm:w-3.5 sm:h-3.5 text-emerald-500" /> : <WifiOff size={12} className="sm:w-3.5 sm:h-3.5 text-red-400" />}
+                          </td>
+                          <td className="p-2 sm:p-3 text-center">
+                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${trx.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                              {trx.status}
+                            </span>
+                          </td>
+                          <td className="p-2 sm:p-3 text-right">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                              <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
+                                <Receipt size={14}/>
+                              </button>
+                              {trx.status === 'completed' && (
+                                hasWarranty && warrantyValid ? (
+                                  <button 
+                                    onClick={() => openReplacementModal(trx)} 
+                                    className="p-1 sm:p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors" 
+                                    title="Process Replacement (Under Warranty)"
+                                  >
+                                    <Repeat size={14}/>
+                                  </button>
+                                ) : hasWarranty && !warrantyValid ? (
+                                  <button 
+                                    disabled 
+                                    className="p-1 sm:p-1.5 text-gray-300 cursor-not-allowed rounded transition-colors" 
+                                    title="Warranty expired - Replacement not available"
+                                  >
+                                    <Repeat size={14}/>
+                                  </button>
+                                ) : (
+                                  <button 
+                                    disabled 
+                                    className="p-1 sm:p-1.5 text-gray-300 cursor-not-allowed rounded transition-colors" 
+                                    title="No warranty - Replacement not available"
+                                  >
+                                    <Repeat size={14}/>
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </motion.div>
@@ -1531,53 +1582,53 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* Void Transaction Confirmation Modal with Reason */}
+      {/* Replacement Modal */}
       <AnimatePresence>
-        {voidModalOpen && transactionToVoid && (
+        {replacementModalOpen && transactionToReplace && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-xl shadow-2xl p-5 sm:p-6 w-full max-w-md">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-red-600">
-                <AlertTriangle size={24} className="sm:w-6 sm:h-6" />
+              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-purple-600">
+                <Repeat size={24} className="sm:w-6 sm:h-6" />
               </div>
-              <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-2 text-center">Refund Transaction?</h3>
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-2 text-center">Process Replacement?</h3>
               
               {warrantyWarning.show && warrantyWarning.transaction && (
                 <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <div className="flex items-start gap-2">
                     <Clock size={16} className="text-yellow-600 mt-0.5 flex-shrink-0" />
                     <div className="text-xs text-yellow-800">
-                      <p className="font-semibold mb-1">Warranty Warning!</p>
+                      <p className="font-semibold mb-1">Warranty Notice</p>
                       <p>{warrantyWarning.message}</p>
-                      <p className="mt-1 text-yellow-700">Are you sure you want to proceed?</p>
+                      <p className="mt-1 text-yellow-700">Once processed, this transaction will be marked as replaced.</p>
                     </div>
                   </div>
                 </div>
               )}
               
               <p className="text-[11px] sm:text-xs text-gray-500 mb-4">
-                Are you sure you want to void receipt <span className="font-mono font-bold text-gray-700">{transactionToVoid.slice(-8).toUpperCase()}</span>? 
-                This will record the sale as refunded.
+                You are about to process a replacement for receipt <span className="font-mono font-bold text-gray-700">{transactionToReplace.id.slice(-8).toUpperCase()}</span>. 
+                This transaction has a valid warranty and qualifies for replacement.
               </p>
               
               <div className="mb-4">
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Reason for Void/Refund <span className="text-gray-400">(Optional)</span>
+                  Reason for Replacement <span className="text-gray-400">(Optional)</span>
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="Please provide a reason for voiding this transaction..."
-                  value={voidReason}
-                  onChange={(e) => setVoidReason(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-700 placeholder-gray-400 resize-none"
+                  placeholder="Please provide a reason for this replacement (e.g., defective item, wrong size, etc.)..."
+                  value={replacementReason}
+                  onChange={(e) => setReplacementReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-700 placeholder-gray-400 resize-none"
                 />
               </div>
               
               <div className="flex gap-2 sm:gap-3">
                 <button 
                   onClick={() => {
-                    setVoidModalOpen(false);
-                    setTransactionToVoid(null);
-                    setVoidReason("");
+                    setReplacementModalOpen(false);
+                    setTransactionToReplace(null);
+                    setReplacementReason("");
                     setWarrantyWarning({ show: false, message: "", transaction: null });
                   }} 
                   className="flex-1 px-3 sm:px-4 py-2 border border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm font-medium hover:bg-gray-50 transition-colors"
@@ -1585,10 +1636,11 @@ export default function SalesPage() {
                   Cancel
                 </button>
                 <button 
-                  onClick={handleVoid} 
-                  className="flex-1 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-red-700 transition-colors shadow-md"
+                  onClick={handleReplacement} 
+                  className="flex-1 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-purple-700 transition-colors shadow-md flex items-center justify-center gap-2"
                 >
-                  Confirm Void & Refund
+                  <Repeat size={14} />
+                  Process Replacement
                 </button>
               </div>
             </motion.div>
@@ -1602,11 +1654,14 @@ export default function SalesPage() {
           <QRScannerModal
             mode="cart"
             onClose={() => setIsQRScannerOpen(false)}
-            products={firebaseProducts as Product[]}
+            products={activeProducts}
             onProductFound={(productId) => {
               const product = productsWithAvailableStock.find(p => p.id === productId);
-              if (product) {
+              if (product && !product.archived) {
                 handleAddToCartClick(product);
+                setIsQRScannerOpen(false);
+              } else if (product?.archived) {
+                showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
                 setIsQRScannerOpen(false);
               }
             }}
@@ -1670,15 +1725,6 @@ export default function SalesPage() {
           </div>
         )}
       </AnimatePresence>
-
     </div>
   );
-}
-
-function CloudCheckIcon() {
-  return <div className="flex justify-center" title="Synced to Server"><CheckCircle2 size={12} className="sm:w-3.5 sm:h-3.5 text-emerald-500" /></div>;
-}
-
-function CloudPendingIcon() {
-  return <div className="flex justify-center" title="Pending Sync (Offline)"><WifiOff size={12} className="sm:w-3.5 sm:h-3.5 text-red-400" /></div>;
 }
