@@ -140,15 +140,7 @@ export default function LandingPage() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Image 
-               src="/logo.png" 
-               alt="MT Olaso Logo" 
-               width={42} 
-               height={42} 
-               style={{ width: 'auto', height: 'auto' }}
-               className="drop-shadow-sm w-8 h-8 lg:w-9 lg:h-9" 
-               priority
-            />
+            <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} />
             <div className="flex flex-col leading-none">
               <span className="font-bold text-base sm:text-lg text-slate-900 tracking-tight">OlasoSync</span>
             </div>
@@ -198,12 +190,12 @@ export default function LandingPage() {
           
           <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 mt-8 sm:mt-0 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-[10px] sm:text-xs font-bold mb-6">
-               <Sparkles size={14} /> Auto Deadstock & Reorder Alerts
+               <Sparkles size={14} /> AI Reorder and Deadstock Alerts
             </div>
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-slate-900 leading-[1.1] mb-5 tracking-tight">
-              Inventory & Sales <br className="hidden sm:block" />
+                Seamless Stock, <br className="hidden sm:block" />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#0B3C8A] to-purple-600">
-                Management System
+                 Faster Checkouts
               </span>
             </h1>
             <p className="text-base sm:text-lg text-slate-500 mb-8 leading-relaxed max-w-lg mx-auto lg:mx-0 font-medium">
@@ -521,7 +513,7 @@ export default function LandingPage() {
           <div className="flex flex-col md:flex-row justify-between items-start gap-10 mb-12">
             <div className="max-w-xs">
               <div className="flex items-center gap-3 mb-4">
-                <Image src="/logo.png" alt="MT Olaso Logo" width={42} height={42} />
+                <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} />
                 <span className="font-bold text-lg text-slate-900">OlasoSync</span>
               </div>
               <p className="text-slate-500 text-sm">Empowering vision care with easy-to-use technology.</p>

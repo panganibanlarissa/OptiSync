@@ -19,6 +19,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/logo.png?v=1" type="image/png" />
+      </head>
       <body className={inter.className}>
         <FirebaseProvider>
           <NotificationProvider>

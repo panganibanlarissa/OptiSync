@@ -132,7 +132,7 @@ function LoginContent() {
           initial={{ opacity: 0, scale: 0.8 }} 
           animate={{ opacity: 1, scale: 1 }}
         >
-          <Image src="/logo.png" alt="MT Olaso Logo" width={42} height={42} className="drop-shadow-sm" />
+          <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} className="drop-shadow-sm" />
         </motion.div>
         <motion.h1 
           initial={{ opacity: 0, x: -10 }} 
@@ -157,9 +157,9 @@ function LoginContent() {
           >
             <motion.div variants={fadeIn} className="relative mb-8 group cursor-default">
               <div className="absolute inset-0 bg-blue-400/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-              <Image
-                src="/logo.png"
-                alt="Inventory System"
+              <Image 
+                src="/logo.png?v=1" 
+                alt="MT Olaso Logo"
                 width={600}
                 height={300}
                 priority
@@ -168,7 +168,7 @@ function LoginContent() {
             </motion.div>
 
             <motion.h2 variants={fadeIn} className="text-3xl md:text-4xl font-extrabold text-[#0B3C8A] mb-4 leading-tight">
-              OlasoSync: Real-Time Inventory Tracking
+              OlasoSync: Seamless Stock, Faster Checkouts
             </motion.h2>
 
             <motion.p variants={fadeIn} className="text-lg text-slate-600 leading-relaxed max-w-md">

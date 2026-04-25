@@ -63,7 +63,7 @@ export default function Sidebar({ children }: SidebarProps) {
             <button onClick={() => setOpen(!open)} className="text-gray-600 hover:text-[#0B3C8A] transition-colors">
               <Menu size={24} />
             </button>
-            <Image src="/logo.png" alt="Smart Inventory Logo" width={34} height={34} />
+            <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={34} height={34} />
             <h1 className="text-lg font-bold text-[#0B3C8A] hidden sm:block">OlasoSync</h1>
           </div>
 
