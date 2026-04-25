@@ -13,11 +13,12 @@ import {
   Receipt,
   Search,
   CheckCircle2,
-  XCircle,
   Filter,
   Clock,
   TrendingUp,
-  Calendar
+  Calendar,
+  Repeat,
+  CheckCheck
 } from "lucide-react";
 
 const THEME_BG = "bg-[#0B3C8A]";
@@ -31,8 +32,13 @@ interface TransactionType {
   items: Array<{ id: string; name: string; quantity: number; price: number }>;
   total: number;
   date: Date;
-  status: "completed" | "voided";
+  status: "completed" | "processing_replacement" | "replaced";
   paymentMethod?: "cash" | "online";
+  replacementReason?: string;
+  replacedAt?: Date;
+  replacedBy?: string;
+  processedAt?: Date;
+  processedBy?: string;
 }
 
 // Helper function to safely get date from Firestore Timestamp
@@ -62,7 +68,7 @@ const getDateFromTimestamp = (timestamp: any): Date | null => {
   return null;
 };
 
-// Helper function to format date as YYYY-MM-DD in local time (not UTC)
+// Helper function to format date as YYYY-MM-DD in local time
 const getLocalDateStamp = (date: Date): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -70,7 +76,7 @@ const getLocalDateStamp = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Helper function to format date range for display (e.g., "Mar 14 – Apr 25")
+// Helper function to format date range for display
 const formatDateRange = (fromDate: Date | null, toDate: Date | null): string => {
   if (!fromDate && !toDate) return "";
   
@@ -118,7 +124,7 @@ const isDateInRange = (date: Date, fromDate: Date | null, toDate: Date | null): 
   return true;
 };
 
-// Calculate days since last sale using product ID matching
+// Calculate days since last sale
 const getDaysSinceLastSale = (product: any, transactions: TransactionType[], today: Date): { days: number; lastSaleDate: Date | null; hasSales: boolean; totalSalesCount: number } => {
   const completedTransactions = transactions.filter(t => t.status === 'completed');
   
@@ -149,12 +155,26 @@ const getDaysSinceLastSale = (product: any, transactions: TransactionType[], tod
   }
 };
 
+// Helper function to get status display
+const getStatusDisplay = (status: string) => {
+  switch (status) {
+    case 'completed':
+      return { text: 'Completed', color: 'bg-emerald-100 text-emerald-700', icon: <CheckCircle2 size={10} /> };
+    case 'processing_replacement':
+      return { text: 'Processing Replacement', color: 'bg-yellow-100 text-yellow-700', icon: <Repeat size={10} /> };
+    case 'replaced':
+      return { text: 'Replaced', color: 'bg-purple-100 text-purple-700', icon: <CheckCheck size={10} /> };
+    default:
+      return { text: status, color: 'bg-gray-100 text-gray-700', icon: null };
+  }
+};
+
 export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedDay, setSelectedDay] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "voided">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "replaced">("all");
   
   // Date Range State
   const [fromDate, setFromDate] = useState<string>("");
@@ -177,20 +197,6 @@ export default function ReportsPage() {
     return firebaseProducts;
   }, [firebaseProducts]);
 
-  // Get the overall transaction date range (first to last transaction)
-  const transactionDateRange = useMemo(() => {
-    if (transactions.length === 0) return { firstDate: null, lastDate: null };
-    
-    const dates = transactions.map(t => new Date(t.date)).filter(d => !isNaN(d.getTime()));
-    if (dates.length === 0) return { firstDate: null, lastDate: null };
-    
-    const firstDate = new Date(Math.min(...dates.map(d => d.getTime())));
-    const lastDate = new Date(Math.max(...dates.map(d => d.getTime())));
-    
-    return { firstDate, lastDate };
-  }, [transactions]);
-
-  // Helper functions for filtering
   const getAvailableMonths = (transactions: TransactionType[]) => {
     const months = new Set<string>();
     transactions.forEach(trx => {
@@ -237,14 +243,6 @@ export default function ReportsPage() {
     return getAvailableDays(transactions, selectedYear, selectedMonth);
   }, [transactions, selectedYear, selectedMonth]);
 
-  // Helper to get date range display text for the filter
-  const getDateRangeDisplayText = (): string => {
-    const fromDateObj = fromDate ? new Date(fromDate) : null;
-    const toDateObj = toDate ? new Date(toDate) : null;
-    return formatDateRange(fromDateObj, toDateObj);
-  };
-
-  // Helper to get date range text for exports (without duplication)
   const getPeriodText = (): string => {
     if (fromDate && toDate) {
       return `${new Date(fromDate).toLocaleDateString()} to ${new Date(toDate).toLocaleDateString()}`;
@@ -280,17 +278,23 @@ export default function ReportsPage() {
       const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
       const transactionDay = transactionDate.getDate();
       
-      const matchesStatus = statusFilter === "all" || trx.status === statusFilter;
+      let matchesStatus = true;
+      if (statusFilter === "all") {
+        matchesStatus = true;
+      } else if (statusFilter === "completed") {
+        matchesStatus = trx.status === "completed";
+      } else if (statusFilter === "replaced") {
+        // Only show "replaced" status, not "processing_replacement"
+        matchesStatus = trx.status === "replaced";
+      }
       
-      // Date filtering: date range takes priority over month/day filters
+      // Date filtering
       let matchesDate = true;
       if (fromDate || toDate) {
-        // If date range is selected, ONLY use date range filter
         const fromDateObj = fromDate ? new Date(fromDate) : null;
         const toDateObj = toDate ? new Date(toDate) : null;
         matchesDate = isDateInRange(transactionDate, fromDateObj, toDateObj);
       } else {
-        // If no date range, use year/month/day filters
         const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
         const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
         const matchesDay = selectedDay === "all" || transactionDay === parseInt(selectedDay);
@@ -301,21 +305,20 @@ export default function ReportsPage() {
     });
   }, [transactions, searchQuery, selectedYear, selectedMonth, selectedDay, statusFilter, fromDate, toDate]);
 
-  // Summary statistics
+  // Summary statistics - only count "replaced" status, not "processing_replacement"
   const summaryStats = useMemo(() => {
     const completed = filteredTransactions.filter(t => t.status === 'completed');
-    const voided = filteredTransactions.filter(t => t.status === 'voided');
+    const replaced = filteredTransactions.filter(t => t.status === 'replaced');
     const totalRevenue = completed.reduce((sum, t) => sum + t.total, 0);
     
     return {
       total: filteredTransactions.length,
       completed: completed.length,
-      voided: voided.length,
+      replaced: replaced.length,
       totalRevenue
     };
   }, [filteredTransactions]);
 
-  // Helper to get filtered transactions for current range (used in aging reports)
   const getFilteredTransactionsForRange = (): TransactionType[] => {
     let filtered = transactions;
     
@@ -326,14 +329,11 @@ export default function ReportsPage() {
         const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
         const transactionDay = transactionDate.getDate();
         
-        // Date filtering: date range takes priority over month/day filters
         if (fromDate || toDate) {
-          // If date range is selected, ONLY use date range filter
           const fromDateObj = fromDate ? new Date(fromDate) : null;
           const toDateObj = toDate ? new Date(toDate) : null;
           return isDateInRange(transactionDate, fromDateObj, toDateObj);
         } else {
-          // If no date range, use year/month/day filters
           const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
           const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
           const matchesDay = selectedDay === "all" || transactionDay === parseInt(selectedDay);
@@ -358,15 +358,21 @@ export default function ReportsPage() {
     const periodText = getPeriodText();
 
     const validTransactions = filteredTransactions.filter(t => t.status === 'completed');
-    const voidedTransactions = filteredTransactions.filter(t => t.status === 'voided');
+    const replacedTransactions = filteredTransactions.filter(t => t.status === 'replaced');
     const totalSales = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
-    const voidedAmount = voidedTransactions.reduce((sum, trx) => sum + trx.total, 0);
+    const replacedAmount = replacedTransactions.reduce((sum, trx) => sum + trx.total, 0);
 
     autoTable(doc, {
       startY: 45,
       margin: { top: 45, right: 14, left: 14, bottom: 20 },
       head: [['Receipt No', 'Date', 'Staff', 'Patient Name', 'Items', 'Payment Method', 'Status', 'Amount (PHP)']],
       body: filteredTransactions.map(t => {
+        let statusText = '';
+        if (t.status === 'completed') statusText = 'COMPLETED';
+        else if (t.status === 'processing_replacement') statusText = 'PROCESSING REPLACEMENT';
+        else if (t.status === 'replaced') statusText = 'REPLACED';
+        else statusText = String(t.status).toUpperCase();
+        
         const itemsStr = t.items.map(i => `${i.quantity}x ${i.name}`).join(', ');
         return [
           t.id.slice(-8).toUpperCase(), 
@@ -375,7 +381,7 @@ export default function ReportsPage() {
           t.patientName, 
           itemsStr,
           t.paymentMethod ? t.paymentMethod.toUpperCase() : 'N/A',
-          t.status.toUpperCase(),
+          statusText,
           `₱${t.total.toLocaleString()}`
         ];
       }),
@@ -419,7 +425,7 @@ export default function ReportsPage() {
     doc.text(`Total Transactions: ${filteredTransactions.length}`, 14, summaryStartY + 8);
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("Total count of all transaction records in this period (completed + voided).", 14, summaryStartY + 11);
+    doc.text("Total count of all transaction records in this period (completed + replaced).", 14, summaryStartY + 11);
     
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
@@ -430,10 +436,10 @@ export default function ReportsPage() {
     
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text(`Voided: ${voidedTransactions.length}`, 14, summaryStartY + 28);
+    doc.text(`Replaced: ${replacedTransactions.length}`, 14, summaryStartY + 28);
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("Number of transactions canceled or reversed; not included in revenue.", 14, summaryStartY + 31);
+    doc.text("Number of transactions that have been replaced.", 14, summaryStartY + 31);
     
     doc.setDrawColor(200, 200, 200);
     doc.line(14, summaryStartY + 37, pageWidth - 14, summaryStartY + 37);
@@ -445,13 +451,13 @@ export default function ReportsPage() {
     doc.setTextColor(100, 100, 100);
     doc.text("Sum of all completed transactions in this period.", 14, summaryStartY + 47);
     
-    if (voidedTransactions.length > 0) {
+    if (replacedTransactions.length > 0) {
       doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
-      doc.text(`Voided Amount: ₱${voidedAmount.toLocaleString()}`, 14, summaryStartY + 54);
+      doc.text(`Replaced Amount: ₱${replacedAmount.toLocaleString()}`, 14, summaryStartY + 54);
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
-      doc.text("Total value of canceled transactions; deducted from gross sales.", 14, summaryStartY + 57);
+      doc.text("Total value of replaced transactions; excluded from revenue.", 14, summaryStartY + 57);
     }
 
     const totalPages = doc.getNumberOfPages();
@@ -688,14 +694,11 @@ export default function ReportsPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Calculate aging data for ALL products with stock
     const allProductsData = products
-      .filter(p => p.stock > 0) // Only products with positive stock
+      .filter(p => p.stock > 0)
       .map(p => {
-        // Get all completed transactions
         const completedTransactions = rangeFilteredTransactions.filter(t => t.status === 'completed');
         
-        // Find all sales for this product
         const salesForProduct = completedTransactions
           .filter(t => t.items.some(item => item.id === p.id))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -710,20 +713,17 @@ export default function ReportsPage() {
           lastSaleDate.setHours(0, 0, 0, 0);
           daysSinceLastSale = Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
         } else {
-          // Product has NEVER been sold - calculate days since creation
           const createdDate = getDateFromTimestamp(p.createdAt);
           if (createdDate) {
             createdDate.setHours(0, 0, 0, 0);
             daysSinceLastSale = Math.floor((today.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
           } else {
-            // If no creation date, mark as old stock
             daysSinceLastSale = 999;
           }
         }
         
         const deadCapital = p.stock * p.markupPrice;
         
-        // Determine aging category and display
         let daysIdleDisplay = '';
         
         if (!hasSales) {
@@ -755,10 +755,8 @@ export default function ReportsPage() {
         };
       });
     
-    // Filter for deadstock - products with daysSinceLastSale >= 30 OR never sold
     const deadstockData = allProductsData
       .filter(item => {
-        // Include if never sold OR unsold for 30+ days
         if (!item.hasSales) return true;
         return item.daysSinceLastSale >= 30;
       })
@@ -770,7 +768,6 @@ export default function ReportsPage() {
     }
 
     const periodText = getPeriodText();
-    const totalDeadCapital = deadstockData.reduce((sum, item) => sum + item.deadCapital, 0);
 
     const addAgingHeader = (pageNumber: number) => {
       doc.setPage(pageNumber);
@@ -792,7 +789,6 @@ export default function ReportsPage() {
 
     addAgingHeader(1);
 
-    // Create table with deadstock data only - no executive summary or recommendations
     autoTable(doc, {
       startY: 45,
       margin: { top: 45, right: 14, left: 14, bottom: 20 },
@@ -809,7 +805,7 @@ export default function ReportsPage() {
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
       styles: { fontSize: 9, textColor: [0, 0, 0] },
       columnStyles: {
-        5: { cellWidth: 35, halign: 'right' } // Value column fixed width and right-aligned
+        5: { cellWidth: 35, halign: 'right' }
       },
       didDrawPage: (data) => {
         if (data.pageNumber > 1) {
@@ -818,7 +814,6 @@ export default function ReportsPage() {
       }
     });
 
-    // Add footer to all pages
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
@@ -869,7 +864,6 @@ export default function ReportsPage() {
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20 space-y-4">
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {/* Header with Title and Action Buttons - Updated with gradient background */}
         <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div className="flex items-center gap-2">
@@ -882,7 +876,6 @@ export default function ReportsPage() {
               </div>
             </div>
             
-            {/* Action Buttons */}
             <div className="flex flex-wrap gap-2 w-full lg:w-auto">
               {userRole === 'admin' && (
                 <button 
@@ -908,10 +901,8 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Search and Filters Row */}
         <div className="p-4 border-b border-gray-100 bg-gray-50/30">
           <div className="flex flex-wrap gap-2">
-            {/* Search Bar */}
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
               <input 
@@ -923,18 +914,16 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* Status Filter */}
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "voided")}
+              onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "replaced")}
               className="px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700"
             >
               <option value="all">All Status</option>
               <option value="completed">Completed</option>
-              <option value="voided">Voided</option>
+              <option value="replaced">Replaced</option>
             </select>
 
-            {/* Year Filter */}
             <select
               value={selectedYear}
               onChange={(e) => {
@@ -955,7 +944,6 @@ export default function ReportsPage() {
               ))}
             </select>
 
-            {/* Month Filter */}
             <select
               value={selectedMonth}
               onChange={(e) => {
@@ -981,7 +969,6 @@ export default function ReportsPage() {
               })}
             </select>
 
-            {/* Day Filter */}
             <select
               value={selectedDay}
               onChange={(e) => {
@@ -1000,7 +987,6 @@ export default function ReportsPage() {
               ))}
             </select>
 
-            {/* From Date */}
             <div className="relative">
               <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
               <input
@@ -1019,7 +1005,6 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* To Date */}
             <div className="relative">
               <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
               <input
@@ -1038,7 +1023,6 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* Clear Filters Button */}
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
@@ -1050,10 +1034,8 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Summary Cards */}
         <div className="p-4 border-b border-gray-100 bg-blue-50">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Total Transactions Card */}
             <div className="bg-white rounded-lg p-3 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
@@ -1066,7 +1048,6 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Completed Transactions Card */}
             <div className="bg-white rounded-lg p-3 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
@@ -1079,20 +1060,18 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Voided Transactions Card */}
             <div className="bg-white rounded-lg p-3 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-500 font-medium">Voided</p>
-                  <p className="text-2xl font-bold text-red-600 mt-1">{summaryStats.voided}</p>
+                  <p className="text-xs text-gray-500 font-medium">Replaced</p>
+                  <p className="text-2xl font-bold text-purple-600 mt-1">{summaryStats.replaced}</p>
                 </div>
-                <div className="p-2 bg-red-50 rounded-lg">
-                  <XCircle size={20} className="text-red-600" />
+                <div className="p-2 bg-purple-50 rounded-lg">
+                  <Repeat size={20} className="text-purple-600" />
                 </div>
               </div>
             </div>
 
-            {/* Total Revenue Card */}
             <div className="bg-white rounded-lg p-3 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between">
                 <div>
@@ -1107,7 +1086,6 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Transactions Table */}
         <div className="w-full overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm whitespace-nowrap">
             <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
@@ -1130,6 +1108,7 @@ export default function ReportsPage() {
                     year: 'numeric' 
                   });
                   const formattedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  const statusDisplay = getStatusDisplay(trx.status);
 
                   return (
                     <tr key={`ledger-${idx}`} className="hover:bg-gray-50/50 transition-colors">
@@ -1152,14 +1131,19 @@ export default function ReportsPage() {
                         ₱{trx.total.toLocaleString()}
                       </td>
                       <td className="p-4 text-center">
-                        {trx.status === 'completed' ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">
-                            <CheckCircle2 size={10}/> Completed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-red-700 bg-red-50 px-2 py-0.5 rounded text-[10px] font-bold">
-                            <XCircle size={10}/> Voided
-                          </span>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${statusDisplay.color}`}>
+                          {statusDisplay.icon}
+                          {statusDisplay.text}
+                        </span>
+                        {trx.status === 'processing_replacement' && trx.processedBy && (
+                          <div className="text-[9px] text-yellow-600 mt-0.5">
+                            by {trx.processedBy}
+                          </div>
+                        )}
+                        {trx.status === 'replaced' && trx.replacedBy && (
+                          <div className="text-[9px] text-purple-600 mt-0.5">
+                            by {trx.replacedBy}
+                          </div>
                         )}
                       </td>
                     </tr>

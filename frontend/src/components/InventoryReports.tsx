@@ -968,7 +968,7 @@ export default function InventoryReports({
                       Sold
                     </th>
                     <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Damage
+                      Damaged
                     </th>
                     <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
                       Total Stock

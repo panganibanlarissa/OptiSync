@@ -41,7 +41,8 @@ import {
   setDoc,
   limit,
   onSnapshot,
-  writeBatch
+  writeBatch,
+  where
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
@@ -97,7 +98,7 @@ export interface Transaction {
   id: string;
   total: number;
   date: Date;
-  status: "completed" | "voided";
+  status: "completed" | "processing_replacement" | "replaced";
   items: any[];
   patientName?: string;
   paymentMethod?: "cash" | "online";
@@ -109,9 +110,11 @@ export interface Transaction {
   synced?: boolean;
   staffName?: string;
   staffId?: string;
-  voidReason?: string;
-  voidedAt?: Date;
-  voidedBy?: string;
+  replacementReason?: string;
+  replacedAt?: Date;
+  replacedBy?: string;
+  processedAt?: Date;
+  processedBy?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -156,7 +159,8 @@ interface FirebaseContextType {
 
   transactions: Transaction[];
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
-  voidTransaction: (id: string, voidReason?: string, voidedBy?: string) => Promise<void>;
+  processReplacement: (id: string, reason: string, processedBy: string) => Promise<void>;
+  markReplacementAsCompleted: (id: string, replacedBy: string) => Promise<void>;
 
   staffUsers: StaffUser[];
   fetchStaffUsers: (forceRefresh?: boolean) => Promise<void>;
@@ -253,7 +257,7 @@ const logLogout = async (staffName: string, staffId: string, userEmail: string |
   }
 };
 
-// Helper function to log stock adjustments
+// Helper function to log stock adjustments (for MANUAL adjustments only)
 const logStockAdjustment = async (
   productId: string, 
   oldStock: number, 
@@ -275,10 +279,272 @@ const logStockAdjustment = async (
       staffName,
       timestamp: serverTimestamp()
     });
-    console.log(`Stock adjustment logged: ${staffName} changed stock from ${oldStock} to ${newStock}. Reason: ${reason}`);
+    console.log(`✅ Stock adjustment logged: ${staffName} changed stock from ${oldStock} to ${newStock}. Reason: ${reason}`);
   } catch (error) {
     console.error("Error logging stock adjustment:", error);
   }
+};
+
+// Helper function to get product details string for activity logging
+const getProductDetailsForLog = (items: any[]): string => {
+  if (!items || items.length === 0) return '';
+  
+  const productDetails = items.map(item => {
+    const itemName = item.name || 'Unknown Product';
+    const itemQuantity = item.quantity || 1;
+    return `${itemQuantity}x ${itemName}`;
+  }).join(', ');
+  
+  return productDetails;
+};
+
+// Helper function to log product deletion
+const logProductDeletion = async (productId: string, productName: string, staffName: string, staffId: string) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'product_delete',
+      action: 'product_deleted',
+      description: `${staffName} deleted product "${productName}" (ID: ${productId}) from inventory`,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Product deletion logged for ${productName}`);
+  } catch (error) {
+    console.error('Error logging product deletion:', error);
+  }
+};
+
+// Helper function to log product archival/unarchival
+const logProductArchive = async (productId: string, productName: string, archived: boolean, staffName: string, staffId: string, reason?: string) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    const actionText = archived ? 'archived' : 'restored from archive';
+    
+    await addDoc(activityRef, {
+      type: 'product_archive',  // Change from 'product_archive' to a distinct type
+      action: archived ? 'product_archived' : 'product_unarchived',
+      description: `${staffName} ${actionText} product "${productName}" (ID: ${productId})${reason ? ` Reason: ${reason}` : ''}`,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      archived: archived,
+      reason: reason || null,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Product ${actionText} logged for ${productName}`);
+  } catch (error) {
+    console.error('Error logging product archive:', error);
+  }
+};
+
+// Helper function to log product addition
+const logProductAddition = async (productId: string, productName: string, productSku: string, productCategory: string, productPrice: number, staffName: string, staffId: string) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'product_add',
+      action: 'product_added',
+      description: `${staffName} added new product "${productName}" (SKU: ${productSku}, Category: ${productCategory}, Price: ₱${productPrice.toLocaleString()}) to inventory`,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      productSku: productSku,
+      productCategory: productCategory,
+      productPrice: productPrice,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Product addition logged for ${productName}`);
+  } catch (error) {
+    console.error('Error logging product addition:', error);
+  }
+};
+
+// Helper function to log product edit with changes
+const logProductEdit = async (
+  productId: string, 
+  productName: string, 
+  changes: Array<{ field: string; oldValue: any; newValue: any }>, 
+  staffName: string, 
+  staffId: string
+) => {
+  try {
+    if (changes.length === 0) return;
+    
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    // Format changes for display
+    const changesText = changes.map(change => {
+      const fieldName = change.field === 'markupPrice' ? 'price' : 
+                        change.field === 'baseCost' ? 'cost' :
+                        change.field === 'reorderPoint' ? 'reorder point' :
+                        change.field === 'leadTimeDays' ? 'lead time' : change.field;
+      
+      if (typeof change.oldValue === 'number' && typeof change.newValue === 'number') {
+        if (change.field === 'markupPrice' || change.field === 'baseCost') {
+          return `${fieldName}: ₱${change.oldValue.toLocaleString()} → ₱${change.newValue.toLocaleString()}`;
+        }
+        return `${fieldName}: ${change.oldValue} → ${change.newValue}`;
+      }
+      return `${fieldName}: "${change.oldValue}" → "${change.newValue}"`;
+    }).join(', ');
+    
+    await addDoc(activityRef, {
+      type: 'product_edit',
+      action: 'product_edited',
+      description: `${staffName} edited product "${productName}". Changes: ${changesText}`,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      changes: changes,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Product edit logged for ${productName}`);
+  } catch (error) {
+    console.error('Error logging product edit:', error);
+  }
+};
+
+// Helper function to log scan in/out activity
+const logScanActivity = async (
+  productId: string,
+  productName: string,
+  oldStock: number,
+  newStock: number,
+  scanType: 'in' | 'out',
+  staffName: string,
+  staffId: string
+) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    const changeAmount = Math.abs(newStock - oldStock);
+    const actionText = scanType === 'in' ? 'Scanned In' : 'Scanned Out';
+    const description = scanType === 'in'
+      ? `${staffName} scanned in ${changeAmount} unit(s) of "${productName}". Stock updated from ${oldStock} to ${newStock}.`
+      : `${staffName} scanned out ${changeAmount} unit(s) of "${productName}". Stock updated from ${oldStock} to ${newStock}.`;
+    
+    await addDoc(activityRef, {
+      type: scanType === 'in' ? 'scan_in' : 'scan_out',
+      action: actionText,
+      description: description,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      oldStock: oldStock,
+      newStock: newStock,
+      quantityChanged: changeAmount,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ ${actionText} activity logged for ${productName}`);
+  } catch (error) {
+    console.error('Error logging scan activity:', error);
+  }
+};
+
+// Helper function to log sale completed activity
+const logSaleCompleted = async (transactionId: string, staffName: string, patientName: string, total: number, items: any[]) => {
+  try {
+    const productDetails = getProductDetailsForLog(items);
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'transaction',
+      action: 'sale_completed',
+      description: `${staffName} processed sale for ${patientName || 'Walk-in Patient'}. Total: ₱${total.toLocaleString()}. Products: ${productDetails}`,
+      staffName: staffName,
+      staffId: staffName,
+      transactionId: transactionId,
+      patientName: patientName || 'Walk-in Patient',
+      total: total,
+      productDetails: productDetails,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Sale completed activity logged for transaction ${transactionId}`);
+  } catch (error) {
+    console.error('Error logging sale completed activity:', error);
+  }
+};
+
+// Helper function to log replacement initiated activity
+const logReplacementInitiated = async (transactionId: string, reason: string, staffName: string, patientName: string, total: number, items: any[]) => {
+  try {
+    const productDetails = getProductDetailsForLog(items);
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'replacement',
+      action: 'replacement_initiated',
+      description: `${staffName} initiated replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()})${reason ? ` Reason: ${reason}` : ''}. Products: ${productDetails}`,
+      staffName: staffName,
+      staffId: staffName,
+      transactionId: transactionId,
+      patientName: patientName || 'Walk-in Patient',
+      total: total,
+      productDetails: productDetails,
+      reason: reason || null,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Replacement initiated activity logged for transaction ${transactionId}`);
+  } catch (error) {
+    console.error('Error logging replacement initiated activity:', error);
+  }
+};
+
+// Helper function to log replacement completed activity
+const logReplacementCompleted = async (transactionId: string, staffName: string, patientName: string, total: number, items: any[]) => {
+  try {
+    const productDetails = getProductDetailsForLog(items);
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'replacement',
+      action: 'replacement_completed',
+      description: `${staffName} completed replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Products: ${productDetails}`,
+      staffName: staffName,
+      staffId: staffName,
+      transactionId: transactionId,
+      patientName: patientName || 'Walk-in Patient',
+      total: total,
+      productDetails: productDetails,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Replacement completed activity logged for transaction ${transactionId}`);
+  } catch (error) {
+    console.error('Error logging replacement completed activity:', error);
+  }
+};
+
+// Helper function to compare objects for changes
+const getChangedFields = (oldData: any, newData: any, ignoredFields: string[] = ['updatedAt', 'createdAt', 'id']): Array<{ field: string; oldValue: any; newValue: any }> => {
+  const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
+  
+  const allKeys = new Set([...Object.keys(oldData || {}), ...Object.keys(newData || {})]);
+  
+  for (const key of allKeys) {
+    if (ignoredFields.includes(key)) continue;
+    
+    const oldValue = oldData?.[key];
+    const newValue = newData?.[key];
+    
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      changes.push({
+        field: key,
+        oldValue: oldValue,
+        newValue: newValue
+      });
+    }
+  }
+  
+  return changes;
 };
 
 // ================= PROVIDER =================
@@ -848,6 +1114,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       setProducts((prev) => [newProduct, ...prev]);
       
+      // Log product addition
+      await logProductAddition(
+        docRef.id,
+        data.name,
+        data.sku,
+        data.category,
+        data.markupPrice,
+        userName || 'System',
+        userId || 'system'
+      );
+      
       return docRef.id;
     } catch (error) {
       console.error("Error adding product:", error);
@@ -857,6 +1134,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
+      // Get the current product state before update
+      const currentProduct = products.find(p => p.id === id);
+      
       const { beginningInventory, ...safeUpdates } = updates as any;
       
       await updateDoc(
@@ -870,6 +1150,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setProducts((prev) =>
         prev.map((p) => (p.id === id ? { ...p, ...safeUpdates } : p))
       );
+      
+      // Log product edits by comparing changes
+      if (currentProduct) {
+        const updatedProduct = { ...currentProduct, ...safeUpdates };
+        const changes = getChangedFields(currentProduct, updatedProduct);
+        
+        if (changes.length > 0) {
+          await logProductEdit(
+            id,
+            currentProduct.name,
+            changes,
+            userName || 'System',
+            userId || 'system'
+          );
+        }
+      }
     } catch (error) {
       console.error("Error updating product:", error);
       throw error;
@@ -878,6 +1174,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const archiveProduct = async (id: string, archived: boolean, reason?: string, markDeleted = false) => {
     try {
+      const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+      const productName = productDoc.exists() ? productDoc.data().name : 'Unknown Product';
+      
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, id);
       await updateDoc(productRef, {
         archived,
@@ -886,6 +1185,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       });
 
       setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, archived, deleted: archived ? markDeleted : false } : p)));
+
+      await logProductArchive(id, productName, archived, userName || 'System', userId || 'system', reason);
 
       try {
         const archiveLogsRef = collection(db, `clinics/${CLINIC_ID}/archiveLogs`);
@@ -908,8 +1209,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const deleteProduct = async (id: string) => {
     try {
+      const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+      const productName = productDoc.exists() ? productDoc.data().name : 'Unknown Product';
+      
       await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       setProducts((prev) => prev.filter((p) => p.id !== id));
+      
+      await logProductDeletion(id, productName, userName || 'System', userId || 'system');
+      
     } catch (error) {
       console.error("Error deleting product:", error);
       throw error;
@@ -929,6 +1236,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
       const actingStaffName = staffName || userName || "System";
       const actingStaffId = staffId || userId || "system";
+      
+      const reasonLower = reason?.toLowerCase() || '';
+      const isScanIn = reasonLower.includes('received via qr scan') || 
+                       reasonLower.includes('scanned in') ||
+                       (reasonLower.includes('qr scan') && newStock > oldStock);
+      const isScanOut = reasonLower.includes('dispatched via qr scan') || 
+                        reasonLower.includes('scanned out') ||
+                        (reasonLower.includes('qr scan') && newStock < oldStock);
 
       let appliedUpdateData: any = null;
 
@@ -938,17 +1253,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           updatedAt: serverTimestamp()
         };
 
-        // Check if the adjustment is for damaged/exchanged items (stock decreased)
-        const isDamageOrExchange = reason?.toLowerCase().includes('damage') || 
-                                    reason?.toLowerCase().includes('damaged') ||
-                                    reason?.toLowerCase().includes('exchange') ||
-                                    reason?.toLowerCase().includes('return');
+        const isDamageOrExchange = reasonLower.includes('damage') || 
+                                    reasonLower.includes('damaged') ||
+                                    reasonLower.includes('exchange') ||
+                                    reasonLower.includes('return');
 
-        // Check if the adjustment is for restocking (stock increased)
         const isRestock = !isDamageOrExchange && stockDifference > 0 && 
-                         (reason?.toLowerCase().includes('restock') ||
-                          reason?.toLowerCase().includes('qr scan') ||
-                          reason?.toLowerCase().includes('received'));
+                         (reasonLower.includes('restock') ||
+                          reasonLower.includes('received'));
 
         if (isDamageOrExchange && stockDifference < 0) {
           const itemsRemoved = Math.abs(stockDifference);
@@ -967,11 +1279,26 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
         appliedUpdateData = updateData;
 
-        try {
-          const productName = currentProduct.name || null;
-          await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
-        } catch (logErr) {
-          console.error("Failed to log stock adjustment:", logErr);
+        if (isScanIn || isScanOut) {
+          const productName = currentProduct.name || 'Unknown Product';
+          await logScanActivity(
+            id,
+            productName,
+            oldStock,
+            newStock,
+            isScanIn ? 'in' : 'out',
+            actingStaffName,
+            actingStaffId
+          );
+          console.log(`📷 ${isScanIn ? 'Scan In' : 'Scan Out'} logged to activityLogs for ${productName}`);
+        } else {
+          try {
+            const productName = currentProduct.name || null;
+            await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
+            console.log(`📝 Manual adjustment logged to stockAdjustments: ${currentProduct.name || id}`);
+          } catch (logErr) {
+            console.error("Failed to log stock adjustment:", logErr);
+          }
         }
 
         console.log(`📊 Stock adjusted by ${actingStaffName}: ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
@@ -1016,6 +1343,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       };
       setTransactions((prev) => [newTransaction, ...prev]);
       
+      await logSaleCompleted(
+        docRef.id,
+        data.staffName || 'Staff',
+        data.patientName || 'Walk-in Patient',
+        data.total,
+        data.items
+      );
+      
       return docRef.id;
     } catch (error) {
       console.error("Error adding transaction:", error);
@@ -1023,9 +1358,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const voidTransaction = async (id: string, voidReason?: string, voidedBy?: string) => {
+  const processReplacement = async (id: string, reason: string, processedBy: string) => {
     try {
-      // Get the transaction to be voided
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, id);
       const transactionSnap = await getDoc(transactionRef);
       
@@ -1033,70 +1367,94 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error("Transaction not found");
       }
       
-      const transactionData = transactionSnap.data() as Transaction;
+      const transactionData = transactionSnap.data();
       
-      // Check if void reason is for damaged items
-      const isDamagedReturn = voidReason?.toLowerCase().includes('damage') || 
-                               voidReason?.toLowerCase().includes('damaged');
-      
-      // Update product stocks based on void reason
-      for (const item of transactionData.items) {
-        const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
-        const productSnap = await getDoc(productRef);
-        
-        if (productSnap.exists()) {
-          const productData = productSnap.data();
-          const currentStock = productData.stock || 0;
-          const currentTotalSold = productData.totalSold || 0;
-          const currentDamageExchanged = productData.damageExchanged || 0;
-          
-          if (isDamagedReturn) {
-            // For damaged returns: 
-            // - Subtract from totalSold (undo the sale)
-            // - Add to damageExchanged (mark as damaged returned)
-            // - DO NOT return to stock (it stays out as it's damaged)
-            await updateDoc(productRef, {
-              totalSold: Math.max(0, currentTotalSold - item.quantity),
-              damageExchanged: currentDamageExchanged + item.quantity,
-              updatedAt: serverTimestamp()
-            });
-            console.log(`📝 Damaged return recorded: -${item.quantity} from totalSold, +${item.quantity} to damageExchanged for ${productData.name}`);
-          } else {
-            // For normal returns: return items to stock and subtract from totalSold
-            await updateDoc(productRef, {
-              stock: currentStock + item.quantity,
-              totalSold: Math.max(0, currentTotalSold - item.quantity),
-              updatedAt: serverTimestamp()
-            });
-            console.log(`📝 Stock returned: +${item.quantity} units to ${productData.name}, -${item.quantity} from totalSold`);
-          }
-        }
+      if (transactionData.status !== "completed" && transactionData.status !== "replaced") {
+        throw new Error("Only completed or previously replaced transactions can be processed for replacement");
       }
       
-      // Update transaction status
       await updateDoc(transactionRef, {
-        status: "voided",
-        voidReason: voidReason || "No reason provided",
-        voidedAt: new Date(),
-        voidedBy: voidedBy || userName || "System",
+        status: "processing_replacement",
+        replacementReason: reason,
+        processedAt: new Date(),
+        processedBy: processedBy,
         updatedAt: serverTimestamp()
       });
-
+      
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === id 
             ? { 
                 ...t, 
-                status: "voided",
-                voidReason: voidReason || "No reason provided",
-                voidedAt: new Date(),
-                voidedBy: voidedBy || userName || "System"
+                status: "processing_replacement",
+                replacementReason: reason,
+                processedAt: new Date(),
+                processedBy: processedBy
               } 
             : t
         )
       );
+      
+      await logReplacementInitiated(
+        id,
+        reason,
+        processedBy,
+        transactionData.patientName || 'Walk-in Patient',
+        transactionData.total || 0,
+        transactionData.items || []
+      );
+      
     } catch (error) {
-      console.error("Error voiding transaction:", error);
+      console.error("Error processing replacement:", error);
+      throw error;
+    }
+  };
+
+  const markReplacementAsCompleted = async (id: string, replacedBy: string) => {
+    try {
+      const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, id);
+      const transactionSnap = await getDoc(transactionRef);
+      
+      if (!transactionSnap.exists()) {
+        throw new Error("Transaction not found");
+      }
+      
+      const transactionData = transactionSnap.data();
+      
+      if (transactionData.status !== "processing_replacement") {
+        throw new Error("Only transactions in 'Processing Replacement' status can be marked as replaced");
+      }
+      
+      await updateDoc(transactionRef, {
+        status: "replaced",
+        replacedAt: new Date(),
+        replacedBy: replacedBy,
+        updatedAt: serverTimestamp()
+      });
+      
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === id 
+            ? { 
+                ...t, 
+                status: "replaced",
+                replacedAt: new Date(),
+                replacedBy: replacedBy
+              } 
+            : t
+        )
+      );
+      
+      await logReplacementCompleted(
+        id,
+        replacedBy,
+        transactionData.patientName || 'Walk-in Patient',
+        transactionData.total || 0,
+        transactionData.items || []
+      );
+      
+    } catch (error) {
+      console.error("Error completing replacement:", error);
       throw error;
     }
   };
@@ -1282,7 +1640,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
     transactions,
     addTransaction,
-    voidTransaction,
+    processReplacement,
+    markReplacementAsCompleted,
 
     staffUsers,
     fetchStaffUsers: async (forceRefresh = false) => {

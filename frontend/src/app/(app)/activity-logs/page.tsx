@@ -19,7 +19,10 @@ import {
   Users,
   X,
   RefreshCw,
-  Shield
+  Shield,
+  Repeat,
+  CheckCheck,
+  Archive
 } from "lucide-react";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useNotification } from "@/components/NotificationProvider";
@@ -32,12 +35,11 @@ const THEME_TEXT = "text-[#0B3C8A]";
 
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
-// List of system usernames to filter out
 const SYSTEM_USERS = ["System", "system", "Unknown User", "unknown", "Staff", "staff"];
 
 interface ActivityLogEntry {
   id: string;
-  type: 'login' | 'logout' | 'stock_adjustment' | 'scan_in' | 'scan_out' | 'transaction' | 'product_add' | 'product_edit' | 'product_delete' | 'staff_create' | 'staff_edit' | 'staff_deactivate' | 'staff_reactivate';
+  type: 'login' | 'logout' | 'stock_adjustment' | 'scan_in' | 'scan_out' | 'transaction' | 'product_add' | 'product_edit' | 'product_delete' | 'product_archive' | 'staff_create' | 'staff_edit' | 'staff_deactivate' | 'staff_reactivate' | 'replacement';
   action: string;
   description: string;
   staffName: string;
@@ -66,13 +68,20 @@ const getActivityIcon = (type: string) => {
     case 'transaction':
       return <ShoppingCart size={14} className="text-purple-600" />;
     case 'product_add':
+      return <Package size={14} className="text-emerald-600" />;
     case 'product_edit':
       return <Package size={14} className="text-indigo-600" />;
+    case 'product_delete':
+      return <Package size={14} className="text-red-600" />;
+    case 'product_archive':
+      return <Archive size={14} className="text-amber-600" />;
     case 'staff_create':
     case 'staff_edit':
     case 'staff_deactivate':
     case 'staff_reactivate':
       return <Users size={14} className="text-amber-600" />;
+    case 'replacement':
+      return <Repeat size={14} className="text-purple-600" />;
     default:
       return <History size={14} className="text-gray-600" />;
   }
@@ -93,13 +102,20 @@ const getActivityBadgeColor = (type: string) => {
     case 'transaction':
       return 'bg-purple-100 text-purple-700';
     case 'product_add':
+      return 'bg-emerald-100 text-emerald-700';
     case 'product_edit':
       return 'bg-indigo-100 text-indigo-700';
+    case 'product_delete':
+      return 'bg-red-100 text-red-700';
+    case 'product_archive':
+      return 'bg-amber-100 text-amber-700';
     case 'staff_create':
     case 'staff_edit':
     case 'staff_deactivate':
     case 'staff_reactivate':
       return 'bg-amber-100 text-amber-700';
+    case 'replacement':
+      return 'bg-purple-100 text-purple-700';
     default:
       return 'bg-gray-100 text-gray-700';
   }
@@ -154,7 +170,16 @@ export default function ActivityLogsPage() {
         monthsSet.add(monthStr);
       };
 
-      // 1. Load stock adjustments (includes scan in/out)
+      const getProductDetailsForLog = (items: any[]): string => {
+        if (!items || items.length === 0) return '';
+        return items.map(item => {
+          const itemName = item.name || 'Unknown Product';
+          const itemQuantity = item.quantity || 1;
+          return `${itemQuantity}x ${itemName}`;
+        }).join(', ');
+      };
+
+      // 1. Load stock adjustments
       const stockAdjustmentsRef = collection(db, `clinics/${CLINIC_ID}/stockAdjustments`);
       const stockQuery = query(stockAdjustmentsRef, orderBy("timestamp", "desc"), limit(1000));
       const stockSnapshot = await getDocs(stockQuery);
@@ -180,9 +205,8 @@ export default function ActivityLogsPage() {
         
         const productId = data.productId;
         const productName = data.productName || productNames.get(productId) || 'Unknown Product';
-        
-        // Only add if staffName is not a system user
         const staffName = data.staffName || 'System';
+        
         if (!SYSTEM_USERS.includes(staffName)) {
           logs.push({
             id: `stock-${doc.id}`,
@@ -203,7 +227,90 @@ export default function ActivityLogsPage() {
         }
       });
 
-      // 2. Load transactions (sales)
+      // 2. Load activity logs from activityLogs collection
+      try {
+        const activityLogsRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+        const activityQuery = query(activityLogsRef, orderBy("timestamp", "desc"), limit(1000));
+        const activitySnapshot = await getDocs(activityQuery);
+        
+        activitySnapshot.forEach(doc => {
+          const data = doc.data();
+          const timestamp = data.timestamp?.toDate() || new Date();
+          addMonth(timestamp);
+          
+          const staffName = data.staffName || 'System';
+          if (!SYSTEM_USERS.includes(staffName)) {
+            let action = '';
+            let type: ActivityLogEntry['type'] = 'transaction';
+            
+            if (data.action === 'sale_completed') {
+              action = 'Sale Completed';
+              type = 'transaction';
+            } else if (data.action === 'replacement_initiated') {
+              action = 'Replacement Initiated';
+              type = 'replacement';
+            } else if (data.action === 'replacement_completed') {
+              action = 'Replacement Completed';
+              type = 'replacement';
+            } else if (data.action === 'Scanned In') {
+              action = 'Scanned In';
+              type = 'scan_in';
+            } else if (data.action === 'Scanned Out') {
+              action = 'Scanned Out';
+              type = 'scan_out';
+            } else if (data.action === 'product_added') {
+              action = 'Product Added';
+              type = 'product_add';
+            } else if (data.action === 'product_edited') {
+              action = 'Product Edited';
+              type = 'product_edit';
+            } else if (data.action === 'product_deleted') {
+              action = 'Product Deleted';
+              type = 'product_delete';
+            } else if (data.action === 'product_archived') {
+              action = 'Product Archived';
+              type = 'product_archive';
+            } else if (data.action === 'product_unarchived') {
+              action = 'Product Restored';
+              type = 'product_archive';
+            } else {
+              action = data.action || 'Activity';
+              type = 'transaction';
+            }
+            
+            logs.push({
+              id: `activity-${doc.id}`,
+              type: type,
+              action: action,
+              description: data.description,
+              staffName: staffName,
+              staffId: data.staffId || 'system',
+              timestamp,
+              details: {
+                productId: data.productId,
+                productName: data.productName,
+                productSku: data.productSku,
+                productCategory: data.productCategory,
+                productPrice: data.productPrice,
+                changes: data.changes,
+                oldStock: data.oldStock,
+                newStock: data.newStock,
+                quantityChanged: data.quantityChanged,
+                transactionId: data.transactionId,
+                patientName: data.patientName,
+                total: data.total,
+                productDetails: data.productDetails,
+                reason: data.reason,
+                archived: data.archived
+              }
+            });
+          }
+        });
+      } catch (error) {
+        console.log('Error loading activityLogs collection:', error);
+      }
+
+      // 3. Load transactions from transactions collection
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
       const transactionsQuery = query(transactionsRef, orderBy("date", "desc"), limit(1000));
       const transactionsSnapshot = await getDocs(transactionsQuery);
@@ -213,15 +320,32 @@ export default function ActivityLogsPage() {
         const timestamp = data.date?.toDate() || data.createdAt?.toDate() || new Date();
         addMonth(timestamp);
         const itemsCount = data.items?.length || 0;
-        
+        const productDetails = getProductDetailsForLog(data.items || []);
         const staffName = data.staffName || 'System';
-        // Only add if staffName is not a system user
+        
         if (!SYSTEM_USERS.includes(staffName)) {
+          let action = '';
+          let description = '';
+          
+          if (data.status === 'completed') {
+            action = 'Sale Completed';
+            description = `${staffName} processed sale for ${data.patientName || 'Walk-in Patient'}. ${itemsCount} item${itemsCount !== 1 ? 's' : ''}, total: ₱${data.total?.toLocaleString() || 0}. Products: ${productDetails}`;
+          } else if (data.status === 'processing_replacement') {
+            action = 'Replacement Initiated';
+            description = `${staffName} initiated replacement for transaction #${doc.id.slice(-8).toUpperCase()} (${data.patientName || 'Walk-in Patient'} - ₱${data.total?.toLocaleString() || 0}). Products: ${productDetails}`;
+          } else if (data.status === 'replaced') {
+            action = 'Replacement Completed';
+            description = `${staffName} completed replacement for transaction #${doc.id.slice(-8).toUpperCase()} (${data.patientName || 'Walk-in Patient'} - ₱${data.total?.toLocaleString() || 0}). Products: ${productDetails}`;
+          } else {
+            action = 'Transaction';
+            description = `${staffName} processed transaction for ${data.patientName || 'Walk-in Patient'}. ${itemsCount} items, total: ₱${data.total?.toLocaleString() || 0}`;
+          }
+          
           logs.push({
             id: `transaction-${doc.id}`,
-            type: 'transaction',
-            action: data.status === 'completed' ? 'Sale Completed' : 'Transaction Voided',
-            description: `${staffName} processed ${data.status === 'completed' ? 'sale' : 'voided transaction'} for ${data.patientName || 'Walk-in Patient'}. ${itemsCount} item${itemsCount !== 1 ? 's' : ''}, total: ₱${data.total?.toLocaleString() || 0}`,
+            type: data.status === 'processing_replacement' || data.status === 'replaced' ? 'replacement' : 'transaction',
+            action: action,
+            description: description,
             staffName: staffName,
             staffId: data.staffId || 'system',
             timestamp,
@@ -231,16 +355,16 @@ export default function ActivityLogsPage() {
               total: data.total,
               items: data.items,
               status: data.status,
-              paymentMethod: data.paymentMethod
+              paymentMethod: data.paymentMethod,
+              replacementReason: data.replacementReason,
+              processedBy: data.processedBy,
+              replacedBy: data.replacedBy
             }
           });
         }
       });
 
-      // 3. Load product additions/edits - filtered out (system only)
-      // Product additions/edits are typically system-generated, skip them
-
-      // 4. Load user/staff activities (logins) - only real users
+      // 4. Load user/staff activities (logins)
       const usersRef = collection(db, "users");
       const usersQuery = query(usersRef, orderBy("lastLoginAt", "desc"), limit(500));
       const usersSnapshot = await getDocs(usersQuery);
@@ -260,9 +384,7 @@ export default function ActivityLogsPage() {
             staffName: staffName,
             staffId: doc.id,
             timestamp: lastLoginAt,
-            details: {
-              email: data.email
-            }
+            details: { email: data.email }
           });
         }
         
@@ -278,11 +400,7 @@ export default function ActivityLogsPage() {
             staffName: staffName,
             staffId: doc.id,
             timestamp: createdAt,
-            details: {
-              email: data.email,
-              role: data.role,
-              status: data.status
-            }
+            details: { email: data.email, role: data.role, status: data.status }
           });
         }
         
@@ -298,15 +416,12 @@ export default function ActivityLogsPage() {
             staffName: staffName,
             staffId: doc.id,
             timestamp: updatedAt,
-            details: {
-              email: data.email,
-              status: data.status
-            }
+            details: { email: data.email, status: data.status }
           });
         }
       });
 
-      // 5. Load logout events from logout_logs collection
+      // 5. Load logout events
       try {
         const logoutLogsRef = collection(db, `clinics/${CLINIC_ID}/logout_logs`);
         const logoutQuery = query(logoutLogsRef, orderBy("timestamp", "desc"), limit(1000));
@@ -316,9 +431,7 @@ export default function ActivityLogsPage() {
           const data = doc.data();
           const timestamp = data.timestamp?.toDate() || new Date();
           addMonth(timestamp);
-          
           const staffName = data.staffName || data.email?.split('@')[0] || 'User';
-          
           const durationText = data.sessionDurationSeconds && data.sessionDurationSeconds > 0
             ? ` (Session: ${Math.floor(data.sessionDurationSeconds / 60)} min ${data.sessionDurationSeconds % 60} sec)`
             : '';
@@ -331,18 +444,14 @@ export default function ActivityLogsPage() {
             staffName: staffName,
             staffId: data.staffId || 'unknown',
             timestamp,
-            details: {
-              email: data.email,
-              sessionDuration: data.sessionDurationSeconds,
-              logoutDate: data.logoutDate
-            }
+            details: { email: data.email, sessionDuration: data.sessionDurationSeconds, logoutDate: data.logoutDate }
           });
         });
       } catch (error) {
         console.log('No logout_logs collection found yet');
       }
 
-      // Sort all logs by timestamp (newest first) for initial load
+      // Sort logs by timestamp (newest first)
       logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       
       const sortedMonths = Array.from(monthsSet).sort((a, b) => {
@@ -351,9 +460,8 @@ export default function ActivityLogsPage() {
         return dateB.getTime() - dateA.getTime();
       });
       setAvailableMonths(sortedMonths);
-      
       setActivityLogs(logs);
-      console.log(`✅ Total real user logs loaded: ${logs.length}`);
+      console.log(`✅ Total activity logs loaded: ${logs.length}`);
     } catch (error) {
       console.error("Error loading activity logs:", error);
       showNotification("Failed to load activity logs", "error");
@@ -433,7 +541,8 @@ export default function ActivityLogsPage() {
       filtered = filtered.filter(log => 
         log.description.toLowerCase().includes(searchLower) ||
         log.staffName.toLowerCase().includes(searchLower) ||
-        log.action.toLowerCase().includes(searchLower)
+        log.action.toLowerCase().includes(searchLower) ||
+        (log.details?.productName && log.details.productName.toLowerCase().includes(searchLower))
       );
     }
     
@@ -469,7 +578,7 @@ export default function ActivityLogsPage() {
         animate="visible"
         className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
       >
-        {/* Header inside card */}
+        {/* Header */}
         <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
           <div className="flex justify-between items-center">
             <div>
@@ -499,7 +608,7 @@ export default function ActivityLogsPage() {
         {/* Filter Section */}
         <div className="p-6 border-b border-gray-100 bg-slate-50/30">
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Activity Type</label>
                 <div className="relative">
@@ -518,6 +627,10 @@ export default function ActivityLogsPage() {
                     <option value="scan_out">Scan Out (Dispatch Stock)</option>
                     <option value="stock_adjustment">Stock Adjustments</option>
                     <option value="transaction">Sales Transactions</option>
+                    <option value="replacement">Replacement Actions</option>
+                    <option value="product_add">Product Added</option>
+                    <option value="product_edit">Product Edited</option>
+                    <option value="product_archive">Product Archive/Restore</option>
                     <option value="staff_create">Staff Creation</option>
                     <option value="staff_deactivate">Staff Deactivation</option>
                   </select>
@@ -572,17 +685,17 @@ export default function ActivityLogsPage() {
                   </button>
                 </div>
               </div>
+            </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
-                <input
-                  type="text"
-                  placeholder="Search activities..."
-                  value={activitySearch}
-                  onChange={(e) => setActivitySearch(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
+              <input
+                type="text"
+                placeholder="Search activities or product names..."
+                value={activitySearch}
+                onChange={(e) => setActivitySearch(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+              />
             </div>
 
             {showDatePicker && (
@@ -590,14 +703,10 @@ export default function ActivityLogsPage() {
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold text-gray-800">Select Date Range</h3>
-                    <button
-                      onClick={() => setShowDatePicker(false)}
-                      className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                    >
+                    <button onClick={() => setShowDatePicker(false)} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
                       <X size={20} className="text-gray-500" />
                     </button>
                   </div>
-                  
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -607,7 +716,6 @@ export default function ActivityLogsPage() {
                         onChange={(e) => setTempStartDate(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
                       />
-                      <p className="text-xs text-gray-400 mt-1">Includes all activities from this day</p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
@@ -617,26 +725,11 @@ export default function ActivityLogsPage() {
                         onChange={(e) => setTempEndDate(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
                       />
-                      <p className="text-xs text-gray-400 mt-1">Includes all activities up to this day</p>
                     </div>
                   </div>
-                  
                   <div className="flex gap-3 mt-6">
-                    <button
-                      onClick={() => {
-                        setShowDatePicker(false);
-                        clearDateRange();
-                      }}
-                      className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={applyDateRange}
-                      className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E]"
-                    >
-                      Apply Range
-                    </button>
+                    <button onClick={() => { setShowDatePicker(false); clearDateRange(); }} className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50">Clear</button>
+                    <button onClick={applyDateRange} className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E]">Apply Range</button>
                   </div>
                 </div>
               </div>
@@ -645,54 +738,31 @@ export default function ActivityLogsPage() {
             {(activityFilter !== "all" || activityMonthFilter !== "all" || dateRange.startDate || activitySearch) && (
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <span className="text-xs text-gray-500">Active filters:</span>
-                
                 {activityFilter !== "all" && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">
                     Type: {activityFilter.replace('_', ' ')}
-                    <button onClick={() => setActivityFilter("all")} className="hover:text-blue-900">
-                      <X size={12} />
-                    </button>
+                    <button onClick={() => setActivityFilter("all")} className="hover:text-blue-900"><X size={12} /></button>
                   </span>
                 )}
-                
                 {activityMonthFilter !== "all" && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">
                     Month: {activityMonthFilter}
-                    <button onClick={() => setActivityMonthFilter("all")} className="hover:text-green-900">
-                      <X size={12} />
-                    </button>
+                    <button onClick={() => setActivityMonthFilter("all")} className="hover:text-green-900"><X size={12} /></button>
                   </span>
                 )}
-                
                 {dateRange.startDate && dateRange.endDate && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700">
                     Range: {formatDateRangeDisplay()}
-                    <button onClick={clearDateRange} className="hover:text-purple-900">
-                      <X size={12} />
-                    </button>
+                    <button onClick={clearDateRange} className="hover:text-purple-900"><X size={12} /></button>
                   </span>
                 )}
-                
                 {activitySearch && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
                     Search: {activitySearch}
-                    <button onClick={() => setActivitySearch("")} className="hover:text-gray-900">
-                      <X size={12} />
-                    </button>
+                    <button onClick={() => setActivitySearch("")} className="hover:text-gray-900"><X size={12} /></button>
                   </span>
                 )}
-                
-                <button
-                  onClick={() => {
-                    setActivityFilter("all");
-                    setActivityMonthFilter("all");
-                    clearDateRange();
-                    setActivitySearch("");
-                  }}
-                  className="text-xs text-red-600 hover:text-red-800 font-medium"
-                >
-                  Clear all
-                </button>
+                <button onClick={() => { setActivityFilter("all"); setActivityMonthFilter("all"); clearDateRange(); setActivitySearch(""); }} className="text-xs text-red-600 hover:text-red-800 font-medium">Clear all</button>
               </div>
             )}
           </div>
@@ -702,9 +772,7 @@ export default function ActivityLogsPage() {
         <div className="px-6 pt-4 pb-2 text-xs text-gray-500 border-b border-gray-100">
           Showing {filteredActivityLogs.length} of {activityLogs.length} activities
           {dateRange.startDate && dateRange.endDate && (
-            <span className="ml-2 text-blue-600">
-              ({dateRange.startDate.toLocaleDateString()} → {dateRange.endDate.toLocaleDateString()})
-            </span>
+            <span className="ml-2 text-blue-600">({dateRange.startDate.toLocaleDateString()} → {dateRange.endDate.toLocaleDateString()})</span>
           )}
         </div>
 
@@ -718,11 +786,9 @@ export default function ActivityLogsPage() {
           ) : filteredActivityLogs.length === 0 ? (
             <div className="text-center py-20 text-gray-400">
               <History size={48} className="mx-auto mb-3 opacity-20" />
-              <p>No activity logs found</p>
+              <p className="text-sm">No activity logs found</p>
               {dateRange.startDate && dateRange.endDate && (
-                <p className="text-xs mt-1">
-                  No activities found between {dateRange.startDate.toLocaleDateString()} and {dateRange.endDate.toLocaleDateString()}
-                </p>
+                <p className="text-xs mt-1">No activities found between {dateRange.startDate.toLocaleDateString()} and {dateRange.endDate.toLocaleDateString()}</p>
               )}
               <p className="text-xs mt-1">Try adjusting your filters</p>
             </div>
