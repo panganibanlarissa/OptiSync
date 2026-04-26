@@ -40,7 +40,13 @@ app = FastAPI(title="OlasoSync ML Service", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001",  "https://optisync-j01wv7p2n-rejeanzapantas-projects.vercel.app", "https://*.vercel.app"]
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://optisync-j01wv7p2n-rejeanzapantas-projects.vercel.app",
+        "https://optisync.vercel.app",
+        "https://*.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
