@@ -4,18 +4,17 @@
 
 ---
 
-## 📋 Table of Contents
-
+## Table of Contents
 - [Overview](#overview)
-- [Key Features](#-key-features)
-- [Tech Stack](#-tech-stack)
-- [Installation Guide](#-installation-guide)
-- [Configuration](#-configuration)
-- [Running the Application](#-running-the-application)
-- [Sample Accounts](#-sample-accounts)
-- [User Role Guides](#-user-role-guides)
-- [Project Structure](#-project-structure)
-- [Troubleshooting](#-troubleshooting)
+- [Key Features](#key-features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Installation Guide](#installation-guide)
+- [Configuration](#configuration)
+- [Running the Application](#running-the-application)
+- [Sample Accounts](#sample-accounts)
+- [User Role Guides](#user-role-guides)
+- [License](#license)
 
 ---
 
@@ -31,8 +30,7 @@ OptiSync addresses the operational challenges faced by optical clinics by provid
 
 ---
 
-## 🚀 Key Features
-
+## Key Features
 ### **Landing Page & Authentication**
 - Responsive, animated landing page with Framer Motion
 - Secure role-based authentication (Admin vs. Staff) via Firebase
@@ -71,8 +69,7 @@ OptiSync addresses the operational challenges faced by optical clinics by provid
 
 ---
 
-## 🛠️ Tech Stack
-
+## Tech Stack
 ### **Frontend**
 - **Framework:** [Next.js 14](https://nextjs.org/) (App Router)
 - **Language:** TypeScript
@@ -100,8 +97,7 @@ OptiSync addresses the operational challenges faced by optical clinics by provid
 
 ---
 
-## 📂 Project Structure
-
+## Project Structure
 ```
 OptiSync/
 ├── frontend/                   # Next.js Web Application
@@ -147,8 +143,7 @@ OptiSync/
 
 ---
 
-## 🔧 Installation Guide
-
+## Installation Guide
 ### **Prerequisites**
 
 Before installing OptiSync, ensure you have the following installed:
@@ -213,8 +208,7 @@ docker-compose up -d
 
 ---
 
-## ⚙️ Configuration
-
+## Configuration
 ### **Firebase Setup**
 
 1. Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
@@ -257,8 +251,7 @@ DATABASE_URL=your_firebase_connection
 
 ---
 
-## 🚀 Running the Application
-
+## Running the Application
 ### **Development Mode**
 
 **Terminal 1 - Frontend:**
@@ -303,8 +296,7 @@ This will start both frontend (port 3000) and backend (port 5000) in containers.
 
 ---
 
-## � Sample Accounts
-
+## Sample Accounts
 For development and testing purposes, use the following pre-configured accounts:
 
 ### **Admin Account**
@@ -350,16 +342,14 @@ You will be directed to the Staff Dashboard with access to sales and product sea
 | Admin | `olasosync@gmail.com` | `MTolaso_opticalclinic2026` | Full Analytics & Management |
 | Staff | `staff.olasosync@gmail.com` | `staff_123` | POS & Inventory Only |
 
-> **⚠️ Important:** These are development accounts only. In production, ensure all default credentials are changed and unique, strong passwords are set for all user accounts.
+> **Important:** These are development accounts only. In production, ensure all default credentials are changed and unique, strong passwords are set for all user accounts.
 
 ---
 
-## �👥 User Role Guides
-
+## User Role Guides
 OptiSync implements two primary user roles with distinct permissions and functionalities. This section provides comprehensive guides for each role.
 
-### **📊 Admin User Guide**
-
+### **Admin User Guide**
 **Role Description:** Administrators have full system access and are responsible for managing inventory, staff, and clinic operations.
 
 #### **Key Permissions**
@@ -405,8 +395,7 @@ The admin dashboard provides:
 
 ---
 
-### **👨‍💼 Staff User Guide**
-
+### **Staff User Guide**
 **Role Description:** Staff members handle day-to-day clinic operations including patient sales, inventory lookups, and customer service.
 
 #### **Key Permissions**
@@ -473,7 +462,7 @@ The staff dashboard provides:
 1. Admin creates account in **Staff Management**
 2. System sends activation email to user
 3. User clicks activation link in email
-5. User can now log in with email and password
+4. User can now log in with email and password
 
 **Login Process:**
 
@@ -493,5 +482,6 @@ The staff dashboard provides:
 
 ---
 
-## 📄 License
+## License
 This project is developed for **M.T. Olaso Optical Clinic**. All rights reserved.
+
