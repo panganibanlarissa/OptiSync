@@ -125,6 +125,9 @@ export default function StaffDashboard() {
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [scanMode, setScanMode] = useState<'in' | 'out'>('in');
   const [showLowStockModal, setShowLowStockModal] = useState(false);
+  const [pendingScanInProduct, setPendingScanInProduct] = useState<{ id: string; name: string; sku: string; stock: number } | null>(null);
+  const [scanInQuantity, setScanInQuantity] = useState("1");
+  const [isApplyingScanIn, setIsApplyingScanIn] = useState(false);
   
   const { products, transactions, adjustStock, userRole, userName, userId } = useFirebase();
   const { showNotification } = useNotification();
@@ -205,21 +208,29 @@ export default function StaffDashboard() {
     const product = products.find(p => p.id === productId);
     if (product) {
       try {
-        const newStock = scanMode === 'in' 
-          ? product.stock + 1 
-          : Math.max(0, product.stock - 1);
+        if (scanMode === 'in') {
+          setPendingScanInProduct({
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            stock: product.stock,
+          });
+          setScanInQuantity("1");
+          setIsQRScannerOpen(false);
+          return;
+        }
+
+        const newStock = Math.max(0, product.stock - 1);
         
         if (newStock !== product.stock) {
-          const reason = scanMode === 'in' 
-            ? 'Received via QR Scan' 
-            : 'Dispatched via QR Scan';
+          const reason = 'Dispatched via QR Scan';
           
           await adjustStock(productId, newStock, reason, userName || 'Staff', userId || 'system');
           
-          const action = scanMode === 'in' ? '+1' : '-1';
+          const action = '-1';
           const message = `${action} unit - ${product.name}`;
           
-          showNotification(message, 'success', `Stock ${scanMode === 'in' ? 'In' : 'Out'} ✓`);
+          showNotification(message, 'success', 'Stock Out');
         } else {
           showNotification(`No change - ${product.name} already at ${product.stock} units`, 'info', 'Stock Unchanged');
         }
@@ -228,6 +239,37 @@ export default function StaffDashboard() {
         console.error("Error adjusting stock:", error);
         showNotification(`Failed to adjust stock for "${product.name}"`, 'error', 'Error');
       }
+    }
+  };
+
+  const confirmScanIn = async () => {
+    if (!pendingScanInProduct || isApplyingScanIn) return;
+
+    const quantity = Number(scanInQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      showNotification("Please enter a valid quantity (whole number greater than 0).", 'error', 'Invalid Quantity');
+      return;
+    }
+
+    const latestProduct = products.find((p) => p.id === pendingScanInProduct.id);
+    if (!latestProduct) {
+      showNotification("Product not found. Please scan again.", 'error', 'Error');
+      setPendingScanInProduct(null);
+      return;
+    }
+
+    setIsApplyingScanIn(true);
+    try {
+      const newStock = latestProduct.stock + quantity;
+      await adjustStock(latestProduct.id, newStock, `Received via QR Scan (+${quantity})`, userName || 'Staff', userId || 'system');
+      showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock In ✓');
+      setPendingScanInProduct(null);
+      setScanInQuantity("1");
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      showNotification(`Failed to adjust stock for "${latestProduct.name}"`, 'error', 'Error');
+    } finally {
+      setIsApplyingScanIn(false);
     }
   };
 
@@ -242,14 +284,14 @@ export default function StaffDashboard() {
         initial="hidden"
         animate="visible"
         variants={containerVariants}
-        className="min-h-screen bg-gray-50 p-4 space-y-4"
+        className="min-h-screen p-4 space-y-4"
       >
-        {/* SCANNER BUTTONS - Quick Warehouse Operations - Updated Colors */}
+        {/* SCANNER BUTTONS - White background with colored borders */}
         <motion.div
           variants={itemVariants}
           className="grid grid-cols-2 gap-4"
         >
-          {/* Scan In Button - Changed to Blue theme */}
+          {/* Scan In Button - White bg, green border, green text & icon */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -257,19 +299,19 @@ export default function StaffDashboard() {
               setScanMode('in');
               setIsQRScannerOpen(true);
             }}
-            className="bg-gradient-to-r from-[#0B3C8A] to-blue-600 hover:from-[#082F6E] hover:to-blue-700 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
+            className="bg-blue-200 border-2 border-blue-500 hover:border-blue-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
           >
-            <div className="p-4 bg-white/20 rounded-full backdrop-blur-sm">
-              <ArrowUp className="text-white w-8 h-8" strokeWidth={2.5} />
+            <div className="p-4 bg-blue-300 rounded-full">
+              <ArrowUp className="text-blue-700 w-8 h-8" strokeWidth={2.5} />
             </div>
             <div className="text-center">
-              <p className="font-bold text-lg text-white leading-tight">Scan In</p>
-              <p className="text-white/80 text-xs mt-0.5">Receive Stock</p>
+              <p className="font-bold text-lg text-blue-600 leading-tight">Scan In</p>
+              <p className="text-blue-500 text-xs mt-0.5">Receive Stock</p>
             </div>
-            <QrCode className="w-5 h-5 text-white/40 absolute top-2 right-2 opacity-60" />
+            <QrCode className="w-5 h-5 text-blue-400 absolute top-2 right-2 opacity-60" />
           </motion.button>
 
-          {/* Scan Out Button - Changed to Orange/Amber theme */}
+          {/* Scan Out Button - White bg, red border, red text & icon */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -277,16 +319,16 @@ export default function StaffDashboard() {
               setScanMode('out');
               setIsQRScannerOpen(true);
             }}
-            className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
+            className="bg-red-200 border-2 border-red-500 hover:border-red-600 rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all shadow-md hover:shadow-lg relative"
           >
-            <div className="p-4 bg-white/20 rounded-full backdrop-blur-sm">
-              <ArrowDown className="text-white w-8 h-8" strokeWidth={2.5} />
+            <div className="p-4 bg-red-300 rounded-full">
+              <ArrowDown className="text-red-700 w-8 h-8" strokeWidth={2.5} />
             </div>
             <div className="text-center">
-              <p className="font-bold text-lg text-white leading-tight">Scan Out</p>
-              <p className="text-white/80 text-xs mt-0.5">Dispatch Stock</p>
+              <p className="font-bold text-lg text-red-600 leading-tight">Scan Out</p>
+              <p className="text-red-500 text-xs mt-0.5">Dispatch Stock</p>
             </div>
-            <QrCode className="w-5 h-5 text-white/40 absolute top-2 right-2 opacity-60" />
+            <QrCode className="w-5 h-5 text-red-400 absolute top-2 right-2 opacity-60" />
           </motion.button>
         </motion.div>
 
@@ -669,6 +711,23 @@ export default function StaffDashboard() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {pendingScanInProduct && (
+          <ScanInConfirmationModal
+            product={pendingScanInProduct}
+            quantity={scanInQuantity}
+            setQuantity={setScanInQuantity}
+            isSubmitting={isApplyingScanIn}
+            onCancel={() => {
+              if (isApplyingScanIn) return;
+              setPendingScanInProduct(null);
+              setScanInQuantity("1");
+            }}
+            onConfirm={confirmScanIn}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -742,5 +801,78 @@ function RecentlyAddedRow({ data }: { data: RecentlyAddedItem }) {
         {formatDate(data.dateAdded)}
       </td>
     </tr>
+  );
+}
+
+function ScanInConfirmationModal({
+  product,
+  quantity,
+  setQuantity,
+  isSubmitting,
+  onCancel,
+  onConfirm,
+}: {
+  product: { id: string; name: string; sku: string; stock: number };
+  quantity: string;
+  setQuantity: (value: string) => void;
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const qty = Number(quantity);
+  const isValidQty = Number.isInteger(qty) && qty > 0;
+  const projectedStock = isValidQty ? product.stock + qty : product.stock;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-4 sm:p-6"
+      >
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Scan In</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Add stock for <span className="font-semibold text-gray-800">{product.name}</span> ({product.sku}).
+        </p>
+
+        <div className="space-y-2 mb-4">
+          <label htmlFor="scanin-qty" className="text-xs font-semibold text-gray-700 uppercase">
+            Quantity To Add
+          </label>
+          <input
+            id="scanin-qty"
+            type="number"
+            min={1}
+            step={1}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A] text-gray-700"
+          />
+          <p className="text-xs text-gray-500">
+            Current: <span className="font-semibold text-gray-700">{product.stock}</span> | New:{" "}
+            <span className="font-semibold text-[#0B3C8A]">{projectedStock}</span>
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!isValidQty || isSubmitting}
+            className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-md disabled:opacity-60"
+          >
+            {isSubmitting ? "Saving..." : "Confirm"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
   );
 }

@@ -6,7 +6,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import jsQR from "jsqr";
-import { useFirebase } from "@/context/FirebaseContext";
 
 interface QRScannerModalProps {
   onClose: () => void;
@@ -34,8 +33,6 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
   const [foundProduct, setFoundProduct] = useState<string | null>(null);
   const scanningRef = useRef(false);
   
-  const { userName, userId, adjustStock } = useFirebase();
-
   // Get context-aware messages based on mode
   const getInstructions = () => {
     switch(mode) {
@@ -69,31 +66,9 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
     }
   };
 
-  const handleProductFoundAction = async (productId: string) => {
+  const handleProductFoundAction = (productId: string) => {
     const product = products.find(p => p.id === productId);
     if (!product) return;
-    
-    // For adjust mode (in/out), use the adjustStock function with proper staff info
-    if (mode === 'in' || mode === 'out' || mode === 'adjust') {
-      const reason = mode === 'in' || mode === 'adjust'
-        ? 'Received via QR Scan' 
-        : 'Dispatched via QR Scan';
-      
-      // Get current product stock
-      const currentProduct = products.find(p => p.id === productId);
-      if (currentProduct && typeof (currentProduct as any).stock === 'number') {
-        const newStock = (mode === 'in' || mode === 'adjust')
-          ? (currentProduct as any).stock + 1 
-          : Math.max(0, (currentProduct as any).stock - 1);
-        
-        // Only adjust if stock actually changes (prevents duplicate entries)
-        if (newStock !== (currentProduct as any).stock) {
-          // Call adjustStock with staff info
-          await adjustStock(productId, newStock, reason, userName || 'Staff', userId || 'system');
-        }
-      }
-    }
-    
     onProductFound(productId);
   };
 
@@ -193,8 +168,8 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
     if (product) {
       setFoundProduct(product.id);
       setManualInput("");
-      setTimeout(async () => {
-        await handleProductFoundAction(product.id);
+      setTimeout(() => {
+        handleProductFoundAction(product.id);
       }, 300);
     } else {
       setError(`Product with ID/SKU "${manualInput}" not found`);

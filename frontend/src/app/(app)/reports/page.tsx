@@ -169,6 +169,10 @@ const getStatusDisplay = (status: string) => {
   }
 };
 
+const formatPdfCurrency = (amount: number): string => {
+  return `PHP ${amount.toLocaleString('en-US')}`;
+};
+
 export default function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
@@ -382,12 +386,22 @@ export default function ReportsPage() {
           itemsStr,
           t.paymentMethod ? t.paymentMethod.toUpperCase() : 'N/A',
           statusText,
-          `₱${t.total.toLocaleString()}`
+          formatPdfCurrency(t.total)
         ];
       }),
       theme: 'grid',
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
-      styles: { fontSize: 9, textColor: [0, 0, 0] },
+      styles: { fontSize: 8, textColor: [0, 0, 0] },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 18 },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 21 },
+        4: { cellWidth: 46 },
+        5: { cellWidth: 18 },
+        6: { cellWidth: 24 },
+        7: { cellWidth: 17, halign: 'right' }
+      },
       didDrawPage: (data) => {
         doc.setFontSize(16);
         doc.setTextColor(0, 0, 0);
@@ -446,7 +460,7 @@ export default function ReportsPage() {
     
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Total Sales Revenue: ₱${totalSales.toLocaleString()}`, 14, summaryStartY + 44);
+    doc.text(`Total Sales Revenue: ${formatPdfCurrency(totalSales)}`, 14, summaryStartY + 44);
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
     doc.text("Sum of all completed transactions in this period.", 14, summaryStartY + 47);
@@ -454,7 +468,7 @@ export default function ReportsPage() {
     if (replacedTransactions.length > 0) {
       doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
-      doc.text(`Replaced Amount: ₱${replacedAmount.toLocaleString()}`, 14, summaryStartY + 54);
+      doc.text(`Replaced Amount: ${formatPdfCurrency(replacedAmount)}`, 14, summaryStartY + 54);
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text("Total value of replaced transactions; excluded from revenue.", 14, summaryStartY + 57);
@@ -613,7 +627,7 @@ export default function ReportsPage() {
           p.stock,
           p.daysSinceSale >= 365 ? ">1 Year" : `${p.daysSinceSale} days`,
           p.hasSales ? (p.totalSalesCount > 0 ? `Unsold (${p.daysSinceSale} days)` : 'Never Sold') : 'Never Sold',
-          `₱${(p.stock * p.markupPrice).toLocaleString()}`
+          formatPdfCurrency(p.stock * p.markupPrice)
         ]),
         headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255] },
         styles: { fontSize: 8, textColor: [0, 0, 0] },
@@ -642,10 +656,10 @@ export default function ReportsPage() {
     
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text(`• Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
-    doc.text(`• Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
-    doc.text(`• Potential capital recovery from liquidation: ₱${liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0).toLocaleString()}`, 14, summaryY + 17);
-    doc.text(`• Stock turnover rate: ${stockAccuracyRate.toFixed(1)}% of inventory has moved during the selected period.`, 14, summaryY + 22);
+    doc.text(`- Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
+    doc.text(`- Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
+    doc.text(`- Potential capital recovery from liquidation: ${formatPdfCurrency(liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0))}`, 14, summaryY + 17);
+    doc.text(`- Stock turnover rate: ${stockAccuracyRate.toFixed(1)}% of inventory has moved during the selected period.`, 14, summaryY + 22);
     
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
@@ -695,7 +709,7 @@ export default function ReportsPage() {
     today.setHours(0, 0, 0, 0);
 
     const allProductsData = products
-      .filter(p => p.stock > 0)
+      .filter(p => p.stock > 0 && !(p as any).archived)
       .map(p => {
         const completedTransactions = rangeFilteredTransactions.filter(t => t.status === 'completed');
         
@@ -756,10 +770,7 @@ export default function ReportsPage() {
       });
     
     const deadstockData = allProductsData
-      .filter(item => {
-        if (!item.hasSales) return true;
-        return item.daysSinceLastSale >= 30;
-      })
+      .filter(item => item.daysSinceLastSale >= 30)
       .sort((a, b) => b.daysSinceLastSale - a.daysSinceLastSale);
 
     if (deadstockData.length === 0) {
@@ -799,7 +810,7 @@ export default function ReportsPage() {
         item.stock,
         item.daysIdleDisplay,
         item.hasSales ? `Unsold (Last sale: ${item.lastSaleDate?.toLocaleDateString() || 'N/A'})` : 'NEVER SOLD',
-        `₱${item.deadCapital.toLocaleString()}`
+        formatPdfCurrency(item.deadCapital)
       ]),
       theme: 'grid',
       headStyles: { fillColor: [100, 100, 100], textColor: [255, 255, 255], fontStyle: 'bold' },
@@ -813,6 +824,29 @@ export default function ReportsPage() {
         }
       }
     });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 45;
+    let summaryY = finalY + 12;
+    if (summaryY + 38 > pageHeight - 20) {
+      doc.addPage();
+      summaryY = 45;
+      addAgingHeader(doc.getNumberOfPages());
+    }
+
+    const totalDeadCapital = deadstockData.reduce((sum, item) => sum + item.deadCapital, 0);
+
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Executive Summary", 14, summaryY);
+
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`- Deadstock Items: ${deadstockData.length}`, 14, summaryY + 7);
+    doc.text(`- Total Dead Capital: ${formatPdfCurrency(totalDeadCapital)}`, 14, summaryY + 12);
+
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Recommendation: Prioritize liquidation of highest-value deadstock and review reorder policies for slow-moving categories.", 14, summaryY + 19);
 
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
@@ -895,7 +929,7 @@ export default function ReportsPage() {
                 onClick={exportLedgerReport}
                 className={`flex-1 lg:flex-none flex items-center justify-center gap-1.5 ${THEME_BG} ${THEME_HOVER} text-white px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors`}
               >
-                <Download size={14} /> Transactions Report
+                <Download size={14} /> Sales Report
               </button>
             </div>
           </div>

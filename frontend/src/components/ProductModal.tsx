@@ -73,7 +73,7 @@ export default function ProductModal({
   const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
   const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
 
-  const isPerishable = formData.category === "Solutions" || formData.category === "Contact Lenses";
+  const isPerishable = formData.category === "Solutions" || formData.category === "Vitamins";
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -82,10 +82,9 @@ export default function ProductModal({
     if (name === 'category') {
       const categoryDefaults: Record<string, string> = {
         "Frames": "FRM",
-        "Lenses": "LNS",
-        "Contact Lenses": "CTL",
         "Solutions": "SOL",
-        "Accessories": "ACC"
+        "Accessories": "ACC",
+        "Vitamins": "VTM"
       };
       const prefix = categoryDefaults[value] || "ITM";
       // Filter existing products of the same category to determine the count
@@ -421,10 +420,9 @@ export default function ProductModal({
                 <select required name="category" value={formData.category} onChange={handleChange} className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-[11px] sm:text-sm focus:ring-1 focus:ring-[#0B3C8A] focus:outline-none text-gray-700">
                   <option value="" disabled>Select a category</option>
                   <option>Frames</option>
-                  <option>Lenses</option>
-                  <option>Contact Lenses</option>
                   <option>Solutions</option>
                   <option>Accessories</option>
+                  <option>Vitamins</option>
                 </select>
               </div>
             </div>

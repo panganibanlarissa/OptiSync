@@ -33,13 +33,33 @@ import {
   Shield,
   Clock,
   Repeat,
-  CheckCheck
+  CheckCheck,
+  Eye
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_HOVER = "hover:bg-[#082F6E]";
 const THEME_TEXT = "text-[#0B3C8A]";
+const DEADSTOCK_DAYS_THRESHOLD = 30;
+
+const toValidDate = (value: unknown): Date | null => {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return new Date(value);
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+
+  if (value && typeof value === "object" && "toDate" in value && typeof (value as any).toDate === "function") {
+    const parsed = (value as any).toDate();
+    if (parsed instanceof Date && !isNaN(parsed.getTime())) return parsed;
+  }
+
+  return null;
+};
 
 interface Product {
   id: string;
@@ -78,6 +98,10 @@ interface Transaction {
   id: string;
   patientName: string;
   items: CartItem[];
+  subtotal?: number;
+  discountType?: "none" | "loyalty" | "pwd";
+  discountPercentage?: number;
+  discountAmount?: number;
   total: number;
   date: Date;
   status: "completed" | "processing_replacement" | "replaced";
@@ -97,6 +121,17 @@ interface Transaction {
   processedAt?: Date;
   processedBy?: string;
 }
+
+const normalizeDiscountPercentage = (raw?: number): number => {
+  if (typeof raw !== "number" || Number.isNaN(raw) || raw <= 0) return 0;
+  return raw > 1 ? raw / 100 : raw;
+};
+
+const shouldShowTransactionDiscount = (
+  trx: Transaction
+): trx is Transaction & { discountAmount: number } => {
+  return typeof trx.discountAmount === "number" && trx.discountAmount > 0;
+};
 
 // CATEGORIES
 const CATEGORIES = ["All", "Frames", "Solutions", "Accessories"];
@@ -168,19 +203,23 @@ export default function SalesPage() {
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
   const [replacementModalOpen, setReplacementModalOpen] = useState(false);
   const [completeReplacementModalOpen, setCompleteReplacementModalOpen] = useState(false);
+  const [viewTransactionModalOpen, setViewTransactionModalOpen] = useState(false);
   const [transactionToReplace, setTransactionToReplace] = useState<Transaction | null>(null);
   const [transactionToComplete, setTransactionToComplete] = useState<Transaction | null>(null);
+  const [transactionToView, setTransactionToView] = useState<Transaction | null>(null);
   const [replacementReason, setReplacementReason] = useState<string>("");
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "online">("cash");
   const [amountReceive, setAmountReceive] = useState<string>("");
   const [filterDate, setFilterDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [viewByMonth, setViewByMonth] = useState<boolean>(false);
+  const [transactionStatusFilter, setTransactionStatusFilter] = useState<"all" | "completed" | "processing_replacement" | "replaced">("all");
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
   const [warrantyStartDate, setWarrantyStartDate] = useState<string>("");
   const [warrantyEndDate, setWarrantyEndDate] = useState<string>("");
   const [referenceNumber, setReferenceNumber] = useState<string>("");
   const [showOnlineConfirm, setShowOnlineConfirm] = useState(false);
+  const [discountType, setDiscountType] = useState<"none" | "loyalty" | "pwd">("none");
 
   const searchParams = useSearchParams();
 
@@ -198,6 +237,11 @@ export default function SalesPage() {
 
   const filteredTransactions = useMemo(() => {
     return (firebaseTransactions as Transaction[]).filter(transaction => {
+      // Status filter
+      if (transactionStatusFilter !== "all" && transaction.status !== transactionStatusFilter) {
+        return false;
+      }
+
       let transactionDate: Date;
       if (transaction.date instanceof Date) {
         transactionDate = transaction.date;
@@ -222,7 +266,7 @@ export default function SalesPage() {
         return transactionDateStr === filterDate;
       }
     });
-  }, [firebaseTransactions, filterDate, viewByMonth]);
+  }, [firebaseTransactions, filterDate, viewByMonth, transactionStatusFilter]);
 
   const productsWithAvailableStock = useMemo(() => {
     return activeProducts.map(product => ({
@@ -244,8 +288,69 @@ export default function SalesPage() {
     return matchesSearch && matchesCategory;
   });
 
+  const deadstockProductIds = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const lastCompletedSaleByProduct = new Map<string, Date>();
+    (firebaseTransactions as Transaction[]).forEach((transaction) => {
+      if (transaction.status !== "completed") return;
+
+      const transactionDate = toValidDate((transaction as any).date);
+      if (!transactionDate) return;
+      transactionDate.setHours(0, 0, 0, 0);
+
+      transaction.items?.forEach((item) => {
+        const previous = lastCompletedSaleByProduct.get(item.id);
+        if (!previous || transactionDate > previous) {
+          lastCompletedSaleByProduct.set(item.id, new Date(transactionDate));
+        }
+      });
+    });
+
+    const deadstockIds = new Set<string>();
+    activeProducts.forEach((product) => {
+      if (product.archived || product.stock <= 0) return;
+
+      let referenceDate = lastCompletedSaleByProduct.get(product.id) ?? null;
+      if (!referenceDate) {
+        referenceDate = toValidDate((product as any).createdAt);
+      }
+
+      if (!referenceDate) {
+        if ((product.lastMovedDaysAgo || 0) >= DEADSTOCK_DAYS_THRESHOLD) {
+          deadstockIds.add(product.id);
+        }
+        return;
+      }
+
+      referenceDate.setHours(0, 0, 0, 0);
+      const daysSince = Math.floor((today.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSince >= DEADSTOCK_DAYS_THRESHOLD) {
+        deadstockIds.add(product.id);
+      }
+    });
+
+    return deadstockIds;
+  }, [activeProducts, firebaseTransactions]);
+
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const total = subtotal;
+  
+  // Calculate discount based on selected discount type
+  const getDiscountPercentage = (): number => {
+    switch(discountType) {
+      case "loyalty":
+        return 0.30; // 30% loyalty discount
+      case "pwd":
+        return 0.20; // 20% PWD/Senior Citizen discount
+      default:
+        return 0; // no discount
+    }
+  };
+  
+  const discountPercentage = getDiscountPercentage();
+  const discountAmount = subtotal * discountPercentage;
+  const total = subtotal - discountAmount;
 
   const handleAddToCartClick = (product: Product) => {
     if (product.archived) {
@@ -372,6 +477,7 @@ export default function SalesPage() {
     setWarrantyStartDate("");
     setWarrantyEndDate("");
     setReferenceNumber("");
+    setDiscountType("none");
   };
 
   const processCheckout = async (
@@ -393,6 +499,10 @@ export default function SalesPage() {
       const newTransactionData: any = {
         patientName: patientName || "Walk-in Patient",
         items: cart,
+        subtotal: subtotal,
+        discountType: discountType,
+        discountPercentage: discountPercentage,
+        discountAmount: discountAmount,
         total: total,
         date: new Date(),
         status: "completed" as const,
@@ -647,6 +757,27 @@ export default function SalesPage() {
     doc.setFont('Helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
     
+    // Display subtotal
+    const subtotalStr = (trx.subtotal || trx.total).toLocaleString();
+    doc.text('Subtotal', leftMargin, currentY);
+    doc.text(subtotalStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+    currentY += 2.3;
+
+    // Display discount if applicable
+    if (shouldShowTransactionDiscount(trx)) {
+      doc.setFontSize(6);
+      const discountPercentStr = `${Math.round(normalizeDiscountPercentage(trx.discountPercentage) * 100)}%`;
+      const discountTypeStr = trx.discountType === 'loyalty' ? 'Loyalty' : trx.discountType === 'pwd' ? 'PWD/Senior' : 'Discount';
+      const discountAmountStr = trx.discountAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      doc.text(`${discountTypeStr} (${discountPercentStr})`, leftMargin, currentY);
+      doc.text(`-${discountAmountStr}`, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      currentY += 2.3;
+    }
+
+    doc.setFontSize(7);
+    doc.setFont('Helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    
     const totalStr = trx.total.toLocaleString();
     doc.text('Total', leftMargin, currentY);
     doc.text(totalStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
@@ -766,6 +897,11 @@ export default function SalesPage() {
     setCompleteReplacementModalOpen(true);
   };
 
+  const openViewTransactionModal = (transaction: Transaction) => {
+    setTransactionToView(transaction);
+    setViewTransactionModalOpen(true);
+  };
+
   const handleMarkReplacementAsCompleted = async () => {
     if (transactionToComplete) {
       try {
@@ -876,7 +1012,9 @@ export default function SalesPage() {
               <motion.div key={`product-grid-${selectedCategory}-${searchQuery}`} variants={containerVariants} initial="hidden" animate="visible" className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3">
                 <AnimatePresence mode="popLayout">
                   {filteredProducts.length > 0 ? (
-                    filteredProducts.map(product => (
+                    filteredProducts.map(product => {
+                      const isDeadstock = deadstockProductIds.has(product.id);
+                      return (
                       <motion.div key={product.id} variants={itemVariants} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ duration: 0.2 }} onClick={() => {
                         if ((product.availableStock ?? 0) > 0 && !product.archived) handleAddToCartClick(product);
                         else if (product.archived) showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
@@ -895,6 +1033,7 @@ export default function SalesPage() {
                           <div className="absolute top-1.5 left-1.5 bg-white/90 backdrop-blur text-gray-600 text-[8px] sm:text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm border border-gray-100 z-10">{product.sku}</div>
                           <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end z-10">
                             {product.archived && <span className="bg-gray-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">ARCHIVED</span>}
+                            {!product.archived && isDeadstock && <span className="text-gray-700 bg-gray-200 border border-gray-400 sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">DEAD</span>}
                             {!product.archived && (product.availableStock ?? 0) <= product.reorderPoint && (product.availableStock ?? 0) > 0 && <span className="bg-orange-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">LOW</span>}
                             {!product.archived && (product.availableStock ?? 0) <= 0 && <span className="bg-red-500 text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm">OUT</span>}
                           </div>
@@ -917,7 +1056,7 @@ export default function SalesPage() {
                           </div>
                         </div>
                       </motion.div>
-                    ))
+                    )})
                   ) : (
                     <motion.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="col-span-full py-10 text-center text-gray-500 text-sm">No products found matching your search.</motion.div>
                   )}
@@ -1013,6 +1152,30 @@ export default function SalesPage() {
                   </div>
                 )}
 
+                <div className="space-y-2">
+                  <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Discount Type</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button 
+                      onClick={() => setDiscountType("none")} 
+                      className={`py-2 px-2 rounded-lg font-semibold text-xs transition-all border-2 ${discountType === "none" ? `border-[#0B3C8A] bg-blue-50 text-[#0B3C8A]` : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"}`}
+                    >
+                      None
+                    </button>
+                    <button 
+                      onClick={() => setDiscountType("loyalty")} 
+                      className={`py-2 px-2 rounded-lg font-semibold text-xs transition-all border-2 ${discountType === "loyalty" ? `border-[#0B3C8A] bg-blue-50 text-[#0B3C8A]` : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"}`}
+                    >
+                      Loyalty (30%)
+                    </button>
+                    <button 
+                      onClick={() => setDiscountType("pwd")} 
+                      className={`py-2 px-2 rounded-lg font-semibold text-xs transition-all border-2 ${discountType === "pwd" ? `border-[#0B3C8A] bg-blue-50 text-[#0B3C8A]` : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"}`}
+                    >
+                      PWD/Senior (20%)
+                    </button>
+                  </div>
+                </div>
+
                 {paymentMethod === "cash" && (
                   <div className="space-y-1.5">
                     <label htmlFor="amountReceive" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Receive</label>
@@ -1035,6 +1198,13 @@ export default function SalesPage() {
               </div>
 
               <div className="space-y-1 sm:space-y-1.5 mb-3 sm:mb-4">
+                <div className="flex justify-between text-xs sm:text-sm font-semibold text-gray-700 pt-1.5 sm:pt-2 border-t border-gray-200"><span>Subtotal</span><span className="text-gray-800">₱{subtotal.toLocaleString()}</span></div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-1.5 rounded">
+                    <span>Discount ({Math.round(discountPercentage * 100)}%)</span>
+                    <span>-₱{discountAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm sm:text-base font-black text-gray-800 pt-1.5 sm:pt-2 border-t border-gray-200"><span>Total</span><span className={THEME_TEXT}>₱{total.toLocaleString()}</span></div>
               </div>
 
@@ -1067,6 +1237,15 @@ export default function SalesPage() {
                   )}
                 </div>
                 <div className="flex-1">
+                  <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Status</label>
+                  <select value={transactionStatusFilter} onChange={(e) => setTransactionStatusFilter(e.target.value as "all" | "completed" | "processing_replacement" | "replaced")} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white">
+                    <option value="all">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="processing_replacement">Processing Replacement</option>
+                    <option value="replaced">Replaced</option>
+                  </select>
+                </div>
+                <div className="flex-1">
                   <div className="text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Total Transactions</div>
                   <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">{filteredTransactions.length}</div>
                 </div>
@@ -1085,17 +1264,13 @@ export default function SalesPage() {
                 <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
                   <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
                     <tr>
-                      <th className="p-2 sm:p-3">Receipt No.</th>
                       <th className="p-2 sm:p-3">Date</th>
-                      <th className="p-2 sm:p-3">Time</th>
                       <th className="p-2 sm:p-3">Patient Name</th>
                       <th className="p-2 sm:p-3">User</th>
                       <th className="p-2 sm:p-3">Items</th>
                       <th className="p-2 sm:p-3 text-right">Amount</th>
                       <th className="p-2 sm:p-3 text-center">Payment</th>
-                      <th className="p-2 sm:p-3 text-center">Warranty</th>
                       <th className="p-2 sm:p-3 text-center">Status</th>
-                      <th className="p-2 sm:p-3 text-center">Sync</th>
                       <th className="p-2 sm:p-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -1105,20 +1280,16 @@ export default function SalesPage() {
     const warrantyValid = isWarrantyValid(trx.warrantyStartDate, trx.warrantyEndDate);
     const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
     const statusBadge = getStatusBadge(trx.status);
-    const isCompleted = trx.status === 'completed';
-    const isProcessingReplacement = trx.status === 'processing_replacement';
     
     return (
       <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
 
-                          <td className="p-2 sm:p-3 font-mono text-gray-500">{trx.id?.slice(-8).toUpperCase() || 'N/A'}</td>
                           <td className="p-2 sm:p-3 text-gray-600">
                             <div className="flex items-center gap-1">
                               <Calendar size={12} className="text-gray-400" />
                               {formatDate(trx.date)}
                             </div>
                           </td>
-                          <td className="p-2 sm:p-3 text-gray-600">{new Date(trx.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
                           <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
                           <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
                           <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
@@ -1136,55 +1307,33 @@ export default function SalesPage() {
                             )}
                           </td>
                           <td className="p-2 sm:p-3 text-center">
-                            {trx.warrantyStartDate && trx.warrantyEndDate ? (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <Shield size={12} className={warrantyValid ? "text-green-600" : "text-red-600"} />
-                                <span className={`text-[8px] font-bold ${warrantyValid ? "text-green-600" : "text-red-600"}`}>{warrantyValid ? "Active" : "Expired"}</span>
-                                <span className="text-[7px] text-gray-500">{formatWarrantyRange(trx.warrantyStartDate, trx.warrantyEndDate)}</span>
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-[8px]">No Warranty</span>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3 text-center">
                             <span className={`inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full ${statusBadge.color}`}>
                               {statusBadge.icon}
                               {statusBadge.text}
                             </span>
                           </td>
-                          <td className="p-2 sm:p-3 text-center">
-                            {trx.synced ? <CheckCircle2 size={12} className="sm:w-3.5 sm:h-3.5 text-emerald-500" /> : <WifiOff size={12} className="sm:w-3.5 sm:h-3.5 text-red-400" />}
-                          </td>
                           <td className="p-2 sm:p-3 text-right">
-  <div className="flex items-center justify-end gap-1 sm:gap-1.5">
-    {/* Download Receipt Button - Always available */}
-    <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
-      <Receipt size={14}/>
-    </button>
-    
-    {/* Condition 1: Processing Replacement - Show "Mark as Replaced" button */}
-    {trx.status === 'processing_replacement' && (
-      <button 
-        onClick={() => openCompleteReplacementModal(trx)} 
-        className="p-1 sm:p-1.5 text-emerald-600 hover:bg-emerald-50 rounded transition-colors" 
-        title="Mark as Replaced"
-      >
-        <CheckCheck size={14} />
-      </button>
-    )}
-    
-    {/* Condition 2: Valid Warranty (for completed OR replaced status) - Show "Replace" button */}
-    {(trx.status === 'completed' || trx.status === 'replaced') && hasWarranty && warrantyValid && (
-      <button 
-        onClick={() => openReplacementModal(trx)} 
-        className="p-1 sm:p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors" 
-        title="Process Replacement (Under Warranty)"
-      >
-        <Repeat size={14} />
-      </button>
-    )}
-  </div>
-</td>
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                              <button onClick={() => openViewTransactionModal(trx)} className="p-1 sm:p-1.5 text-slate-600 hover:bg-slate-100 rounded transition-colors" title="View Transaction">
+                                <Eye size={14}/>
+                              </button>
+                              {/* Download Receipt Button - Always available */}
+                              <button onClick={() => generateReceipt(trx)} className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Download Receipt">
+                                <Receipt size={14}/>
+                              </button>
+                              
+                              {/* Valid Warranty (for completed OR replaced status) - Show "Replace" button */}
+                              {(trx.status === 'completed' || trx.status === 'replaced') && hasWarranty && warrantyValid && (
+                                <button 
+                                  onClick={() => openReplacementModal(trx)} 
+                                  className="p-1 sm:p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors" 
+                                  title="Process Replacement (Under Warranty)"
+                                >
+                                  <Repeat size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -1230,6 +1379,12 @@ export default function SalesPage() {
               <h2 className="text-lg sm:text-xl font-black text-gray-800 mb-1">Payment Successful</h2>
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4 font-mono">{lastTransaction.id.slice(-8).toUpperCase()}</p>
               <div className="text-2xl sm:text-3xl font-black text-[#0B3C8A] mb-5 sm:mb-6">₱{lastTransaction.total.toLocaleString()}</div>
+              {shouldShowTransactionDiscount(lastTransaction) && (
+                <div className="bg-emerald-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-emerald-200">
+                  <div className="flex justify-between"><span className="text-emerald-600 font-semibold">Subtotal:</span><span className="text-emerald-700 font-bold">₱{(lastTransaction.subtotal || lastTransaction.total + lastTransaction.discountAmount).toLocaleString()}</span></div>
+                  <div className="flex justify-between text-emerald-600"><span className="font-semibold">{lastTransaction.discountType === 'loyalty' ? 'Loyalty' : lastTransaction.discountType === 'pwd' ? 'PWD/Senior' : 'Discount'} ({Math.round(normalizeDiscountPercentage(lastTransaction.discountPercentage) * 100)}%)</span><span className="font-bold">-₱{lastTransaction.discountAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
+                </div>
+              )}
               {lastTransaction.paymentMethod && (
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-gray-200">
                   <div className="flex justify-between"><span className="text-gray-600">Payment Method:</span><span className="font-semibold text-gray-800 uppercase">{lastTransaction.paymentMethod}</span></div>
@@ -1249,6 +1404,180 @@ export default function SalesPage() {
               <div className="flex flex-col gap-2">
                 <button onClick={() => generateReceipt(lastTransaction)} className={`w-full py-2 sm:py-2.5 rounded-lg border border-gray-200 text-gray-700 text-xs sm:text-sm font-bold hover:bg-gray-50 flex justify-center items-center gap-2 transition-colors`}><Receipt size={14} className="sm:w-4 sm:h-4"/> Print / Download Receipt</button>
                 <button onClick={() => setShowCheckoutModal(false)} className={`w-full py-2 sm:py-2.5 rounded-lg ${THEME_BG} text-white text-xs sm:text-sm font-bold ${THEME_HOVER} transition-colors`}>Close</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* View Transaction Details Modal */}
+      <AnimatePresence>
+        {viewTransactionModalOpen && transactionToView && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl">
+                    <Receipt size={20} className="text-slate-600" />
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-900">Transaction Details</h3>
+                </div>
+                <button
+                  onClick={() => {
+                    setViewTransactionModalOpen(false);
+                    setTransactionToView(null);
+                  }}
+                  className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-all duration-200 hover:shadow-sm"
+                  title="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Transaction Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Receipt Number</p>
+                  <p className="font-mono font-bold text-slate-800 text-sm mt-1">{transactionToView.id?.slice(-8).toUpperCase() || "N/A"}</p>
+                </div>
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Date & Time</p>
+                  <p className="font-semibold text-slate-700 text-sm mt-1">{formatDate(transactionToView.date)} at {new Date(transactionToView.date).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}</p>
+                </div>
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Customer</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
+                      <User size={12} className="text-blue-600" />
+                    </div>
+                    <p className="font-semibold text-slate-800 text-sm">{transactionToView.patientName || "Walk-in Patient"}</p>
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Cashier</p>
+                  <p className="font-semibold text-slate-700 text-sm mt-1">{transactionToView.staffName || "User"}</p>
+                </div>
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Payment Method</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      transactionToView.paymentMethod === 'cash' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'
+                    }`}>
+                      {transactionToView.paymentMethod === 'cash' ? <Banknote size={10} /> : <CreditCard size={10} />}
+                      {(transactionToView.paymentMethod || 'N/A').toUpperCase()}
+                    </span>
+                    {transactionToView.referenceNumber && transactionToView.paymentMethod === "online" && (
+                      <span className="text-[10px] text-slate-500 font-mono">Ref: {transactionToView.referenceNumber}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Status</p>
+                  <div className="mt-1">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 text-[11px] font-bold rounded-full ${getStatusBadge(transactionToView.status).color}`}>
+                      {getStatusBadge(transactionToView.status).icon}
+                      {getStatusBadge(transactionToView.status).text}
+                    </span>
+                  </div>
+                </div>
+                <div className="sm:col-span-2 bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Warranty</p>
+                  {transactionToView.warrantyStartDate && transactionToView.warrantyEndDate ? (
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <Shield size={14} className={isWarrantyValid(transactionToView.warrantyStartDate, transactionToView.warrantyEndDate) ? "text-emerald-600" : "text-red-600"} />
+                      <span className={`font-semibold text-sm ${isWarrantyValid(transactionToView.warrantyStartDate, transactionToView.warrantyEndDate) ? "text-emerald-700" : "text-red-600"}`}>
+                        {isWarrantyValid(transactionToView.warrantyStartDate, transactionToView.warrantyEndDate) ? "Active" : "Expired"}
+                      </span>
+                      <span className="text-slate-600 text-sm">{formatWarrantyRange(transactionToView.warrantyStartDate, transactionToView.warrantyEndDate)}</span>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500 mt-1">No warranty</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden mb-5">
+                <div className="bg-gradient-to-r from-slate-100 to-slate-50 px-4 py-2.5 border-b border-slate-200">
+                  <p className="font-semibold text-slate-800 text-sm">Order Items</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {transactionToView.items.map((item, index) => (
+                    <div key={`${item.id}-${index}`} className="px-4 py-2.5 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-slate-700 font-medium">{item.name}</span>
+                        <span className="text-[11px] text-slate-400">Quantity: {item.quantity} × ₱{item.price.toLocaleString()}</span>
+                      </div>
+                      <span className="font-bold text-slate-800">₱{(item.price * item.quantity).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Totals Section - WITH DISCOUNT DISPLAY */}
+              <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-4 mb-5">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500">Subtotal</span>
+                    <span className="font-semibold text-slate-700">₱{(transactionToView.subtotal || transactionToView.total + (transactionToView.discountAmount || 0)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  </div>
+                  {shouldShowTransactionDiscount(transactionToView) && (
+                    <div className="flex justify-between items-center text-sm bg-emerald-50 -mx-2 px-2 py-1.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-700 font-medium">Discount</span>
+                        <span className="text-[10px] text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded-full">
+                          {transactionToView.discountType === 'loyalty' ? 'Loyalty 30%' : transactionToView.discountType === 'pwd' ? 'PWD/Senior 20%' : `${Math.round(normalizeDiscountPercentage(transactionToView.discountPercentage) * 100)}%`}
+                        </span>
+                      </div>
+                      <span className="font-bold text-emerald-700">-₱{transactionToView.discountAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-slate-200 pt-2 mt-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-base font-bold text-slate-800">Total</span>
+                      <span className="text-xl font-black text-[#0B3C8A]">₱{transactionToView.total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+                  {transactionToView.paymentMethod === 'cash' && transactionToView.amountReceive !== undefined && (
+                    <>
+                      <div className="flex justify-between text-sm pt-1">
+                        <span className="text-slate-500">Amount Received</span>
+                        <span className="font-semibold text-slate-700">₱{transactionToView.amountReceive.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                      </div>
+                      {transactionToView.change !== undefined && transactionToView.change > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Change</span>
+                          <span className="font-bold text-emerald-600">₱{transactionToView.change.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-stretch gap-3">
+                <button
+                  onClick={() => generateReceipt(transactionToView)}
+                  className="flex-1 px-4 py-2.5 bg-[#0B3C8A] text-white rounded-xl text-sm font-semibold hover:bg-[#082F6E] transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                >
+                  <Receipt size={16} />
+                  Download Receipt
+                </button>
+
+                {transactionToView.status === "processing_replacement" && (
+                  <button
+                    onClick={() => {
+                      setViewTransactionModalOpen(false);
+                      setTransactionToView(null);
+                      openCompleteReplacementModal(transactionToView);
+                    }}
+                    className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                  >
+                    <CheckCheck size={16} />
+                    Mark as Replaced
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>
@@ -1359,6 +1688,12 @@ export default function SalesPage() {
               <div className="bg-slate-50 rounded-lg p-4 space-y-2.5">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Customer Name:</span><span className="font-semibold text-gray-900">{patientName || "Walk-in Patient"}</span></div>
                 {referenceNumber && (<div className="flex justify-between text-sm"><span className="text-gray-600">Reference Number:</span><span className="font-mono font-semibold text-gray-900">{referenceNumber}</span></div>)}
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-sm bg-emerald-50 p-2 rounded border border-emerald-200">
+                    <span className="text-emerald-700 font-medium">Discount ({discountType === "loyalty" ? "Loyalty 30%" : "PWD/Senior 20%"}):</span>
+                    <span className="font-semibold text-emerald-700">-₱{discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="border-t border-gray-200 pt-2.5"><div className="flex justify-between text-base"><span className="font-semibold text-gray-900">Total Amount:</span><span className="font-bold text-[#0B3C8A]">₱{total.toLocaleString()}</span></div></div>
               </div>
               <div className="flex gap-2.5 pt-2">
@@ -1380,6 +1715,13 @@ export default function SalesPage() {
               <div className="bg-slate-50 rounded-lg p-4 space-y-2.5">
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Customer Name:</span><span className="font-semibold text-gray-900">{patientName || "Walk-in Patient"}</span></div>
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Payment Method:</span><span className="font-semibold text-gray-900 uppercase">Cash</span></div>
+                <div className="flex justify-between text-sm"><span className="text-gray-600">Subtotal:</span><span className="font-semibold text-gray-900">₱{cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-sm bg-emerald-50 p-2 rounded border border-emerald-200">
+                    <span className="text-emerald-700 font-medium">Discount ({discountType === "loyalty" ? "Loyalty 30%" : "PWD/Senior 20%"}):</span>
+                    <span className="font-semibold text-emerald-700">-₱{discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm"><span className="text-gray-600">Amount Receive:</span><span className="font-semibold text-gray-900">₱{parseFloat(amountReceive).toLocaleString()}</span></div>
                 <div className="border-t border-gray-200 pt-2.5"><div className="flex justify-between text-base"><span className="font-semibold text-gray-900">Change:</span><span className="font-bold text-[#0B3C8A]">₱{(parseFloat(amountReceive) - total).toLocaleString()}</span></div></div>
               </div>

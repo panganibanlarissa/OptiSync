@@ -51,6 +51,9 @@ export default function InventoryPage() {
   const [productToDelete, setProductToDelete] = useState<InventoryData | null>(null);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [qrScanMode, setQRScanMode] = useState<"search" | "adjust">("adjust");
+  const [pendingRestockProduct, setPendingRestockProduct] = useState<InventoryData | null>(null);
+  const [restockQuantity, setRestockQuantity] = useState("1");
+  const [isApplyingRestock, setIsApplyingRestock] = useState(false);
 
   const { showNotification, showToastOnly } = useNotification();
 
@@ -76,6 +79,37 @@ export default function InventoryPage() {
     } catch (error) {
       console.error("Error deleting product:", error);
       showNotification("Failed to delete product.", "error", "Error");
+    }
+  };
+
+  const confirmQRRestock = async () => {
+    if (!pendingRestockProduct || isApplyingRestock) return;
+
+    const quantity = Number(restockQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      showNotification("Please enter a valid restock quantity (whole number greater than 0).", "error", "Invalid Quantity");
+      return;
+    }
+
+    const latestProduct = products.find((p) => p.id === pendingRestockProduct.id);
+    if (!latestProduct) {
+      showNotification("Product not found. Please scan again.", "error", "Error");
+      setPendingRestockProduct(null);
+      return;
+    }
+
+    setIsApplyingRestock(true);
+    try {
+      const newStock = latestProduct.stock + quantity;
+      await adjustStock(latestProduct.id, newStock, `Received via QR Scan (+${quantity})`);
+      showNotification(`+${quantity} unit${quantity > 1 ? "s" : ""} added to "${latestProduct.name}"`, "success", "Stock Updated");
+      setPendingRestockProduct(null);
+      setRestockQuantity("1");
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      showNotification(`Failed to add stock for "${latestProduct.name}"`, "error", "Error");
+    } finally {
+      setIsApplyingRestock(false);
     }
   };
 
@@ -155,17 +189,27 @@ export default function InventoryPage() {
                 setIsQRScannerOpen(false);
                 return;
               }
-              const newStock = product.stock + 1;
-              adjustStock(product.id, newStock, "Received via QR Scan")
-                .then(() => {
-                  showNotification(`+1 unit added to "${product.name}" via QR scan`, "success", "Stock Updated");
-                  setIsQRScannerOpen(false);
-                })
-                .catch((error: Error) => {
-                  console.error("Error adjusting stock:", error);
-                  showNotification(`Failed to add stock for "${product.name}"`, "error", "Error");
-                });
+              setPendingRestockProduct(product);
+              setRestockQuantity("1");
+              setIsQRScannerOpen(false);
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pendingRestockProduct && (
+          <QRRestockConfirmationModal
+            product={pendingRestockProduct}
+            quantity={restockQuantity}
+            setQuantity={setRestockQuantity}
+            isSubmitting={isApplyingRestock}
+            onCancel={() => {
+              if (isApplyingRestock) return;
+              setPendingRestockProduct(null);
+              setRestockQuantity("1");
+            }}
+            onConfirm={confirmQRRestock}
           />
         )}
       </AnimatePresence>
@@ -182,6 +226,79 @@ export default function InventoryPage() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function QRRestockConfirmationModal({
+  product,
+  quantity,
+  setQuantity,
+  isSubmitting,
+  onCancel,
+  onConfirm,
+}: {
+  product: InventoryData;
+  quantity: string;
+  setQuantity: (value: string) => void;
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const quantityNumber = Number(quantity);
+  const isValidQty = Number.isInteger(quantityNumber) && quantityNumber > 0;
+  const projectedStock = isValidQty ? product.stock + quantityNumber : product.stock;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-4 sm:p-6"
+      >
+        <h3 className="text-sm sm:text-lg font-bold text-gray-900 mb-2">Confirm Restock</h3>
+        <p className="text-[10px] sm:text-sm text-gray-600 mb-4">
+          Add stock for <span className="font-semibold text-gray-800">{product.name}</span> ({product.sku}).
+        </p>
+
+        <div className="space-y-2 mb-4">
+          <label htmlFor="restock-qty" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">
+            Quantity To Add
+          </label>
+          <input
+            id="restock-qty"
+            type="number"
+            min={1}
+            step={1}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A] text-gray-700"
+          />
+          <div className="text-[10px] sm:text-xs text-gray-500">
+            Current Stock: <span className="font-semibold text-gray-700">{product.stock}</span> | New Stock:{" "}
+            <span className="font-semibold text-[#0B3C8A]">{projectedStock}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2 sm:gap-3">
+          <button
+            onClick={onCancel}
+            disabled={isSubmitting}
+            className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!isValidQty || isSubmitting}
+            className="flex-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-md sm:rounded-lg bg-[#0B3C8A] text-white text-[11px] sm:text-sm font-medium hover:bg-[#082F6E] transition-colors shadow-lg shadow-blue-900/20 disabled:opacity-60"
+          >
+            {isSubmitting ? "Saving..." : "Confirm"}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 }
