@@ -1,14 +1,9 @@
 // src/config/cloudinary.ts
 export const cloudinaryConfig = {
-  cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || '',
-  apiKey: process.env.CLOUDINARY_API_KEY || '',
-  apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  cloudName: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'dn95k6pnt',
+  uploadPreset: process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'optisync_products',
 };
 
 export const isCloudinaryConfigured = (): boolean => {
-  return Boolean(
-    cloudinaryConfig.cloudName && 
-    cloudinaryConfig.apiKey && 
-    cloudinaryConfig.apiSecret
-  );
+  return Boolean(cloudinaryConfig.cloudName && cloudinaryConfig.uploadPreset);
 };
