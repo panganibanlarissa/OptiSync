@@ -22,11 +22,11 @@
 ## Overview
 
 OptiSync addresses the operational challenges faced by optical clinics by providing:
-- Real-time inventory visibility with QR code scanning
+- Real-time inventory visibility with QR code generation and scanning
 - AI-powered sales forecasting using Prophet and XGBoost
-- Integrated POS system with multiple payment options
+- Integrated POS system with cart, discounts, online/cash payment handling, and warranty replacement support
 - Role-based access control for different staff levels
-- Data security with AES encryption and automated backups
+- Activity logging for product, stock, scan, and transaction actions
 - Compliance with data protection regulations (RA 10173)
 
 ---
@@ -46,18 +46,21 @@ OptiSync addresses the operational challenges faced by optical clinics by provid
 - Visual analytics with interactive charts and graphs
 
 ### **Inventory Management**
-- Complete CRUD operations for products (frames, lenses, supplies)
-- QR code generation and mobile-ready scanning
+- Complete CRUD operations for products (frames, solutions, accessories, vitamins, and related items)
+- QR code generation with immediate QR tag display after product creation
+- QR scan-in and scan-out flows with quantity confirmation
+- Scan-out entries are tracked as damaged/exchanged units for accurate inventory accounting
 - Cloud-based image management via Cloudinary
 - Color-coded inventory status and automated deadstock detection
-- Product categorization and filtering
+- Product categorization and filtering (including Vitamins in POS filters)
+- Inventory report export to PDF
 
 ### **Point of Sale (POS)**
 - Streamlined patient checkout with cart management
-- Multiple payment methods (Cash, GCash)
-- Dynamic VAT/Tax calculations and discounts
+- Multiple payment methods (Cash, Online/Reference-based)
+- Discount support (Loyalty, PWD/Senior)
 - Official, printable PDF receipts
-- Transaction history and reporting
+- Transaction history and warranty replacement processing
 
 ### **Security & Reliability**
 - AES encryption for sensitive data (`crypto-js`)
@@ -344,7 +347,7 @@ You will be directed to the Staff Dashboard with access to sales and product sea
 
 | Role | Email | Password | Dashboard |
 |------|-------|----------|-----------|
-| Admin | `admin@clinic.local` | `admin123` | Full Analytics & Management |
+| Admin | `olasosync@gmail.com` | `MTolaso_opticalclinic2026` | Full Analytics & Management |
 | Staff | `staff.olasosync@gmail.com` | `staff_123` | POS & Inventory Only |
 
 > **⚠️ Important:** These are development accounts only. In production, ensure all default credentials are changed and unique, strong passwords are set for all user accounts.
@@ -384,35 +387,21 @@ The admin dashboard provides:
 - Upload product image via Cloudinary
 - Set stock quantity and pricing
 - Click **Save**
+- Product QR code is shown immediately for printing/labeling
 
 **2. Review Sales Dashboard**
 - Open **Dashboard**
 - Review KPIs: Total Revenue, Gross Profit, Sales Count
 - Check ML-generated sales forecast for next 7-30 days
 - Review inventory trends and deadstock items
-- Export reports as needed
+- Download inventory reports as PDF when needed
 
 **3. Manage Staff Accounts**
-- Go to **Settings** → **Staff Management**
+- Go to **Staff Management**
 - Click **Add Staff Member**
 - Enter email, name, and assign role (Staff)
 - Set permissions
 - Send activation link via email
-
-**4. Generate & Review Backups**
-- Access **Settings** → **Backup Management**
-- View last backup timestamp and status
-- Manually trigger backup: Click **Create Backup**
-- Download backup file or restore from previous backup
-- Monitor backup schedule
-
-#### **Admin Best Practices**
-- Review dashboard analytics daily
-- Conduct monthly inventory audits
-- Monitor and approve large transactions
-- Maintain regular backup schedules
-- Update product information promptly
-- Keep staff accounts current and secure
 
 ---
 
@@ -422,11 +411,11 @@ The admin dashboard provides:
 
 #### **Key Permissions**
 - ✅ Process patient transactions (POS)
-- ✅ View inventory (Read-only for searching/scanning)
+- ✅ View and update inventory stock via scan-in/scan-out and stock adjustments
 - ✅ Generate receipts
 - ✅ View assigned reports
-- ✅ Modify inventory
-- ❌ Cannot access system settings
+- ✅ Use QR product search and stock movement tools
+- ❌ Cannot access system activity logs
 - ❌ Cannot manage user accounts
 - ❌ Cannot view financial analytics
 
@@ -446,7 +435,7 @@ The staff dashboard provides:
 - Select product and enter quantity
 - Item appears in cart
 - Review subtotal and tax calculation
-- Select payment method (Cash/GCash)
+- Select payment method (Cash/Online)
 - Click **Complete Transaction**
 - Print receipt
 
@@ -461,8 +450,9 @@ The staff dashboard provides:
 - Click **QR Scanner** button
 - Point device camera at product barcode
 - System automatically retrieves product details
-- Confirm product information
-- Add to cart or view inventory
+- Confirm product information and quantity
+- For Scan In/Out, confirm quantity before applying stock movement
+- Scan Out is recorded as damage/exchange to keep unit accounting accurate
 
 **4. Generate and Print Receipt**
 - After transaction completion, receipt displays automatically
@@ -474,41 +464,15 @@ The staff dashboard provides:
   - Payment method
   - Customer and seller information
 
-#### **Staff Best Practices**
-- Always scan or verify product details before checkout
-- Double-check payment amounts before confirming
-- Print receipts for all transactions
-- Report product discrepancies to admin immediately
-- Keep passwords secure and log out after each session
-- Use the product search feature to verify availability before promises
-
----
-
-### **Access Control Matrix**
-
-| Feature | Admin | Staff |
-|---------|-------|-------|
-| Dashboard & Analytics | ✅ Full Access | ⚠️ Limited (Today's Sales) |
-| Inventory Management | ✅ CRUD | ✅ CRUD |
-| QR Code Scanning | ✅ Yes | ✅ Yes |
-| Process Transactions | ✅ Yes | ✅ Yes |
-| Generate Receipts | ✅ Yes | ✅ Yes |
-| Staff Management | ✅ Yes | ❌ No |
-| System Settings | ✅ Yes | ❌ No |
-| Backup Management | ✅ Yes | ❌ No |
-| Reports & Exports | ✅ Full | ❌ No |
-| ML Forecasting | ✅ Yes | ❌ No |
-
 ---
 
 ### **Account Creation & Login**
 
 **For New Users:**
 
-1. Admin creates account in **Settings** → **Staff Management**
+1. Admin creates account in **Staff Management**
 2. System sends activation email to user
 3. User clicks activation link in email
-4. User sets password and completes profile
 5. User can now log in with email and password
 
 **Login Process:**
@@ -526,98 +490,6 @@ The staff dashboard provides:
 3. Check email for recovery link
 4. Click link and create new password
 5. Log in with new password
-
----
-
-## 🐛 Troubleshooting
-
-### **Frontend Issues**
-
-**Port 3000 Already in Use:**
-```bash
-npm run dev -- -p 3001  # Use different port
-```
-
-**Dependencies Not Installed:**
-```bash
-npm install --legacy-peer-deps
-npm cache clean --force
-```
-
-**Firebase Configuration Not Working:**
-- Verify `.env.local` file exists in frontend directory
-- Check Firebase credentials are correct
-- Ensure Firestore database is created
-- Verify authentication methods are enabled
-
-**QR Scanner Not Working:**
-- Ensure camera permission is granted in browser
-- Check browser console for errors
-- Verify jsQR library is loaded
-
-### **Backend Issues**
-
-**Python Virtual Environment Not Activating:**
-```bash
-# Windows: Use full path if needed
-.\venv\Scripts\activate.bat
-
-# macOS/Linux: Try bash instead of sh
-bash -c "source venv/bin/activate"
-```
-
-**Missing Dependencies:**
-```bash
-pip install -r requirements.txt
-pip install --upgrade pip
-```
-
-**Port 5000 Already in Use:**
-```python
-# Edit app.py to use different port
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5001)
-```
-
-**ML Models Not Loading:**
-- Verify model files exist in configured path
-- Check file permissions
-- Ensure sufficient disk space
-- Review backend logs for detailed errors
-
-### **Database Issues**
-
-**Firebase Connection Failing:**
-- Check internet connection
-- Verify Firebase project is active
-- Check service account credentials
-- Review Firebase console for errors
-
-**Firestore Rules Blocking Access:**
-- Check security rules in Firebase Console
-- Ensure rules allow read/write for authenticated users
-- Review authentication status
-
-### **Docker Issues**
-
-**Container Won't Start:**
-```bash
-docker-compose logs frontend  # Check frontend logs
-docker-compose logs backend   # Check backend logs
-docker-compose down           # Stop all containers
-docker-compose up --build     # Rebuild and start
-```
-
-**Port Conflicts:**
-Edit `docker-compose.yml` and change port mappings
-
-### **Performance Issues**
-
-- Clear browser cache and local storage
-- Restart development servers
-- Check network tab in browser DevTools
-- Monitor API response times
-- Review backend server logs
 
 ---
 
