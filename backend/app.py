@@ -43,8 +43,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://optisync-j01wv7p2n-rejeanzapantas-projects.vercel.app",
-        "https://optisync.vercel.app",
+        "https://optisync-ivory.vercel.app",
         "https://*.vercel.app"
     ],
     allow_credentials=True,
