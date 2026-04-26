@@ -35,6 +35,12 @@ export interface DeadstockAISuggestion {
     categoryUrgency: number;
     velocityFactor: number;
     finalDiscount: number;
+    // NEW ML fields
+    ml_adjustment?: number;
+    prophet_confidence?: string;
+    predicted_sale_probability?: number;
+    expected_sales_next_30d?: number;
+    trend_description?: string;
   };
 }
 
@@ -140,7 +146,7 @@ export function useMLForecasting() {
         baseCost: p.baseCost,
         reorderPoint: p.reorderPoint,
         lastMovedDaysAgo: p.lastMovedDaysAgo,
-        createdAt: formatCreatedAt((p as any).createdAt), // Format as ISO string
+        createdAt: formatCreatedAt((p as any).createdAt),
       }));
 
       const transactionData: TransactionData[] = transactions.map(t => ({
@@ -200,7 +206,7 @@ export function useMLForecasting() {
           }));
           
           if (result.deadstockSuggestions && Array.isArray(result.deadstockSuggestions)) {
-            console.log('📝 Processing deadstock suggestions:', result.deadstockSuggestions);
+            console.log('📝 Processing Prophet-enhanced deadstock suggestions:', result.deadstockSuggestions);
             result.deadstockSuggestions.forEach((suggestion: any) => {
               deadstockSuggestions.set(suggestion.productId, {
                 productId: suggestion.productId,
@@ -212,7 +218,12 @@ export function useMLForecasting() {
                   capitalFactor: 0,
                   categoryUrgency: 1.0,
                   velocityFactor: 0,
-                  finalDiscount: 0
+                  finalDiscount: 0,
+                  ml_adjustment: 0,
+                  prophet_confidence: 'low',
+                  predicted_sale_probability: 0,
+                  expected_sales_next_30d: 0,
+                  trend_description: 'No ML data'
                 }
               });
             });
@@ -243,7 +254,7 @@ export function useMLForecasting() {
       console.log('ML Service Source:', mlServiceAvailable ? 'Python (Prophet/SK)' : 'UNAVAILABLE - AI Disabled');
       console.log('Using ML:', usingML);
       console.log('Recommendations:', recommendations.length);
-      console.log('Deadstock AI Suggestions:', deadstockSuggestions.size);
+      console.log('Deadstock AI Suggestions (Prophet-enhanced):', deadstockSuggestions.size);
       console.groupEnd();
 
     } catch (error) {

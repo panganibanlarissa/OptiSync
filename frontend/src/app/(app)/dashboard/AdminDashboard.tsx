@@ -48,6 +48,8 @@ interface StatData {
 interface ForecastDisplayData {
   name: string;
   currentStock: number;
+  recommendedOrder: number;
+  stockoutDay: number;
   predictedDemand30d: number;
   predictedDemand60d: number;
   predictedDemand90d: number;
@@ -58,6 +60,8 @@ interface ForecastExplanation {
   productId: string;
   productName: string;
   currentStock: number;
+  recommendedOrder: number;
+  stockoutDay: number;
   monthlyForecasts: Array<{
     month: string;
     predictedDemand: number;
@@ -152,6 +156,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Contact Lenses': 'bg-indigo-500',
   'Solutions': 'bg-amber-500',
   'Accessories': 'bg-purple-500',
+  'Vitamins': 'bg-rose-500',
   'Unknown': 'bg-gray-500'
 };
 
@@ -182,6 +187,11 @@ export default function AdminDashboard() {
 
   const nextThreeMonths = useMemo(() => getNextThreeMonths(), []);
 
+  // Filter out archived products from displays (but NOT from gross profit calculation)
+  const activeProducts = useMemo(() => {
+    return products.filter((p: any) => (p as any).archived !== true);
+  }, [products]);
+
   const completedTransactions = useMemo(() => {
     return transactions.filter((t: any) => t.status === 'completed');
   }, [transactions]);
@@ -203,12 +213,14 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [completedTransactions]);
 
+  // Low stock count - only from active (non-archived) products
   const lowStockCount = useMemo(() => {
-    return products.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
-  }, [products]);
+    return activeProducts.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
+  }, [activeProducts]);
 
+  // Low stock items - only from active (non-archived) products
   const lowStockItems = useMemo(() => {
-    return products
+    return activeProducts
       .filter(p => p.stock <= p.reorderPoint && p.stock >= 0)
       .sort((a, b) => a.stock - b.stock)
       .map(p => ({
@@ -218,8 +230,9 @@ export default function AdminDashboard() {
         currentStock: p.stock,
         status: p.stock === 0 ? 'critical' as const : 'low' as const
       }));
-  }, [products]);
+  }, [activeProducts]);
 
+  // Gross profit - uses ALL products (including archived) to ensure historical accuracy
   const grossProfit = useMemo(() => {
     return completedTransactions.reduce((sum: number, t: any) => {
       const profit = t.items.reduce((itemSum: number, item: any) => {
@@ -289,33 +302,36 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
+  // Forecast data - only from active (non-archived) products
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
-      return recommendations.map((r: Recommendation) => ({
-        name: r.productName,
-        currentStock: r.currentStock,
-        predictedDemand30d: typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) ? r.predictedDemand30d : 0,
-        predictedDemand60d: typeof r.predictedDemand60d === 'number' && !isNaN(r.predictedDemand60d) ? r.predictedDemand60d : 0,
-        predictedDemand90d: typeof r.predictedDemand90d === 'number' && !isNaN(r.predictedDemand90d) ? r.predictedDemand90d : 0,
-        trend: r.trend
-      }));
+      return recommendations
+        .filter((r: Recommendation) => {
+          // Check if the product is active (not archived)
+          const product = activeProducts.find(p => p.name === r.productName || p.id === r.productId);
+          return product !== undefined;
+        })
+        .map((r: Recommendation) => ({
+          name: r.productName,
+          currentStock: r.currentStock,
+          recommendedOrder: r.recommendedOrder,
+          stockoutDay: r.daysUntilOut,
+          predictedDemand30d: typeof r.predictedDemand30d === 'number' && !isNaN(r.predictedDemand30d) ? r.predictedDemand30d : 0,
+          predictedDemand60d: typeof r.predictedDemand60d === 'number' && !isNaN(r.predictedDemand60d) ? r.predictedDemand60d : 0,
+          predictedDemand90d: typeof r.predictedDemand90d === 'number' && !isNaN(r.predictedDemand90d) ? r.predictedDemand90d : 0,
+          trend: r.trend
+        }));
     }
     return [];
-  }, [usingML, hasEnoughDataForML, recommendations]);
+  }, [usingML, hasEnoughDataForML, recommendations, activeProducts]);
 
   const getCurrentDisplayDemand = (item: ForecastDisplayData) => {
-    switch (selectedForecastMonth) {
-      case 1:
-        return item.predictedDemand60d;
-      case 2:
-        return item.predictedDemand90d;
-      default:
-        return item.predictedDemand30d;
-    }
+    return item.predictedDemand30d;
   };
 
+  // HEATMAP_DATA - only from active (non-archived) products
   const HEATMAP_DATA = useMemo(() => {
-    const categoryStats = products.reduce((acc: any, product: any) => {
+    const categoryStats = activeProducts.reduce((acc: any, product: any) => {
       if (!acc[product.category]) {
         acc[product.category] = {
           totalProfit: 0,
@@ -333,13 +349,18 @@ export default function AdminDashboard() {
     const maxProfit = Math.max(...Object.values(categoryStats).map((c: any) => c.totalProfit), 1);
     const maxVolume = Math.max(...Object.values(categoryStats).map((c: any) => c.totalVolume), 1);
 
-    return Object.entries(categoryStats).map(([category, data]: [string, any]) => ({
-      category,
-      profit: maxProfit > 0 ? Math.round((data.totalProfit / maxProfit) * 100) : 0,
-      volume: maxVolume > 0 ? Math.round((data.totalVolume / maxVolume) * 100) : 0,
-      color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Unknown']
-    }));
-  }, [products]);
+    // Sort categories by profit (highest first)
+    const sortedCategories = Object.entries(categoryStats)
+      .map(([category, data]: [string, any]) => ({
+        category,
+        profit: maxProfit > 0 ? Math.round((data.totalProfit / maxProfit) * 100) : 0,
+        volume: maxVolume > 0 ? Math.round((data.totalVolume / maxVolume) * 100) : 0,
+        color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Unknown']
+      }))
+      .sort((a, b) => b.profit - a.profit);
+
+    return sortedCategories;
+  }, [activeProducts]);
 
   const getDateFromTimestamp = (timestamp: any): Date | null => {
     if (!timestamp) return null;
@@ -367,13 +388,14 @@ export default function AdminDashboard() {
     return null;
   };
 
+  // DEADSTOCK_DATA - only from active (non-archived) products
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const deadstockItems: DeadstockItem[] = [];
 
-    for (const p of products) {
+    for (const p of activeProducts) {
       if (p.stock <= 0) continue;
       
       const salesForProduct = completedTransactions
@@ -432,19 +454,20 @@ export default function AdminDashboard() {
 
     deadstockItems.sort((a, b) => b.lockedCapital - a.lockedCapital);
     return deadstockItems;
-  }, [products, completedTransactions, usingML, deadstockSuggestions]);
+  }, [activeProducts, completedTransactions, usingML, deadstockSuggestions]);
 
+  // Generate forecast explanation with recommended order and stockout date
   const generateForecastExplanation = (item: ForecastDisplayData): ForecastExplanation => {
     const monthlyForecasts = [
-      { month: nextThreeMonths[0], predictedDemand: item.predictedDemand30d },
-      { month: nextThreeMonths[1], predictedDemand: item.predictedDemand60d },
-      { month: nextThreeMonths[2], predictedDemand: item.predictedDemand90d }
+      { month: nextThreeMonths[0], predictedDemand: item.predictedDemand30d }
     ];
     
     return {
       productId: item.name,
       productName: item.name,
       currentStock: item.currentStock,
+      recommendedOrder: item.recommendedOrder,
+      stockoutDay: item.stockoutDay,
       monthlyForecasts,
       trend: item.trend
     };
@@ -672,7 +695,7 @@ export default function AdminDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Demand Forecasting Card - Updated with clickable product cards */}
+          {/* Demand Forecasting Card */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -705,19 +728,9 @@ export default function AdminDashboard() {
               
               {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
                 <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
-                  {nextThreeMonths.map((month, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedForecastMonth(idx)}
-                      className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                        selectedForecastMonth === idx 
-                          ? "bg-white text-[#0B3C8A] shadow-sm" 
-                          : "text-gray-400 hover:text-gray-600"
-                      }`}
-                    >
-                      {month.slice(0, 3)}
-                    </button>
-                  ))}
+                  <div className="px-3 py-1.5 text-xs font-bold bg-white text-[#0B3C8A] shadow-sm rounded-md">
+                    {nextThreeMonths[0]} Forecast
+                  </div>
                 </div>
               )}
             </div>
@@ -728,9 +741,8 @@ export default function AdminDashboard() {
                   {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
                     <ForecastCard 
                       key={i}
-                      data={item} 
-                      currentDemand={getCurrentDisplayDemand(item)}
-                      selectedMonth={nextThreeMonths[selectedForecastMonth]}
+                      data={item}
+                      selectedMonth={nextThreeMonths[0]}
                       onClick={() => openForecastExplanation(item)}
                     />
                   ))}
@@ -757,28 +769,24 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
 
-          {/* Performance Heatmap */}
+          {/* Performance Heatmap - Fixed: No extra space, sorted by profit */}
           <motion.div
             variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
+            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
           >
-            <div className="p-4 sm:p-5 border-b border-gray-100">
+            <div className="p-4 sm:p-5 border-b border-gray-100 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-emerald-100 rounded-lg">
                   <BarChart3 className="text-emerald-700 w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-gray-800">
-                    Performance Heatmap
-                  </h2>
-                  <p className="text-xs text-gray-500">
-                    Profit vs. Volume Analysis
-                  </p>
+                  <h2 className="text-lg font-bold text-gray-800">Performance Heatmap</h2>
+                  <p className="text-xs text-gray-500">Profit vs. Volume Analysis</p>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 sm:p-5 pt-0">
+            <div className="p-4 sm:p-5 pt-0 flex-1">
               <p className="text-xs text-gray-400 mb-4 leading-relaxed">
                 Identifies which categories generate the most revenue (Solid Color)
                 relative to how many physical units are sold (Gray Overlay).
@@ -786,24 +794,22 @@ export default function AdminDashboard() {
 
               <div className="space-y-4">
                 {HEATMAP_DATA.length > 0 ? (
-                  HEATMAP_DATA.map((item: any, idx: number) => (
+                  HEATMAP_DATA.map((item, idx) => (
                     <div key={idx} className="space-y-1.5">
                       <div className="flex justify-between text-sm">
-                        <span className="font-semibold text-gray-700">
-                          {item.category}
-                        </span>
+                        <span className="font-semibold text-gray-700">{item.category}</span>
                       </div>
                       <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
                         <motion.div
                           initial={{ width: 0 }}
                           animate={{ width: `${item.profit}%` }}
                           transition={{ duration: 1, ease: "easeOut" }}
-                          className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-gray-900`}
+                          className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-white`}
                         >
                           Profit {item.profit}%
                         </motion.div>
                         <div
-                          className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-800"
+                          className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-700"
                           style={{ width: `${100 - item.volume}%` }}
                         >
                           Vol {item.volume}%
@@ -812,9 +818,9 @@ export default function AdminDashboard() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-gray-500 text-center py-4">
-                    No product data available.
-                  </p>
+                  <div className="text-center py-8">
+                    <p className="text-sm text-gray-500">No product data available.</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -916,7 +922,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Forecast Modal - Using clickable cards */}
+      {/* Forecast Modal */}
       <AnimatePresence>
         {showForecastModal && (
           <Modal
@@ -927,9 +933,8 @@ export default function AdminDashboard() {
               {FORECAST_DATA.map((item, i) => (
                 <ForecastCard 
                   key={i}
-                  data={item} 
-                  currentDemand={getCurrentDisplayDemand(item)}
-                  selectedMonth={nextThreeMonths[selectedForecastMonth]}
+                  data={item}
+                  selectedMonth={nextThreeMonths[0]}
                   onClick={() => {
                     setShowForecastModal(false);
                     openForecastExplanation(item);
@@ -941,7 +946,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Simplified Forecast Explanation Modal */}
+      {/* Forecast Explanation Modal with Stockout Date */}
       <AnimatePresence>
         {showForecastExplanationModal && selectedForecastProduct && (
           <SimplifiedForecastExplanationModal
@@ -1029,15 +1034,21 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-// Forecast Card Component - Clickable card (similar to Deadstock Impact design)
-function ForecastCard({ data, currentDemand, selectedMonth, onClick }: { 
+// Forecast Card Component - With stockout date display
+function ForecastCard({ data, selectedMonth, onClick }: { 
   data: ForecastDisplayData; 
-  currentDemand: number; 
   selectedMonth: string;
   onClick: () => void;
 }) {
-  const orderQuantity = Math.max(0, currentDemand - data.currentStock);
+  const orderQuantity = data.recommendedOrder;
   const needsReorder = orderQuantity > 0;
+  
+  // Format stockout day as "Month Day" (e.g., "May 11")
+  const getStockoutDate = (stockoutDay: number, forecastMonth: string): string => {
+    if (stockoutDay >= 30) return "End of month";
+    // Use the forecast month (e.g., "May") and the stockout day
+    return `${forecastMonth} ${stockoutDay}`;
+  };
 
   return (
     <div 
@@ -1062,7 +1073,7 @@ function ForecastCard({ data, currentDemand, selectedMonth, onClick }: {
         <div>
           <p className="text-gray-500 text-[10px] font-medium">{selectedMonth} Forecast</p>
           <p className="font-bold text-[#0B3C8A] text-sm">
-            {currentDemand} units
+            {data.predictedDemand30d} units
           </p>
         </div>
         <div>
@@ -1077,7 +1088,9 @@ function ForecastCard({ data, currentDemand, selectedMonth, onClick }: {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 text-xs text-gray-500">
             <Package size={12} />
-            {needsReorder ? `Order ${orderQuantity} Units for ${selectedMonth}` : "Stock Sufficient"}
+            {needsReorder 
+              ? `Stockout: ${getStockoutDate(data.stockoutDay, selectedMonth)} • Order ${orderQuantity} units`
+              : "Stock Sufficient"}
           </div>
           <ChevronRight size={14} className="text-gray-400" />
         </div>
@@ -1086,7 +1099,7 @@ function ForecastCard({ data, currentDemand, selectedMonth, onClick }: {
   );
 }
 
-// Simplified Forecast Explanation Modal
+// Forecast Explanation Modal with Stockout Date
 function SimplifiedForecastExplanationModal({ 
   explanation, 
   onClose 
@@ -1094,105 +1107,135 @@ function SimplifiedForecastExplanationModal({
   explanation: ForecastExplanation; 
   onClose: () => void;
 }) {
-  const recommendedOrder = Math.max(0, explanation.monthlyForecasts[0].predictedDemand - explanation.currentStock);
+  const recommendedOrder = explanation.recommendedOrder;
+  const currentStock = explanation.currentStock;
+  const totalForecast = explanation.monthlyForecasts[0]?.predictedDemand || 0;
+  const forecastMonth = explanation.monthlyForecasts[0]?.month || "May";
+  const stockoutDay = explanation.stockoutDay;
   
-  const getTrendDisplay = () => {
-    if (explanation.trend === 'up') {
-      return { icon: <TrendingUp size={20} className="text-green-600" />, text: 'Increasing', color: 'text-green-600', bg: 'bg-green-50' };
-    } else if (explanation.trend === 'down') {
-      return { icon: <TrendingDown size={20} className="text-red-600" />, text: 'Decreasing', color: 'text-red-600', bg: 'bg-red-50' };
-    } else {
-      return { icon: <Minus size={20} className="text-gray-500" />, text: 'Stable', color: 'text-gray-600', bg: 'bg-gray-50' };
-    }
+  // Format stockout date as "Month Day"
+  const getStockoutDate = (): string => {
+    if (stockoutDay >= 30) return "end of month";
+    return `${forecastMonth} ${stockoutDay}`;
   };
   
-  const trendDisplay = getTrendDisplay();
+  // Calculate order by date (5 days before stockout)
+  const getOrderByDate = (): string => {
+    if (stockoutDay >= 30) return `${forecastMonth} ${Math.max(1, 30 - 5)}`;
+    const orderDay = Math.max(1, stockoutDay - 5);
+    return `${forecastMonth} ${orderDay}`;
+  };
+  
+  const needsReorder = recommendedOrder > 0;
+  const stockoutDate = getStockoutDate();
+  const orderByDate = getOrderByDate();
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div
         variants={modalVariants}
         initial="hidden"
         animate="visible"
         exit="exit"
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
       >
-        <div className="sticky top-0 bg-gradient-to-r from-blue-50 to-white p-5 border-b border-gray-200">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Package size={18} className="text-blue-600" />
-              </div>
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
+          <h2 className="text-xl font-bold text-gray-800">{explanation.productName}</h2>
+          <p className="text-sm text-gray-500 mt-1">{forecastMonth} Forecast</p>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          
+          {/* Forecast Value */}
+          <div className="text-center">
+            <p className="text-5xl font-bold text-[#0B3C8A]">{totalForecast}</p>
+            <p className="text-sm text-gray-500 mt-2">units forecasted</p>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Current Stock</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">{currentStock} <span className="text-sm font-normal">units</span></p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">Recommended Order</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">{recommendedOrder} <span className="text-sm font-normal">units</span></p>
+            </div>
+          </div>
+
+          {/* Stockout Info Card */}
+          {needsReorder && (
+            <div className="bg-orange-50 rounded-xl p-4 border border-orange-100">
+              <p className="text-sm text-orange-800">
+                <span className="font-semibold">Stockout Date:</span> {stockoutDate}
+              </p>
+              <p className="text-sm text-orange-800 mt-1">
+                Covers demand from <span className="font-semibold">{stockoutDate}</span> through end of month
+              </p>
+            </div>
+          )}
+
+          {/* No reorder needed */}
+          {!needsReorder && (
+            <div className="bg-emerald-50 rounded-xl p-4 text-center border border-emerald-100">
+              <p className="text-sm text-emerald-700 font-medium">✓ Stock Sufficient</p>
+              <p className="text-xs text-emerald-600 mt-1">No reorder needed at this time</p>
+            </div>
+          )}
+
+          {/* Order Instructions */}
+          {needsReorder && (
+            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+              <p className="text-sm text-blue-800">
+                Order <span className="font-bold">{recommendedOrder} units</span> by <span className="font-bold">{orderByDate}</span>
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Order now to ensure delivery before stockout on {stockoutDate}
+              </p>
+            </div>
+          )}
+
+          {/* Trend Card */}
+          <div className={`rounded-xl p-4 border ${
+            explanation.trend === 'up' ? 'bg-emerald-50 border-emerald-100' : 
+            explanation.trend === 'down' ? 'bg-red-50 border-red-100' : 
+            'bg-gray-50 border-gray-100'
+          }`}>
+            <div className="flex items-center gap-3">
+              {explanation.trend === 'up' && <TrendingUp size={20} className="text-emerald-600" />}
+              {explanation.trend === 'down' && <TrendingDown size={20} className="text-red-600" />}
+              {explanation.trend === 'stable' && <Minus size={20} className="text-gray-500" />}
               <div>
-                <h2 className="text-lg font-bold text-gray-800">Forecast Details</h2>
-                <p className="text-xs text-gray-500">{explanation.productName}</p>
+                <p className={`text-sm font-semibold ${
+                  explanation.trend === 'up' ? 'text-emerald-700' : 
+                  explanation.trend === 'down' ? 'text-red-700' : 
+                  'text-gray-700'
+                }`}>
+                  {explanation.trend === 'up' ? 'Increasing Demand' : 
+                   explanation.trend === 'down' ? 'Decreasing Demand' : 
+                   'Stable Demand'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {explanation.trend === 'up' 
+                    ? "Based on recent sales patterns, demand is expected to grow"
+                    : explanation.trend === 'down'
+                    ? "Based on recent sales patterns, demand is expected to decline"
+                    : "Based on recent sales patterns, demand is expected to remain steady"}
+                </p>
               </div>
             </div>
-            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-              <X size={18} className="text-gray-500" />
-            </button>
           </div>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Current Stock Summary */}
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-gray-600">Current Stock</span>
-              <span className="text-xl font-bold text-gray-800">{explanation.currentStock} units</span>
-            </div>
-          </div>
-
-          {/* Monthly Forecasts */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Monthly Forecast</h3>
-            <div className="space-y-3">
-              {explanation.monthlyForecasts.map((forecast, idx) => (
-                <div key={idx} className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold text-gray-800">{forecast.month}</span>
-                    <span className="text-xl font-bold text-blue-600">{forecast.predictedDemand} units</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Trend Summary */}
-          <div className={`${trendDisplay.bg} rounded-xl p-4 border border-gray-200`}>
-            <div className="flex items-center gap-2">
-              {trendDisplay.icon}
-              <span className={`text-sm font-semibold ${trendDisplay.color}`}>
-                {trendDisplay.text} Demand
-              </span>
-            </div>
-            <p className="text-xs text-gray-600 mt-2">
-              {explanation.trend === 'up' 
-                ? "Based on recent sales patterns, demand for this product is expected to grow."
-                : explanation.trend === 'down'
-                ? "Based on recent sales patterns, demand for this product is expected to decline."
-                : "Based on recent sales patterns, demand for this product is expected to remain steady."}
-            </p>
-          </div>
-
-          {/* Action Recommendation */}
-          <div className="bg-gradient-to-r from-[#0B3C8A] to-blue-700 rounded-xl p-4 text-white">
-            <div className="flex items-center gap-2 mb-2">
-              <Package size={16} />
-              <h3 className="text-sm font-bold">Recommended Action</h3>
-            </div>
-            <p className="text-base font-bold">
-              {explanation.trend === 'up' 
-                ? `Order ${recommendedOrder} units for ${explanation.monthlyForecasts[0].month}`
-                : explanation.trend === 'down'
-                ? "Review stock levels - reducing orders recommended"
-                : "Maintain current stock levels"}
-            </p>
-          </div>
-        </div>
-
-        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200">
-          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
+          <button 
+            onClick={onClose}
+            className="w-full px-4 py-2.5 text-sm font-medium text-gray-600 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors"
+          >
             Close
           </button>
         </div>
@@ -1257,7 +1300,7 @@ function StatCard({ data }: { data: StatData }) {
   );
 }
 
-// Deadstock Analysis Modal Component
+// Deadstock Analysis Modal Component (kept from original)
 function DeadstockAnalysisModal({ 
   item, 
   onClose, 

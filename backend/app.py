@@ -1,4 +1,4 @@
-# backend/app.py - Complete fixed version
+# backend/app.py - Complete with proper stockout date calculation
 
 import os
 import json
@@ -13,6 +13,20 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
+import warnings
+warnings.filterwarnings('ignore')
+
+# Suppress cmdstanpy and prophet warnings
+os.environ['CMDSTANPY_DISABLE_CACHE'] = '1'
+os.environ['PROPHET_VERBOSE'] = '0'
+
+# Import Prophet with warning suppression
+import logging
+logging.getLogger('cmdstanpy').setLevel(logging.ERROR)
+logging.getLogger('prophet').setLevel(logging.ERROR)
+
+from prophet import Prophet
+from prophet.make_holidays import make_holidays_df
 
 # Load environment variables
 load_dotenv()
@@ -92,7 +106,6 @@ class ForecastResponse(BaseModel):
 # Constants
 SEASONAL_MULTIPLIERS = [1.4, 1.1, 1.3, 1.35, 1.2, 1.1, 0.85, 0.8, 0.9, 1.0, 1.2, 1.5]
 TOP_SELLING_PRODUCT_LIMIT = 10
-MIN_TRANSACTIONS_FOR_FORECAST = 2
 
 def make_naive(dt):
     """Convert timezone-aware datetime to naive for safe comparisons"""
@@ -113,83 +126,6 @@ def parse_date(date_str: str) -> datetime:
     except Exception:
         return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-def detect_bulk_order(quantity: int, product_category: str, product_name: str = "") -> Tuple[bool, float]:
-    """Detect if an order is unusually large for the product type."""
-    normal_thresholds = {
-        'Frames': 3,
-        'Lenses': 4,
-        'Contact Lenses': 6,
-        'Solutions': 4,
-        'Accessories': 5
-    }
-    
-    extreme_thresholds = {
-        'Frames': 10,
-        'Lenses': 15,
-        'Contact Lenses': 20,
-        'Solutions': 12,
-        'Accessories': 15
-    }
-    
-    threshold = normal_thresholds.get(product_category, 5)
-    extreme = extreme_thresholds.get(product_category, 10)
-    
-    if quantity <= threshold:
-        return (False, 1.0)
-    elif quantity <= extreme:
-        weight = max(0.3, 1.0 - ((quantity - threshold) / extreme) * 0.5)
-        return (True, weight)
-    else:
-        weight = 0.1
-        return (True, weight)
-
-def get_product_creation_date(product: Product, reference_date: datetime = None) -> datetime:
-    """Get product creation date from product data."""
-    if reference_date is None:
-        reference_date = make_naive(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
-    else:
-        reference_date = make_naive(reference_date).replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    if product.createdAt is not None:
-        try:
-            if isinstance(product.createdAt, datetime):
-                return make_naive(product.createdAt).replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            if isinstance(product.createdAt, str):
-                try:
-                    if 'Z' in product.createdAt:
-                        dt = datetime.fromisoformat(product.createdAt.replace('Z', '+00:00'))
-                    else:
-                        dt = datetime.fromisoformat(product.createdAt)
-                    return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
-                except:
-                    pass
-            
-            if isinstance(product.createdAt, dict):
-                if '_seconds' in product.createdAt:
-                    dt = datetime.fromtimestamp(product.createdAt['_seconds'])
-                    return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
-                elif 'seconds' in product.createdAt:
-                    dt = datetime.fromtimestamp(product.createdAt['seconds'])
-                    return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            if hasattr(product.createdAt, 'to_datetime'):
-                dt = product.createdAt.to_datetime()
-                return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            if hasattr(product.createdAt, 'toDate'):
-                dt = product.createdAt.toDate()
-                return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
-                
-        except Exception as e:
-            print(f"  ⚠️ Error parsing createdAt: {e}")
-    
-    if hasattr(product, 'lastMovedDaysAgo') and product.lastMovedDaysAgo is not None:
-        if product.lastMovedDaysAgo >= 0 and product.lastMovedDaysAgo < 30:
-            return reference_date - timedelta(days=product.lastMovedDaysAgo)
-    
-    return reference_date
-
 def get_product_sales_history(product: Product, transactions: List[Transaction], reference_date: datetime) -> Tuple[List[Dict], Optional[datetime], int, int, datetime]:
     """Get product's complete sales history."""
     completed_txns = [t for t in transactions if t.status == 'completed']
@@ -202,6 +138,9 @@ def get_product_sales_history(product: Product, transactions: List[Transaction],
     for t in completed_txns:
         try:
             trans_date = parse_date(t.date)
+            trans_date = make_naive(trans_date)
+            trans_date = trans_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            
             for item in t.items:
                 if item.id == product.id:
                     product_sales.append({
@@ -216,13 +155,49 @@ def get_product_sales_history(product: Product, transactions: List[Transaction],
         except Exception as e:
             continue
     
-    creation_date = get_product_creation_date(product, reference_date)
+    # Get product creation date
+    creation_date = None
+    
+    if product.createdAt is not None:
+        try:
+            if isinstance(product.createdAt, datetime):
+                creation_date = make_naive(product.createdAt)
+            elif isinstance(product.createdAt, dict):
+                if '_seconds' in product.createdAt:
+                    creation_date = datetime.fromtimestamp(product.createdAt['_seconds'])
+                elif 'seconds' in product.createdAt:
+                    creation_date = datetime.fromtimestamp(product.createdAt['seconds'])
+                if creation_date:
+                    creation_date = make_naive(creation_date)
+            elif hasattr(product.createdAt, 'to_datetime'):
+                creation_date = make_naive(product.createdAt.to_datetime())
+            elif hasattr(product.createdAt, 'toDate'):
+                creation_date = make_naive(product.createdAt.toDate())
+            elif isinstance(product.createdAt, (int, float)):
+                creation_date = make_naive(datetime.fromtimestamp(product.createdAt))
+            elif isinstance(product.createdAt, str):
+                try:
+                    dt = datetime.fromisoformat(product.createdAt.replace('Z', '+00:00'))
+                    creation_date = make_naive(dt)
+                except:
+                    pass
+        except Exception as e:
+            print(f"  ⚠️ Error parsing createdAt for {product.name}: {e}")
+    
+    if creation_date is None:
+        if product_sales:
+            earliest_sale = min(sale['date'] for sale in product_sales)
+            creation_date = make_naive(earliest_sale)
+        else:
+            creation_date = today
+    
+    creation_date = make_naive(creation_date).replace(hour=0, minute=0, second=0, microsecond=0)
     
     if last_sale_date:
-        last_sale_date = make_naive(last_sale_date)
+        last_sale_date = make_naive(last_sale_date).replace(hour=0, minute=0, second=0, microsecond=0)
         days_since_last_sale = (today - last_sale_date).days
     else:
-        days_since_last_sale = (today - creation_date).days
+        days_since_last_sale = (today - creation_date).days if creation_date else 0
     
     return product_sales, last_sale_date, total_quantity, days_since_last_sale, creation_date
 
@@ -269,15 +244,413 @@ def get_reference_month_sales(product: Product, transactions: List[Transaction],
     
     return total_sold
 
-def check_is_deadstock(product: Product, transactions: List[Transaction], reference_date: datetime, days_threshold: int = 30) -> Tuple[bool, int, Optional[datetime]]:
-    """Check if a product is deadstock."""
-    _, last_sale_date, _, days_since_last_sale, _ = get_product_sales_history(product, transactions, reference_date)
+def generate_daily_sales_data(transactions: List[Transaction]) -> pd.DataFrame:
+    """Generate daily aggregated sales data for Prophet model using ALL historical data."""
+    completed_txns = [t for t in transactions if t.status == 'completed']
     
-    if last_sale_date is None:
-        return (False, 0, None)
+    if len(completed_txns) < 10:
+        return pd.DataFrame()
     
-    is_deadstock_flag = days_since_last_sale >= days_threshold
-    return (is_deadstock_flag, days_since_last_sale, last_sale_date)
+    sales_by_date = {}
+    
+    for t in completed_txns:
+        try:
+            trans_date = parse_date(t.date)
+            date_key = trans_date.strftime('%Y-%m-%d')
+            total_items = sum(item.quantity for item in t.items)
+            
+            if date_key in sales_by_date:
+                sales_by_date[date_key] += total_items
+            else:
+                sales_by_date[date_key] = total_items
+        except:
+            continue
+    
+    if not sales_by_date:
+        return pd.DataFrame()
+    
+    # Find earliest and latest dates
+    all_dates = [datetime.strptime(d, '%Y-%m-%d') for d in sales_by_date.keys()]
+    earliest_date = min(all_dates)
+    latest_date = max(all_dates)
+    
+    # Create continuous date range (includes ALL history: March + April)
+    date_range = pd.date_range(start=earliest_date, end=latest_date, freq='D')
+    
+    # Build DataFrame with all dates
+    df_data = []
+    for date in date_range:
+        date_key = date.strftime('%Y-%m-%d')
+        count = sales_by_date.get(date_key, 0)
+        df_data.append({'ds': date, 'y': count})
+    
+    df = pd.DataFrame(df_data)
+    df['ds'] = pd.to_datetime(df['ds'])
+    df = df.sort_values('ds')
+    
+    return df
+
+def generate_product_daily_sales(product: Product, transactions: List[Transaction]) -> pd.DataFrame:
+    """Generate daily sales data for a specific product using ALL historical data."""
+    completed_txns = [t for t in transactions if t.status == 'completed']
+    
+    # Collect all sales by date
+    sales_by_date = {}
+    
+    # Find the earliest transaction date for this product
+    earliest_date = None
+    latest_date = None
+    
+    for t in completed_txns:
+        try:
+            trans_date = parse_date(t.date)
+            trans_date = trans_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            for item in t.items:
+                if item.id == product.id:
+                    date_key = trans_date.strftime('%Y-%m-%d')
+                    if date_key in sales_by_date:
+                        sales_by_date[date_key] += item.quantity
+                    else:
+                        sales_by_date[date_key] = item.quantity
+                    
+                    if earliest_date is None or trans_date < earliest_date:
+                        earliest_date = trans_date
+                    if latest_date is None or trans_date > latest_date:
+                        latest_date = trans_date
+        except:
+            continue
+    
+    # If no sales found, return empty DataFrame
+    if not sales_by_date:
+        return pd.DataFrame()
+    
+    # Ensure earliest_date and latest_date are set
+    if earliest_date is None:
+        earliest_date = datetime.now() - timedelta(days=30)
+    if latest_date is None:
+        latest_date = datetime.now()
+    
+    # Create continuous date range from earliest sale to latest sale
+    earliest_date = earliest_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    latest_date = latest_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    date_range = pd.date_range(start=earliest_date, end=latest_date, freq='D')
+    
+    # Build DataFrame with all dates (including days with zero sales)
+    df_data = []
+    for date in date_range:
+        date_key = date.strftime('%Y-%m-%d')
+        quantity = sales_by_date.get(date_key, 0)
+        df_data.append({'ds': date, 'y': quantity})
+    
+    df = pd.DataFrame(df_data)
+    df['ds'] = pd.to_datetime(df['ds'])
+    df = df.sort_values('ds')
+    
+    non_zero_days = len([d for d in df_data if d['y'] > 0])
+    print(f"     → Product has {len(df)} total days of history (from {earliest_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')})")
+    print(f"     → Non-zero sales days: {non_zero_days}")
+    
+    return df
+
+def generate_forecast_for_product(product: Product, transactions: List[Transaction]) -> Dict:
+    """
+    Generate demand forecast for a single product using Prophet.
+    Uses ALL available historical data with proper stockout date calculation.
+    """
+    # Get daily sales for this product using ALL history
+    df = generate_product_daily_sales(product, transactions)
+    
+    # Need at least 14 days of history for Prophet
+    if df.empty or len(df) < 14:
+        print(f"     → Insufficient data: only {len(df)} days of history")
+        return {
+            'predicted_demand_30d': None,
+            'predicted_demand_60d': None,
+            'predicted_demand_90d': None,
+            'recommended_order': None,
+            'days_until_out': None,
+            'trend': None,
+            'confidence': None,
+            'has_enough_data': False,
+            'data_points': len(df)
+        }
+    
+    try:
+        full_df = df.copy()
+        
+        non_zero_days = len(full_df[full_df['y'] > 0])
+        
+        # Lowered thresholds for March + April data (60 days, ~5-15 sales days)
+        if non_zero_days < 5:
+            print(f"     → Insufficient non-zero days: {non_zero_days} (need 5+)")
+            return {
+                'predicted_demand_30d': None,
+                'predicted_demand_60d': None,
+                'predicted_demand_90d': None,
+                'recommended_order': None,
+                'days_until_out': None,
+                'trend': None,
+                'confidence': None,
+                'has_enough_data': False,
+                'data_points': len(full_df),
+                'non_zero_days': non_zero_days
+            }
+        
+        # Need at least 30 total days for weekly pattern detection
+        if len(full_df) < 30:
+            print(f"     → Insufficient total days: {len(full_df)} (need 30+)")
+            return {
+                'predicted_demand_30d': None,
+                'predicted_demand_60d': None,
+                'predicted_demand_90d': None,
+                'recommended_order': None,
+                'days_until_out': None,
+                'trend': None,
+                'confidence': None,
+                'has_enough_data': False,
+                'data_points': len(full_df)
+            }
+        
+        # Get Philippine holidays for better seasonality
+        ph_holidays = make_holidays_df(
+            year_list=list(range(full_df['ds'].min().year, full_df['ds'].max().year + 1)),
+            country='PH'
+        )
+        
+        # Initialize Prophet with lower seasonality for sparse data
+        model = Prophet(
+            yearly_seasonality=False,
+            weekly_seasonality=True,
+            daily_seasonality=False,
+            seasonality_mode='additive',
+            changepoint_prior_scale=0.5,
+            seasonality_prior_scale=3.0,
+            holidays_prior_scale=3.0,
+            interval_width=0.8,
+            holidays=ph_holidays
+        )
+        
+        # Add monthly seasonality
+        model.add_seasonality(
+            name='monthly',
+            period=30.5,
+            fourier_order=3,
+            prior_scale=3.0
+        )
+        
+        # Fit the model
+        model.fit(full_df)
+        
+        # Create future dates for 90 days
+        future = model.make_future_dataframe(periods=90, include_history=True)
+        forecast = model.predict(future)
+        
+        # Get forecast for future dates only
+        last_date = full_df['ds'].max()
+        forecast_future = forecast[forecast['ds'] > last_date].copy()
+        
+        if forecast_future.empty or len(forecast_future) < 30:
+            print(f"     → Prophet forecast returned empty")
+            return {
+                'predicted_demand_30d': None,
+                'predicted_demand_60d': None,
+                'predicted_demand_90d': None,
+                'recommended_order': None,
+                'days_until_out': None,
+                'trend': None,
+                'confidence': None,
+                'has_enough_data': False,
+                'data_points': len(full_df)
+            }
+        
+        # Get daily forecast values for next 30 days
+        daily_forecast = forecast_future['yhat'].values[:30]
+        
+        # Calculate total forecast demand for 30 days
+        forecast_30d = max(1, round(daily_forecast.sum()))
+        forecast_60d = max(1, round(forecast_future['yhat'].head(60).sum()))
+        forecast_90d = max(1, round(forecast_future['yhat'].head(90).sum()))
+        
+        # ========== PROPER STOCKOUT DATE CALCULATION ==========
+        current_stock = product.stock
+        cumulative_demand = 0
+        stockout_day = None
+        days_until_out = 30
+        
+        # Print daily forecast for debugging
+        print(f"     → Daily forecast values (first 10 days): {[round(d, 1) for d in daily_forecast[:10]]}")
+        
+        # Calculate when stock will run out based on daily forecast pattern
+        for day, demand in enumerate(daily_forecast, start=1):
+            cumulative_demand += demand
+            if cumulative_demand >= current_stock:
+                stockout_day = day
+                days_until_out = day
+                break
+        
+        # Calculate recommended order based on stockout date
+        if stockout_day and stockout_day < 30:
+            # Stock runs out before month end - need to order for remaining days
+            remaining_demand = sum(daily_forecast[stockout_day:30])
+            recommended_order = max(0, round(remaining_demand))
+            
+            # Add small safety buffer (10%) for delivery time
+            if recommended_order > 0:
+                recommended_order = int(recommended_order * 1.1)
+            
+            print(f"     → Stockout on day {stockout_day} of month")
+            print(f"     → Remaining forecast after stockout: {remaining_demand:.1f} units")
+            print(f"     → Recommended order: {recommended_order} units")
+        else:
+            # Stock lasts entire month
+            recommended_order = 0
+            print(f"     → Stock lasts entire month (no reorder needed)")
+        
+        # Cap recommended order to reasonable maximum
+        max_reasonable_order = forecast_30d
+        recommended_order = min(recommended_order, max_reasonable_order)
+        recommended_order = max(0, recommended_order)
+        
+        # Determine trend from forecast slope
+        if len(forecast_future) >= 60:
+            first_30_avg = forecast_future['yhat'].head(30).mean()
+            last_30_avg = forecast_future['yhat'].tail(30).mean()
+            if last_30_avg > first_30_avg * 1.2:
+                trend = 'up'
+            elif last_30_avg < first_30_avg * 0.8:
+                trend = 'down'
+            else:
+                trend = 'stable'
+        else:
+            trend = 'stable'
+        
+        confidence = 'high' if non_zero_days >= 15 else 'medium'
+        
+        print(f"     → Prophet Forecast: {forecast_30d} units (30d) | Trend: {trend} | Non-zero days: {non_zero_days}")
+        print(f"     → Days until stockout: {days_until_out} | Order: {recommended_order} units")
+        
+        return {
+            'predicted_demand_30d': forecast_30d,
+            'predicted_demand_60d': forecast_60d,
+            'predicted_demand_90d': forecast_90d,
+            'recommended_order': recommended_order,
+            'days_until_out': days_until_out,
+            'trend': trend,
+            'confidence': confidence,
+            'has_enough_data': True,
+            'data_points': len(full_df),
+            'non_zero_days': non_zero_days
+        }
+        
+    except Exception as e:
+        print(f"     → Prophet error: {str(e)[:100]}")
+        return {
+            'predicted_demand_30d': None,
+            'predicted_demand_60d': None,
+            'predicted_demand_90d': None,
+            'recommended_order': None,
+            'days_until_out': None,
+            'trend': None,
+            'confidence': None,
+            'has_enough_data': False,
+            'data_points': 0,
+            'error': str(e)[:100]
+        }
+
+def generate_overall_forecast_data(transactions: List[Transaction], reference_date: datetime) -> List[Dict]:
+    """Generate the overall forecast chart data using Prophet with ALL historical data."""
+    df = generate_daily_sales_data(transactions)
+    
+    if df.empty or len(df) < 14:
+        print(f"     → Insufficient data for overall forecast: {len(df)} days")
+        return []
+    
+    try:
+        full_df = df.copy()
+        
+        non_zero_days = len(full_df[full_df['y'] > 0])
+        
+        if non_zero_days < 10:
+            print(f"     → Insufficient non-zero days for overall forecast: {non_zero_days}")
+            return []
+        
+        # Get Philippine holidays
+        ph_holidays = make_holidays_df(
+            year_list=list(range(full_df['ds'].min().year, full_df['ds'].max().year + 1)),
+            country='PH'
+        )
+        
+        # Initialize Prophet
+        model = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=True,
+            daily_seasonality=False,
+            seasonality_mode='multiplicative',
+            changepoint_prior_scale=0.05,
+            seasonality_prior_scale=10.0,
+            holidays_prior_scale=10.0,
+            interval_width=0.95,
+            holidays=ph_holidays
+        )
+        
+        # Add monthly seasonality
+        model.add_seasonality(
+            name='monthly',
+            period=30.5,
+            fourier_order=5,
+            prior_scale=5.0
+        )
+        
+        model.fit(full_df)
+        
+        # Create future dates for 6 months
+        future = model.make_future_dataframe(periods=180, include_history=True)
+        forecast = model.predict(future)
+        
+        # Get future forecast only
+        last_historical_date = full_df['ds'].max()
+        future_forecast = forecast[forecast['ds'] > last_historical_date].copy()
+        
+        if future_forecast.empty:
+            return []
+        
+        # Prepare forecast data for chart
+        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        current_month = reference_date.month - 1
+        
+        forecast_data = []
+        
+        # Aggregate by month for the next 6 months
+        future_forecast['year_month'] = future_forecast['ds'].dt.strftime('%Y-%m')
+        monthly_forecast = future_forecast.groupby('year_month').agg({
+            'yhat': 'sum',
+            'yhat_lower': 'sum',
+            'yhat_upper': 'sum'
+        }).reset_index()
+        
+        # Create forecast data points for the next 6 months
+        for i in range(min(6, len(monthly_forecast))):
+            month_idx = (current_month + i) % 12
+            row = monthly_forecast.iloc[i]
+            forecast_value = max(0, int(row['yhat']))
+            lower = max(0, int(row['yhat_lower']))
+            upper = max(0, int(row['yhat_upper']))
+            
+            forecast_data.append({
+                'month': month_names[month_idx],
+                'value': forecast_value,
+                'type': 'forecast',
+                'lower': lower,
+                'upper': upper
+            })
+        
+        return forecast_data
+        
+    except Exception as e:
+        print(f"Error generating Prophet forecast: {str(e)}")
+        return []
 
 def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, locked_capital: float, 
                                       historical_velocity: float, category: str, never_sold: bool = False) -> Dict[str, Any]:
@@ -289,7 +662,6 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
     max_safe_discount_percent = max(0, profit_margin - SAFETY_BUFFER)
     
     base_discount = 0
-    
     if days_since_sale >= 90:
         base_discount = 25
     elif days_since_sale >= 80:
@@ -317,11 +689,7 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
         capital_adjustment = 0
     
     category_urgency = {
-        'Frames': 1.0,
-        'Lenses': 0.9,
-        'Contact Lenses': 0.7,
-        'Solutions': 0.6,
-        'Accessories': 1.0
+        'Frames': 1.0, 'Lenses': 0.9, 'Contact Lenses': 0.7, 'Solutions': 0.6, 'Accessories': 1.0
     }
     urgency_multiplier = category_urgency.get(category, 1.0)
     
@@ -333,23 +701,16 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
     elif historical_velocity > 0 and historical_velocity < 2:
         velocity_reduction = 0
     
-    # For never-sold products, add a small boost to encourage first sale
-    if never_sold:
-        never_sold_boost = 2
-    else:
-        never_sold_boost = 0
+    never_sold_boost = 2 if never_sold else 0
     
-    total_discount = base_discount + capital_adjustment + never_sold_boost
-    total_discount = total_discount * urgency_multiplier
+    total_discount = (base_discount + capital_adjustment + never_sold_boost) * urgency_multiplier
     total_discount = max(0, total_discount - velocity_reduction)
-    
     final_discount_percent = min(total_discount, max_safe_discount_percent)
     
     if days_since_sale >= 30 and final_discount_percent < 5 and max_safe_discount_percent >= 5:
         final_discount_percent = 5
     
     final_discount_percent = int(round(final_discount_percent))
-    
     discounted_price = product.markupPrice * (1 - final_discount_percent / 100)
     profit_after_discount = discounted_price - product.baseCost
     
@@ -418,151 +779,6 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
         }
     }
 
-def calculate_product_demand_ml(product: Product, transactions: List[Transaction], reference_date: datetime) -> Dict[str, Any]:
-    """Calculate demand forecast for a single product using ML-inspired logic."""
-    
-    completed_txns = [t for t in transactions if t.status == 'completed']
-    current_month = reference_date.month - 1
-    
-    product_sales, last_sale_date, total_quantity_sold, days_since_sale, creation_date = get_product_sales_history(product, transactions, reference_date)
-    
-    if len(product_sales) == 0:
-        return {
-            'predicted_demand_30d': 0,
-            'predicted_demand_60d': 0,
-            'predicted_demand_90d': 0,
-            'trend': 'stable',
-            'confidence': 'low',
-            'has_history': False,
-            'avg_monthly': 0,
-            'bulk_orders_detected': 0
-        }
-    
-    product_sales_weighted = []
-    total_weighted_quantity = 0
-    total_weight = 0
-    bulk_count = 0
-    
-    for sale in product_sales:
-        is_bulk, weight = detect_bulk_order(sale['quantity'], product.category, product.name)
-        weighted_qty = sale['quantity'] * weight
-        
-        product_sales_weighted.append({
-            'date': sale['date'],
-            'quantity': sale['quantity'],
-            'weighted_quantity': weighted_qty,
-            'weight': weight,
-            'is_bulk': is_bulk,
-            'revenue': sale['revenue']
-        })
-        
-        total_weighted_quantity += weighted_qty
-        total_weight += weight
-        if is_bulk:
-            bulk_count += 1
-    
-    if len(product_sales_weighted) > 0:
-        dates = [s['date'] for s in product_sales_weighted]
-        if len(dates) > 1:
-            date_range = max((max(dates) - min(dates)).days, 1)
-        else:
-            date_range = 30
-        
-        if total_weight > 0:
-            effective_quantity = total_weighted_quantity
-        else:
-            effective_quantity = total_quantity_sold
-        
-        daily_velocity = effective_quantity / max(date_range, 1)
-        base_monthly_demand = daily_velocity * 30
-        
-        if bulk_count > 0:
-            print(f"    📊 Bulk order adjustment: {bulk_count} bulk order(s) detected, weighted demand: {base_monthly_demand:.1f}")
-    else:
-        daily_velocity = 0
-        base_monthly_demand = 0
-    
-    if len(product_sales_weighted) >= 4:
-        sorted_sales = sorted(product_sales_weighted, key=lambda x: x['date'])
-        recent_avg = sum(s['quantity'] for s in sorted_sales[-2:]) / 2
-        older_avg = sum(s['quantity'] for s in sorted_sales[:2]) / 2 if len(sorted_sales) >= 4 else recent_avg
-        trend_factor = 1 + ((recent_avg - older_avg) / max(older_avg, 1)) * 0.5
-        trend_factor = max(0.7, min(1.3, trend_factor))
-    else:
-        trend_factor = 1.0
-    
-    current_seasonal = SEASONAL_MULTIPLIERS[current_month]
-    next_month = (current_month + 1) % 12
-    month2 = (current_month + 2) % 12
-    next_seasonal = SEASONAL_MULTIPLIERS[next_month]
-    month2_seasonal = SEASONAL_MULTIPLIERS[month2]
-    
-    raw_forecast_30d = base_monthly_demand * current_seasonal * trend_factor
-    forecast_30d = max(1, round(raw_forecast_30d))
-    forecast_60d = max(1, round(
-        (base_monthly_demand * current_seasonal * trend_factor) +
-        (base_monthly_demand * next_seasonal * (trend_factor + 0.02))
-    ))
-    forecast_90d = max(1, round(
-        (base_monthly_demand * current_seasonal * trend_factor) +
-        (base_monthly_demand * next_seasonal * (trend_factor + 0.02)) +
-        (base_monthly_demand * month2_seasonal * (trend_factor + 0.04))
-    ))
-    
-    increasing_count = 0
-    decreasing_count = 0
-    
-    if forecast_60d > forecast_30d:
-        increasing_count += 1
-    elif forecast_60d < forecast_30d:
-        decreasing_count += 1
-    
-    if forecast_90d > forecast_60d:
-        increasing_count += 1
-    elif forecast_90d < forecast_60d:
-        decreasing_count += 1
-    
-    if increasing_count >= 2:
-        trend = 'up'
-    elif decreasing_count >= 2:
-        trend = 'down'
-    elif increasing_count == 1 and decreasing_count == 1:
-        if forecast_90d > forecast_30d * 1.15:
-            trend = 'up'
-        elif forecast_90d < forecast_30d * 0.85:
-            trend = 'down'
-        else:
-            trend = 'stable'
-    else:
-        trend = 'stable'
-    
-    if len(completed_txns) >= 20 and total_quantity_sold >= 20:
-        data_confidence = 'high'
-    elif len(completed_txns) >= 10:
-        data_confidence = 'medium'
-    else:
-        data_confidence = 'low'
-    
-    change_30_to_60 = ((forecast_60d - forecast_30d) / max(forecast_30d, 1)) * 100
-    change_60_to_90 = ((forecast_90d - forecast_60d) / max(forecast_60d, 1)) * 100
-    
-    if abs(change_30_to_60) > 100 or abs(change_60_to_90) > 100:
-        confidence = 'medium'
-    else:
-        confidence = data_confidence
-    
-    return {
-        'predicted_demand_30d': forecast_30d,
-        'predicted_demand_60d': forecast_60d,
-        'predicted_demand_90d': forecast_90d,
-        'trend': trend,
-        'confidence': confidence,
-        'has_history': True,
-        'avg_monthly': round(base_monthly_demand, 1),
-        'bulk_orders_detected': bulk_count
-    }
-
-
 @app.get("/")
 async def health_check():
     return {
@@ -576,9 +792,8 @@ async def health_check():
 @app.post("/api/forecast", response_model=ForecastResponse)
 async def generate_forecast(request: ForecastRequest):
     """
-    Generate sales forecast and product recommendations using ML
-    - Demand Forecasting shows only products with MULTIPLE transactions (>=2)
-    - Deadstock AI suggestions show for ALL products with stock > 0 and days unsold >= 30
+    Generate sales forecast and product recommendations using Prophet ML model.
+    Uses ALL historical data (March + April) with proper stockout date calculation.
     """
     try:
         completed_txns = [t for t in request.transactions if t.status == 'completed']
@@ -593,49 +808,17 @@ async def generate_forecast(request: ForecastRequest):
             print(f"\n📅 No transactions found, using current date: {reference_date.strftime('%Y-%m-%d')}")
         
         print(f"\n{'='*60}")
-        print(f"ML FORECASTING API CALL - Prophet/Scikit-learn Engine")
+        print(f"ML FORECASTING API CALL - Prophet Engine")
         print(f"{'='*60}")
         print(f"Products: {len(request.products)}")
         print(f"Completed Transactions: {len(completed_txns)}")
         print(f"Reference Month: {reference_date.strftime('%B %Y')}")
         print(f"{'-'*60}")
         
-        # Generate forecast data for chart
-        forecast_data = []
-        if len(completed_txns) >= 5:
-            monthly_totals = {}
-            for t in completed_txns:
-                try:
-                    date = parse_date(t.date)
-                    month_key = f"{date.year}-{date.month}"
-                    monthly_totals[month_key] = monthly_totals.get(month_key, 0) + t.total
-                except Exception as e:
-                    continue
-            
-            values = list(monthly_totals.values())
-            if len(values) >= 3:
-                avg_monthly = sum(values[-3:]) / 3
-            else:
-                avg_monthly = sum(values) / len(values) if values else 50000
-            
-            month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            current_month = reference_date.month - 1
-            
-            for i in range(6):
-                month_idx = (current_month + i) % 12
-                seasonal_factor = SEASONAL_MULTIPLIERS[month_idx]
-                growth_factor = 1 + (i * 0.025)
-                forecast_value = avg_monthly * seasonal_factor * growth_factor
-                
-                forecast_data.append({
-                    'month': month_names[month_idx],
-                    'value': int(forecast_value),
-                    'type': 'forecast',
-                    'lower': int(forecast_value * 0.7),
-                    'upper': int(forecast_value * 1.3)
-                })
+        # Generate forecast data using Prophet with ALL historical data
+        forecast_data = generate_overall_forecast_data(request.transactions, reference_date)
         
-        # Generate recommendations
+        # Generate per-product recommendations using Prophet only
         recommendations = []
         deadstock_suggestions_for_response = []
         active_products_list = []
@@ -668,37 +851,40 @@ async def generate_forecast(request: ForecastRequest):
             has_history = has_sales_history(product, request.transactions, reference_date)
             ref_month_sales = product_data.get(product.id, {}).get('ref_month_sales', 0)
             transaction_count = product_data.get(product.id, {}).get('transaction_count', 0)
-            is_deadstock_flag, days_since_last_sale, last_sale = check_is_deadstock(product, request.transactions, reference_date)
             
-            creation_date = get_product_creation_date(product, reference_date)
-            days_since_creation = (today - creation_date).days
-            
+            product_sales, last_sale_date, total_qty, days_since_last_sale, creation_date = get_product_sales_history(
+                product, request.transactions, reference_date
+            )
+            days_since_creation = (today - creation_date).days if creation_date else 0
+            is_deadstock = has_history and days_since_last_sale >= 30
             is_aged_unsold = (not has_history) and (days_since_creation >= 30)
-            is_deadstock_item = has_history and is_deadstock_flag
             
             print(f"  🔍 {product.name}: sold_in_{ref_month_name}={ref_month_sales}, transactions={transaction_count}, has_history={has_history}, days_since_creation={days_since_creation}")
             
-            # ==================== DEADSTOCK & AGED UNSOLD ====================
-            if is_deadstock_item or is_aged_unsold:
-                if is_deadstock_item:
+            # Handle deadstock and aged unsold
+            if is_deadstock or is_aged_unsold:
+                if is_deadstock:
                     days_since_activity = days_since_last_sale
-                    product_type = "deadstock"
                     deadstock_count += 1
-                    print(f"     → DEADSTOCK: Last sale {days_since_activity} days ago - generating AI suggestion")
+                    print(f"     → DEADSTOCK: Last sale {days_since_activity} days ago")
+                    _, _, total_quantity, _, _ = get_product_sales_history(product, request.transactions, reference_date)
+                    historical_velocity = total_quantity / max(1, days_since_activity) * 30 if days_since_activity > 0 else 0
+                    locked_capital = product.stock * product.markupPrice
+                    
+                    ai_suggestion = generate_deadstock_ai_suggestion(
+                        product, days_since_activity, locked_capital, historical_velocity, 
+                        product.category, never_sold=False
+                    )
                 else:
                     days_since_activity = days_since_creation
-                    product_type = "aged_unsold"
                     aged_unsold_count += 1
-                    print(f"     → AGED UNSOLD: Created {days_since_activity} days ago, never sold - generating AI suggestion")
-                
-                _, _, total_quantity, _, _ = get_product_sales_history(product, request.transactions, reference_date)
-                historical_velocity = total_quantity / max(1, days_since_activity) * 30 if days_since_activity > 0 else 0
-                locked_capital = product.stock * product.markupPrice
-                
-                ai_suggestion = generate_deadstock_ai_suggestion(
-                    product, days_since_activity, locked_capital, historical_velocity, 
-                    product.category, never_sold=(not has_history)
-                )
+                    print(f"     → AGED UNSOLD: Created {days_since_activity} days ago")
+                    locked_capital = product.stock * product.markupPrice
+                    
+                    ai_suggestion = generate_deadstock_ai_suggestion(
+                        product, days_since_activity, locked_capital, 0, 
+                        product.category, never_sold=True
+                    )
                 
                 deadstock_suggestions_for_response.append({
                     'productId': product.id,
@@ -707,79 +893,67 @@ async def generate_forecast(request: ForecastRequest):
                     'recommendedDiscount': ai_suggestion['recommended_discount'],
                     'mlFactors': ai_suggestion['ml_factors']
                 })
-                
                 continue
             
-            # ==================== NEW PRODUCTS ====================
+            # Skip new products (created within last 30 days with no sales)
             if not has_history and days_since_creation < 30:
                 new_products_count += 1
                 print(f"     → NEW PRODUCT: Created {days_since_creation} days ago - excluded")
                 continue
             
-            # ==================== SINGLE TRANSACTION ====================
+            # Skip products with only 1 transaction
             if has_history and transaction_count <= 1:
                 single_transaction_excluded += 1
                 print(f"     → EXCLUDED: Only {transaction_count} transaction(s) - insufficient data")
                 continue
             
-            # ==================== ACTIVE PRODUCTS ====================
-            if has_history and transaction_count >= 2 and not is_deadstock_flag:
+            # Active product - eligible for forecasting
+            if has_history and transaction_count >= 2 and not is_deadstock:
                 active_products_list.append({
                     'product': product,
                     'ref_month_sales': ref_month_sales,
                     'transaction_count': transaction_count
                 })
-                print(f"     → ACTIVE: {ref_month_sales} units in {ref_month_name} ({transaction_count} transactions) - INCLUDED")
+                print(f"     → ACTIVE: {ref_month_sales} units in {ref_month_name} ({transaction_count} transactions) - ELIGIBLE")
         
         # Sort and limit active products
         active_products_list.sort(key=lambda x: x['ref_month_sales'], reverse=True)
         top_active_products = active_products_list[:TOP_SELLING_PRODUCT_LIMIT]
-        
-        if deadstock_suggestions_for_response:
-            print(f"\n💀 DEADSTOCK & AGED UNSOLD AI SUGGESTIONS GENERATED: {len(deadstock_suggestions_for_response)}")
-            for suggestion in deadstock_suggestions_for_response[:3]:
-                print(f"     - {suggestion['productId'][:30]}: {suggestion['suggestion'][:60]}...")
         
         if top_active_products:
             print(f"\n✅ TOP {len(top_active_products)} ACTIVE PRODUCTS in Demand Forecasting:")
             for idx, item in enumerate(top_active_products):
                 print(f"     {idx+1}. {item['product'].name}: {item['ref_month_sales']} units ({item['transaction_count']} transactions)")
         
-        print(f"\n📊 SUMMARY:")
-        print(f"     Deadstock AI Suggestions: {deadstock_count}")
-        print(f"     Aged Unsold AI Suggestions: {aged_unsold_count}")
-        print(f"     Active Products in Forecasting: {len(top_active_products)}")
-        print(f"     Excluded (1 transaction): {single_transaction_excluded}")
-        print(f"     New Products: {new_products_count}")
-        
-        print("\n📊 PER-PRODUCT ML DEMAND ANALYSIS:")
+        print("\n📊 PER-PRODUCT ML DEMAND ANALYSIS (Prophet):")
         print("-" * 60)
         
+        # Generate Prophet forecast for each active product using ALL historical data
         for item in top_active_products:
             product = item['product']
-            ml_result = calculate_product_demand_ml(product, request.transactions, reference_date)
             
-            forecast_30d = ml_result['predicted_demand_30d']
-            forecast_60d = ml_result['predicted_demand_60d']
-            forecast_90d = ml_result['predicted_demand_90d']
+            # Use Prophet forecast with proper stockout calculation
+            forecast_result = generate_forecast_for_product(product, request.transactions)
             
-            daily_demand = max(0.1, forecast_30d / 30)
-            days_until_out = int(product.stock / daily_demand) if product.stock > 0 else 0
-            
-            print(f"\n  📈 {product.name}")
-            print(f"     Current Stock: {product.stock}")
-            print(f"     Sales in {ref_month_name}: {item['ref_month_sales']} units")
-            print(f"     → ML Forecast: {forecast_30d} → {forecast_60d} → {forecast_90d} units")
-            print(f"     Trend: {ml_result['trend']}")
-            
-            if (product.stock <= product.reorderPoint or 
-                forecast_30d > product.stock * 0.5 or 
-                product.stock < 10):
+            if forecast_result.get('has_enough_data', False):
+                forecast_30d = forecast_result['predicted_demand_30d']
+                forecast_60d = forecast_result['predicted_demand_60d']
+                forecast_90d = forecast_result['predicted_demand_90d']
+                recommended_order = forecast_result.get('recommended_order', 0)
+                days_until_out = forecast_result.get('days_until_out', 30)
+                trend = forecast_result['trend']
+                confidence = forecast_result['confidence']
                 
-                recommended_order = max(1, forecast_30d - product.stock)
-                if product.stock <= product.reorderPoint:
-                    recommended_order = max(recommended_order, product.reorderPoint)
+                print(f"\n  📈 {product.name}")
+                print(f"     Current Stock: {product.stock}")
+                print(f"     Sales in {ref_month_name}: {item['ref_month_sales']} units")
+                print(f"     Data points: {forecast_result.get('data_points', 0)} days, {forecast_result.get('non_zero_days', 0)} sales days")
+                print(f"     → Prophet Forecast: {forecast_30d} units (30d)")
+                print(f"     → Days until stockout: {days_until_out} days")
+                print(f"     → Recommended Order: {recommended_order} units")
+                print(f"     → Trend: {trend} | Confidence: {confidence}")
                 
+                # Always add recommendation to show the forecast (even if order = 0)
                 recommendations.append({
                     'productId': product.id,
                     'productName': product.name,
@@ -788,24 +962,32 @@ async def generate_forecast(request: ForecastRequest):
                     'predictedDemand60d': forecast_60d,
                     'predictedDemand90d': forecast_90d,
                     'recommendedOrder': recommended_order,
-                    'daysUntilOut': min(days_until_out, 90),
-                    'trend': ml_result['trend'],
-                    'confidence': ml_result['confidence']
+                    'daysUntilOut': days_until_out,
+                    'trend': trend,
+                    'confidence': confidence
                 })
+            else:
+                # Skip product - no forecast available
+                print(f"\n  ⚠️ {product.name}: No forecast available")
+                print(f"     Reason: Insufficient data for Prophet (need 5+ sales days, 30+ total days)")
+                print(f"     Sales in {ref_month_name}: {item['ref_month_sales']} units")
+                if forecast_result.get('non_zero_days', 0) > 0:
+                    print(f"     Non-zero days in history: {forecast_result.get('non_zero_days', 0)}")
         
         recommendations.sort(key=lambda x: x['daysUntilOut'])
         
         print(f"\n{'='*60}")
         print(f"ML SUMMARY:")
         print(f"  Recommendations: {len(recommendations)}")
-        print(f"  AI Suggestions: {len(deadstock_suggestions_for_response)}")
+        print(f"  Deadstock Suggestions: {len(deadstock_suggestions_for_response)}")
+        print(f"  Prophet Model: {'Active' if len(completed_txns) >= 10 else 'Insufficient Data'}")
         print(f"{'='*60}\n")
         
         return {
             "forecastData": forecast_data,
             "recommendations": recommendations[:10],
             "deadstockSuggestions": deadstock_suggestions_for_response,
-            "usingML": len(completed_txns) >= 5,
+            "usingML": len(completed_txns) >= 10,
             "dataPoints": len(completed_txns)
         }
             
