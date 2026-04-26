@@ -1256,7 +1256,8 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         const isDamageOrExchange = reasonLower.includes('damage') || 
                                     reasonLower.includes('damaged') ||
                                     reasonLower.includes('exchange') ||
-                                    reasonLower.includes('return');
+                                    reasonLower.includes('return') ||
+                                    isScanOut;
 
         const isRestock = !isDamageOrExchange && stockDifference > 0 && 
                          (reasonLower.includes('restock') ||

@@ -126,8 +126,11 @@ export default function StaffDashboard() {
   const [scanMode, setScanMode] = useState<'in' | 'out'>('in');
   const [showLowStockModal, setShowLowStockModal] = useState(false);
   const [pendingScanInProduct, setPendingScanInProduct] = useState<{ id: string; name: string; sku: string; stock: number } | null>(null);
+  const [pendingScanOutProduct, setPendingScanOutProduct] = useState<{ id: string; name: string; sku: string; stock: number } | null>(null);
   const [scanInQuantity, setScanInQuantity] = useState("1");
+  const [scanOutQuantity, setScanOutQuantity] = useState("1");
   const [isApplyingScanIn, setIsApplyingScanIn] = useState(false);
+  const [isApplyingScanOut, setIsApplyingScanOut] = useState(false);
   
   const { products, transactions, adjustStock, userRole, userName, userId } = useFirebase();
   const { showNotification } = useNotification();
@@ -219,21 +222,14 @@ export default function StaffDashboard() {
           setIsQRScannerOpen(false);
           return;
         }
-
-        const newStock = Math.max(0, product.stock - 1);
         
-        if (newStock !== product.stock) {
-          const reason = 'Dispatched via QR Scan';
-          
-          await adjustStock(productId, newStock, reason, userName || 'Staff', userId || 'system');
-          
-          const action = '-1';
-          const message = `${action} unit - ${product.name}`;
-          
-          showNotification(message, 'success', 'Stock Out');
-        } else {
-          showNotification(`No change - ${product.name} already at ${product.stock} units`, 'info', 'Stock Unchanged');
-        }
+        setPendingScanOutProduct({
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          stock: product.stock,
+        });
+        setScanOutQuantity("1");
         setIsQRScannerOpen(false);
       } catch (error) {
         console.error("Error adjusting stock:", error);
@@ -270,6 +266,48 @@ export default function StaffDashboard() {
       showNotification(`Failed to adjust stock for "${latestProduct.name}"`, 'error', 'Error');
     } finally {
       setIsApplyingScanIn(false);
+    }
+  };
+
+  const confirmScanOut = async () => {
+    if (!pendingScanOutProduct || isApplyingScanOut) return;
+
+    const quantity = Number(scanOutQuantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      showNotification("Please enter a valid quantity (whole number greater than 0).", 'error', 'Invalid Quantity');
+      return;
+    }
+
+    const latestProduct = products.find((p) => p.id === pendingScanOutProduct.id);
+    if (!latestProduct) {
+      showNotification("Product not found. Please scan again.", 'error', 'Error');
+      setPendingScanOutProduct(null);
+      return;
+    }
+
+    if (quantity > latestProduct.stock) {
+      showNotification(`Cannot scan out ${quantity} units. Only ${latestProduct.stock} unit${latestProduct.stock === 1 ? '' : 's'} in stock.`, 'error', 'Insufficient Stock');
+      return;
+    }
+
+    setIsApplyingScanOut(true);
+    try {
+      const newStock = latestProduct.stock - quantity;
+      await adjustStock(
+        latestProduct.id,
+        newStock,
+        `Damaged via QR Scan Out (-${quantity})`,
+        userName || 'Staff',
+        userId || 'system'
+      );
+      showNotification(`-${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock Out');
+      setPendingScanOutProduct(null);
+      setScanOutQuantity("1");
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      showNotification(`Failed to adjust stock for "${latestProduct.name}"`, 'error', 'Error');
+    } finally {
+      setIsApplyingScanOut(false);
     }
   };
 
@@ -728,6 +766,23 @@ export default function StaffDashboard() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {pendingScanOutProduct && (
+          <ScanOutConfirmationModal
+            product={pendingScanOutProduct}
+            quantity={scanOutQuantity}
+            setQuantity={setScanOutQuantity}
+            isSubmitting={isApplyingScanOut}
+            onCancel={() => {
+              if (isApplyingScanOut) return;
+              setPendingScanOutProduct(null);
+              setScanOutQuantity("1");
+            }}
+            onConfirm={confirmScanOut}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -854,6 +909,83 @@ function ScanInConfirmationModal({
             Current: <span className="font-semibold text-gray-700">{product.stock}</span> | New:{" "}
             <span className="font-semibold text-[#0B3C8A]">{projectedStock}</span>
           </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!isValidQty || isSubmitting}
+            className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-md disabled:opacity-60"
+          >
+            {isSubmitting ? "Saving..." : "Confirm"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ScanOutConfirmationModal({
+  product,
+  quantity,
+  setQuantity,
+  isSubmitting,
+  onCancel,
+  onConfirm,
+}: {
+  product: { id: string; name: string; sku: string; stock: number };
+  quantity: string;
+  setQuantity: (value: string) => void;
+  isSubmitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const qty = Number(quantity);
+  const isValidQty = Number.isInteger(qty) && qty > 0 && qty <= product.stock;
+  const projectedStock = Number.isInteger(qty) && qty > 0 ? Math.max(0, product.stock - qty) : product.stock;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-4 sm:p-6"
+      >
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Scan Out</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Remove stock for <span className="font-semibold text-gray-800">{product.name}</span> ({product.sku}).
+        </p>
+
+        <div className="space-y-2 mb-4">
+          <label htmlFor="scanout-qty" className="text-xs font-semibold text-gray-700 uppercase">
+            Quantity To Remove
+          </label>
+          <input
+            id="scanout-qty"
+            type="number"
+            min={1}
+            max={Math.max(1, product.stock)}
+            step={1}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A] text-gray-700"
+          />
+          <p className="text-xs text-gray-500">
+            Current: <span className="font-semibold text-gray-700">{product.stock}</span> | New:{" "}
+            <span className="font-semibold text-red-600">{projectedStock}</span>
+          </p>
+          {Number.isInteger(qty) && qty > product.stock && (
+            <p className="text-xs text-red-600 font-medium">Quantity cannot exceed available stock.</p>
+          )}
         </div>
 
         <div className="flex gap-3">

@@ -3,7 +3,6 @@
 import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Download,
   FileText,
   Filter,
   X,
@@ -17,7 +16,6 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import Papa from "papaparse";
 import ProductModal, { ProductFormData } from "./ProductModal";
 import QRCodeModal from "./QRCodeModal";
 import QRScannerModal from "./QRScannerModal";
@@ -608,42 +606,6 @@ export default function InventoryReports({
     );
   };
 
-  // Export to CSV
-  const exportToCSV = () => {
-    const csvData = filteredProducts.map((product) => {
-      return {
-        SKU: product.sku,
-        "Product Name": product.name,
-        Category: product.category,
-        Specifications: product.specifications || "N/A",
-        "Beginning Inventory": (product as any).beginningInventory || 0,
-        "Sold": (product as any).totalSold || 0,
-        "Damage": (product as any).damageExchanged || 0,
-        "Total Stock": product.stock,
-        "Base Cost": product.baseCost,
-        "Retail Price": product.markupPrice,
-        "Batch Number": product.batchNumber || "N/A",
-        "Expiry Date": product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
-        Status: getProductStatus(product).join(" | "),
-        "Total Value": product.markupPrice * product.stock,
-      };
-    });
-
-    const csv = Papa.unparse(csvData);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `Inventory_Report_${new Date().toISOString().split("T")[0]}.csv`
-    );
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const categories = ["All Categories", ...new Set(products.map((p) => p.category))];
 
   const deadstockCount = useMemo(() => {
@@ -720,7 +682,7 @@ export default function InventoryReports({
               <>
                 <button
                   onClick={() => setShowArchiveList(true)}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-gray-50 whitespace-nowrap"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-200 whitespace-nowrap"
                 >
                   Archive List
                 </button>
@@ -728,22 +690,13 @@ export default function InventoryReports({
                 <button
                   onClick={exportToPDF}
                   disabled={filteredProducts.length === 0}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 border bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
                 >
                   <FileText size={14} />
-                  <span className="hidden sm:inline">PDF</span>
+                  <span className="hidden sm:inline"> Download PDF</span>
                   <span className="sm:hidden">PDF</span>
                 </button>
 
-                <button
-                  onClick={exportToCSV}
-                  disabled={filteredProducts.length === 0}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  <Download size={14} />
-                  <span className="hidden sm:inline">CSV</span>
-                  <span className="sm:hidden">CSV</span>
-                </button>
               </>
             )}
           </div>
@@ -1193,13 +1146,31 @@ export default function InventoryReports({
           onClose={() => setAddingProduct(null)}
           onSave={async (data: ProductFormData) => {
             try {
+              let addedProductId: string | undefined;
               if (onAddProduct) {
-                await onAddProduct(data);
+                const result = await onAddProduct(data);
+                if (typeof result === "string") {
+                  addedProductId = result;
+                }
               } else {
                 await fetch('/api/products', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(data),
+                });
+              }
+
+              const fallbackProduct = products.find(
+                (p) => p.sku === data.sku || (p.name === data.name && p.category === data.category)
+              );
+              const resolvedProductId = addedProductId || fallbackProduct?.id;
+
+              if (resolvedProductId) {
+                setSelectedQRProduct({
+                  id: resolvedProductId,
+                  sku: data.sku,
+                  name: data.name,
+                  price: data.markupPrice,
                 });
               }
             } catch (err) {

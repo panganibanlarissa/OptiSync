@@ -134,7 +134,7 @@ const shouldShowTransactionDiscount = (
 };
 
 // CATEGORIES
-const CATEGORIES = ["All", "Frames", "Solutions", "Accessories"];
+const CATEGORIES = ["All", "Frames", "Solutions", "Accessories", "Vitamins"];
 
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
