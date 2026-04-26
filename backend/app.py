@@ -1,4 +1,5 @@
-# backend/app.py
+# backend/app.py - Complete fixed version
+
 import os
 import json
 import hashlib
@@ -39,7 +40,7 @@ app = FastAPI(title="OlasoSync ML Service", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://*.vercel.app"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001",  "https://optisync-j01wv7p2n-rejeanzapantas-projects.vercel.app", "https://*.vercel.app"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,6 +86,8 @@ class ForecastResponse(BaseModel):
 
 # Constants
 SEASONAL_MULTIPLIERS = [1.4, 1.1, 1.3, 1.35, 1.2, 1.1, 0.85, 0.8, 0.9, 1.0, 1.2, 1.5]
+TOP_SELLING_PRODUCT_LIMIT = 10
+MIN_TRANSACTIONS_FOR_FORECAST = 2
 
 def make_naive(dt):
     """Convert timezone-aware datetime to naive for safe comparisons"""
@@ -106,10 +109,7 @@ def parse_date(date_str: str) -> datetime:
         return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 def detect_bulk_order(quantity: int, product_category: str, product_name: str = "") -> Tuple[bool, float]:
-    """
-    Detect if an order is unusually large for the product type.
-    Returns (is_bulk, weight_factor)
-    """
+    """Detect if an order is unusually large for the product type."""
     normal_thresholds = {
         'Frames': 3,
         'Lenses': 4,
@@ -139,10 +139,7 @@ def detect_bulk_order(quantity: int, product_category: str, product_name: str = 
         return (True, weight)
 
 def get_product_creation_date(product: Product, reference_date: datetime = None) -> datetime:
-    """
-    Get product creation date from product data.
-    Returns reference_date if not found (for new products)
-    """
+    """Get product creation date from product data."""
     if reference_date is None:
         reference_date = make_naive(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
     else:
@@ -150,11 +147,9 @@ def get_product_creation_date(product: Product, reference_date: datetime = None)
     
     if product.createdAt is not None:
         try:
-            # Handle datetime object
             if isinstance(product.createdAt, datetime):
                 return make_naive(product.createdAt).replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Handle string format
             if isinstance(product.createdAt, str):
                 try:
                     if 'Z' in product.createdAt:
@@ -165,7 +160,6 @@ def get_product_creation_date(product: Product, reference_date: datetime = None)
                 except:
                     pass
             
-            # Handle dict format (Firestore timestamp from frontend)
             if isinstance(product.createdAt, dict):
                 if '_seconds' in product.createdAt:
                     dt = datetime.fromtimestamp(product.createdAt['_seconds'])
@@ -174,12 +168,10 @@ def get_product_creation_date(product: Product, reference_date: datetime = None)
                     dt = datetime.fromtimestamp(product.createdAt['seconds'])
                     return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Handle object with to_datetime method
             if hasattr(product.createdAt, 'to_datetime'):
                 dt = product.createdAt.to_datetime()
                 return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Handle object with toDate method (Firestore client)
             if hasattr(product.createdAt, 'toDate'):
                 dt = product.createdAt.toDate()
                 return make_naive(dt).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -187,16 +179,14 @@ def get_product_creation_date(product: Product, reference_date: datetime = None)
         except Exception as e:
             print(f"  ⚠️ Error parsing createdAt: {e}")
     
-    # If we have lastMovedDaysAgo and it's recent, use that
     if hasattr(product, 'lastMovedDaysAgo') and product.lastMovedDaysAgo is not None:
         if product.lastMovedDaysAgo >= 0 and product.lastMovedDaysAgo < 30:
             return reference_date - timedelta(days=product.lastMovedDaysAgo)
     
-    # DEFAULT: Return reference_date for new products
     return reference_date
 
 def get_product_sales_history(product: Product, transactions: List[Transaction], reference_date: datetime) -> Tuple[List[Dict], Optional[datetime], int, int, datetime]:
-    """Get product's complete sales history. Always returns a creation_date."""
+    """Get product's complete sales history."""
     completed_txns = [t for t in transactions if t.status == 'completed']
     today = make_naive(reference_date).replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -223,7 +213,6 @@ def get_product_sales_history(product: Product, transactions: List[Transaction],
     
     creation_date = get_product_creation_date(product, reference_date)
     
-    # Make sure all dates are naive for subtraction
     if last_sale_date:
         last_sale_date = make_naive(last_sale_date)
         days_since_last_sale = (today - last_sale_date).days
@@ -234,18 +223,49 @@ def get_product_sales_history(product: Product, transactions: List[Transaction],
 
 def has_sales_history(product: Product, transactions: List[Transaction], reference_date: datetime) -> bool:
     """Check if a product has any sales history (ever been sold)"""
-    _, last_sale_date, _, _, _ = get_product_sales_history(product, transactions, reference_date)
-    return last_sale_date is not None
-
-def is_deadstock(product: Product, transactions: List[Transaction], reference_date: datetime, days_threshold: int = 30) -> Tuple[bool, int, Optional[datetime]]:
-    """
-    Check if a product is deadstock.
-    A product is deadstock if:
-    1. It HAS sales history (has been sold before), AND
-    2. Last sale was more than threshold days ago
+    completed_txns = [t for t in transactions if t.status == 'completed']
     
-    Returns (is_deadstock, days_since_last_sale, last_sale_date)
-    """
+    for t in completed_txns:
+        for item in t.items:
+            if item.id == product.id:
+                return True
+    return False
+
+def get_transaction_count(product: Product, transactions: List[Transaction], reference_date: datetime) -> int:
+    """Get the number of unique transactions a product appears in."""
+    completed_txns = [t for t in transactions if t.status == 'completed']
+    transaction_ids = set()
+    
+    for t in completed_txns:
+        for item in t.items:
+            if item.id == product.id:
+                transaction_ids.add(t.id)
+                break
+    
+    return len(transaction_ids)
+
+def get_reference_month_sales(product: Product, transactions: List[Transaction], reference_date: datetime) -> int:
+    """Calculate total quantity sold for a product in the reference month."""
+    completed_txns = [t for t in transactions if t.status == 'completed']
+    ref_month = reference_date.month
+    ref_year = reference_date.year
+    
+    total_sold = 0
+    
+    for t in completed_txns:
+        try:
+            trans_date = parse_date(t.date)
+            if trans_date.year == ref_year and trans_date.month == ref_month:
+                for item in t.items:
+                    if item.id == product.id:
+                        total_sold += item.quantity
+        except Exception as e:
+            continue
+    
+    return total_sold
+
+def check_is_deadstock(product: Product, transactions: List[Transaction], reference_date: datetime, days_threshold: int = 30) -> Tuple[bool, int, Optional[datetime]]:
+    """Check if a product is deadstock."""
     _, last_sale_date, _, days_since_last_sale, _ = get_product_sales_history(product, transactions, reference_date)
     
     if last_sale_date is None:
@@ -256,108 +276,162 @@ def is_deadstock(product: Product, transactions: List[Transaction], reference_da
 
 def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, locked_capital: float, 
                                       historical_velocity: float, category: str, never_sold: bool = False) -> Dict[str, Any]:
-    """
-    Generate AI/ML-based suggestion for deadstock products.
-    Uses multi-factor ML logic.
-    """
+    """Generate AI/ML-based suggestion for deadstock products."""
+    
+    profit_per_unit = product.markupPrice - product.baseCost
+    profit_margin = (profit_per_unit / product.markupPrice) * 100
+    SAFETY_BUFFER = 2
+    max_safe_discount_percent = max(0, profit_margin - SAFETY_BUFFER)
     
     base_discount = 0
     
-    # Factor 1: Days unsold
     if days_since_sale >= 90:
-        base_discount = 0.55
-    elif days_since_sale >= 75:
-        base_discount = 0.45
+        base_discount = 25
+    elif days_since_sale >= 80:
+        base_discount = 22
+    elif days_since_sale >= 70:
+        base_discount = 18
     elif days_since_sale >= 60:
-        base_discount = 0.35
+        base_discount = 15
     elif days_since_sale >= 50:
-        base_discount = 0.28
+        base_discount = 12
     elif days_since_sale >= 40:
-        base_discount = 0.20
+        base_discount = 8
     elif days_since_sale >= 30:
-        base_discount = 0.12
+        base_discount = 5
+    else:
+        base_discount = 0
     
-    # Factor 2: Locked capital adjustment
     if locked_capital > 150000:
-        base_discount += 0.12
+        capital_adjustment = 3
     elif locked_capital > 100000:
-        base_discount += 0.10
+        capital_adjustment = 2
     elif locked_capital > 50000:
-        base_discount += 0.06
-    elif locked_capital > 25000:
-        base_discount += 0.03
+        capital_adjustment = 1
+    else:
+        capital_adjustment = 0
     
-    # Factor 3: Category-based urgency multiplier
     category_urgency = {
         'Frames': 1.0,
         'Lenses': 0.9,
-        'Contact Lenses': 1.4,
-        'Solutions': 1.3,
-        'Accessories': 0.8
+        'Contact Lenses': 0.7,
+        'Solutions': 0.6,
+        'Accessories': 1.0
     }
     urgency_multiplier = category_urgency.get(category, 1.0)
-    base_discount = min(0.70, base_discount * urgency_multiplier)
     
-    # Factor 4: Historical sales velocity
+    velocity_reduction = 0
     if historical_velocity > 15:
-        base_discount = max(0.08, base_discount - 0.10)
+        velocity_reduction = 3
     elif historical_velocity > 8:
-        base_discount = max(0.08, base_discount - 0.05)
+        velocity_reduction = 2
     elif historical_velocity > 0 and historical_velocity < 2:
-        base_discount = min(0.65, base_discount + 0.05)
+        velocity_reduction = 0
     
-    # For never-sold products, increase discount slightly
+    # For never-sold products, add a small boost to encourage first sale
     if never_sold:
-        base_discount = min(0.70, base_discount + 0.05)
-    
-    base_discount = max(0.10, min(0.70, base_discount))
-    discount_percent = int(base_discount * 100)
-    
-    # Generate suggestion
-    if days_since_sale >= 75:
-        suggestion_type = 'critical'
-        suggestion = f"🚨 CRITICAL: {days_since_sale} days unsold. ML analysis recommends {discount_percent}% IMMEDIATE MARKDOWN to recover ₱{locked_capital:,.0f} locked capital."
-    elif days_since_sale >= 50:
-        suggestion_type = 'critical'
-        suggestion = f"⚠️ URGENT: {days_since_sale} days unsold. AI suggests {discount_percent}% discount or 'Buy One Get One' promotion. Capital at risk: ₱{locked_capital:,.0f}"
-    elif days_since_sale >= 40:
-        suggestion_type = 'warning'
-        suggestion = f"📉 WARNING: {days_since_sale} days without sales. ML recommends {discount_percent}% off or bundle with popular items to move stock."
+        never_sold_boost = 2
     else:
-        suggestion_type = 'info'
-        suggestion = f"ℹ️ AI ANALYSIS: {days_since_sale} days unsold. Recommended action: {discount_percent}% discount promotion or 'Buy One Get One 50% Off'."
+        never_sold_boost = 0
+    
+    total_discount = base_discount + capital_adjustment + never_sold_boost
+    total_discount = total_discount * urgency_multiplier
+    total_discount = max(0, total_discount - velocity_reduction)
+    
+    final_discount_percent = min(total_discount, max_safe_discount_percent)
+    
+    if days_since_sale >= 30 and final_discount_percent < 5 and max_safe_discount_percent >= 5:
+        final_discount_percent = 5
+    
+    final_discount_percent = int(round(final_discount_percent))
+    
+    discounted_price = product.markupPrice * (1 - final_discount_percent / 100)
+    profit_after_discount = discounted_price - product.baseCost
+    
+    if profit_after_discount < 0:
+        safe_discount = ((product.markupPrice - product.baseCost) / product.markupPrice) * 100
+        safe_discount = max(0, int(safe_discount))
+        final_discount_percent = safe_discount
+        discounted_price = product.markupPrice * (1 - final_discount_percent / 100)
+        profit_after_discount = discounted_price - product.baseCost
+    
+    if never_sold:
+        if days_since_sale >= 75:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended to attract first-time buyers. Capital locked: ₱{locked_capital:,.0f}"
+        elif days_since_sale >= 50:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended. Item unsold for {days_since_sale} days."
+        elif days_since_sale >= 40:
+            suggestion_type = 'warning'
+            suggestion = f"{final_discount_percent}% discount recommended to generate first sale."
+        elif days_since_sale >= 30:
+            suggestion_type = 'info'
+            suggestion = f"{final_discount_percent}% discount recommended for this slow-moving item."
+        else:
+            suggestion_type = 'info'
+            suggestion = "Item has no sales history. Consider promotional pricing."
+    else:
+        if days_since_sale >= 75:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended to recover ₱{locked_capital:,.0f} locked capital."
+        elif days_since_sale >= 50:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended. Capital at risk: ₱{locked_capital:,.0f}"
+        elif days_since_sale >= 40:
+            suggestion_type = 'warning'
+            suggestion = f"{final_discount_percent}% discount recommended to move stock."
+        elif days_since_sale >= 30:
+            suggestion_type = 'info'
+            suggestion = f"{final_discount_percent}% discount recommended."
+        else:
+            suggestion_type = 'info'
+            suggestion = "No discount recommended at this time."
     
     if category in ['Contact Lenses', 'Solutions']:
-        suggestion += f" As a perishable {category.lower()}, prioritize clearance before expiry date."
+        suggestion += f" Priority clearance before expiry."
     elif locked_capital > 100000:
-        suggestion += f" High-value item (₱{locked_capital:,.0f}) - consider flash sale or corporate bundle."
+        suggestion += f" High-value item - consider flash sale."
     elif historical_velocity > 10:
-        suggestion += f" This product previously sold well ({historical_velocity:.0f} units/month). A temporary promotion may reactivate demand."
+        suggestion += f" This product previously sold well."
+    elif never_sold and days_since_sale > 30:
+        suggestion += f" Consider bundling with popular items."
     
     return {
         'suggestion': suggestion,
         'suggestion_type': suggestion_type,
-        'recommended_discount': discount_percent,
+        'recommended_discount': final_discount_percent,
         'ml_factors': {
             'days_factor': round(min(1.0, days_since_sale / 90), 2),
             'capital_factor': round(min(1.0, locked_capital / 200000), 2),
             'category_urgency': urgency_multiplier,
             'velocity_factor': round(min(1.0, historical_velocity / 30), 2),
-            'final_discount': discount_percent
+            'profit_margin': round(profit_margin, 1),
+            'max_safe_discount': round(max_safe_discount_percent, 1),
+            'final_discount': final_discount_percent,
+            'never_sold': never_sold
         }
     }
 
 def calculate_product_demand_ml(product: Product, transactions: List[Transaction], reference_date: datetime) -> Dict[str, Any]:
-    """
-    Calculate demand forecast for a single product using ML-inspired logic.
-    Only called for products with sales history.
-    Returns 30-day, 60-day, and 90-day forecasts.
-    """
+    """Calculate demand forecast for a single product using ML-inspired logic."""
     
     completed_txns = [t for t in transactions if t.status == 'completed']
     current_month = reference_date.month - 1
     
     product_sales, last_sale_date, total_quantity_sold, days_since_sale, creation_date = get_product_sales_history(product, transactions, reference_date)
+    
+    if len(product_sales) == 0:
+        return {
+            'predicted_demand_30d': 0,
+            'predicted_demand_60d': 0,
+            'predicted_demand_90d': 0,
+            'trend': 'stable',
+            'confidence': 'low',
+            'has_history': False,
+            'avg_monthly': 0,
+            'bulk_orders_detected': 0
+        }
     
     product_sales_weighted = []
     total_weighted_quantity = 0
@@ -430,23 +504,47 @@ def calculate_product_demand_ml(product: Product, transactions: List[Transaction
         (base_monthly_demand * month2_seasonal * (trend_factor + 0.04))
     ))
     
+    increasing_count = 0
+    decreasing_count = 0
     
-    # show actual calculated demand
+    if forecast_60d > forecast_30d:
+        increasing_count += 1
+    elif forecast_60d < forecast_30d:
+        decreasing_count += 1
     
-    if len(product_sales_weighted) >= 4:
-        sorted_sales = sorted(product_sales_weighted, key=lambda x: x['date'])
-        recent = sum(s['quantity'] for s in sorted_sales[-2:]) / 2
-        older = sum(s['quantity'] for s in sorted_sales[:2]) / 2
-        if recent > older * 1.2:
+    if forecast_90d > forecast_60d:
+        increasing_count += 1
+    elif forecast_90d < forecast_60d:
+        decreasing_count += 1
+    
+    if increasing_count >= 2:
+        trend = 'up'
+    elif decreasing_count >= 2:
+        trend = 'down'
+    elif increasing_count == 1 and decreasing_count == 1:
+        if forecast_90d > forecast_30d * 1.15:
             trend = 'up'
-        elif recent < older * 0.8:
+        elif forecast_90d < forecast_30d * 0.85:
             trend = 'down'
         else:
             trend = 'stable'
     else:
         trend = 'stable'
     
-    confidence = 'high' if len(completed_txns) >= 20 and total_quantity_sold >= 20 else 'medium' if len(completed_txns) >= 10 else 'low'
+    if len(completed_txns) >= 20 and total_quantity_sold >= 20:
+        data_confidence = 'high'
+    elif len(completed_txns) >= 10:
+        data_confidence = 'medium'
+    else:
+        data_confidence = 'low'
+    
+    change_30_to_60 = ((forecast_60d - forecast_30d) / max(forecast_30d, 1)) * 100
+    change_60_to_90 = ((forecast_90d - forecast_60d) / max(forecast_60d, 1)) * 100
+    
+    if abs(change_30_to_60) > 100 or abs(change_60_to_90) > 100:
+        confidence = 'medium'
+    else:
+        confidence = data_confidence
     
     return {
         'predicted_demand_30d': forecast_30d,
@@ -474,19 +572,17 @@ async def health_check():
 async def generate_forecast(request: ForecastRequest):
     """
     Generate sales forecast and product recommendations using ML
-    - Only products with sales history appear in Demand Forecasting
-    - Deadstock = products with sales history but last sale > 30 days OR never-sold products aged 30+ days
-    - Deadstock suggestions use AI/ML multi-factor analysis
+    - Demand Forecasting shows only products with MULTIPLE transactions (>=2)
+    - Deadstock AI suggestions show for ALL products with stock > 0 and days unsold >= 30
     """
     try:
         completed_txns = [t for t in request.transactions if t.status == 'completed']
         
-        # IMPORTANT: Use latest transaction date as reference instead of current date
-        # This ensures forecasts are consistent and don't jump at month boundaries
         if completed_txns:
             latest_date = max([parse_date(t.date) for t in completed_txns])
             reference_date = latest_date
             print(f"\n📅 Using reference date: {reference_date.strftime('%Y-%m-%d')} (latest transaction)")
+            print(f"📅 Reference Month: {reference_date.strftime('%B %Y')}")
         else:
             reference_date = make_naive(datetime.now())
             print(f"\n📅 No transactions found, using current date: {reference_date.strftime('%Y-%m-%d')}")
@@ -496,7 +592,7 @@ async def generate_forecast(request: ForecastRequest):
         print(f"{'='*60}")
         print(f"Products: {len(request.products)}")
         print(f"Completed Transactions: {len(completed_txns)}")
-        print(f"Reference Month: {reference_date.strftime('%B')}")
+        print(f"Reference Month: {reference_date.strftime('%B %Y')}")
         print(f"{'-'*60}")
         
         # Generate forecast data for chart
@@ -536,81 +632,69 @@ async def generate_forecast(request: ForecastRequest):
         
         # Generate recommendations
         recommendations = []
-        deadstock_list = []
         deadstock_suggestions_for_response = []
         active_products_list = []
         new_products_count = 0
         aged_unsold_count = 0
+        single_transaction_excluded = 0
+        deadstock_count = 0
         
         print("\n📊 PER-PRODUCT CLASSIFICATION:")
         print("-" * 55)
         
         today = make_naive(reference_date).replace(hour=0, minute=0, second=0, microsecond=0)
+        ref_month_name = reference_date.strftime('%B')
         
+        # Calculate data for each product
+        product_data = {}
+        for product in request.products:
+            ref_month_sales = get_reference_month_sales(product, request.transactions, reference_date)
+            transaction_count = get_transaction_count(product, request.transactions, reference_date)
+            product_data[product.id] = {
+                'ref_month_sales': ref_month_sales,
+                'transaction_count': transaction_count
+            }
+        
+        # Process each product
         for product in request.products:
             if product.stock <= 0:
                 continue
             
             has_history = has_sales_history(product, request.transactions, reference_date)
-            is_deadstock_flag, days_since_last_sale, last_sale = is_deadstock(product, request.transactions, reference_date)
+            ref_month_sales = product_data.get(product.id, {}).get('ref_month_sales', 0)
+            transaction_count = product_data.get(product.id, {}).get('transaction_count', 0)
+            is_deadstock_flag, days_since_last_sale, last_sale = check_is_deadstock(product, request.transactions, reference_date)
             
-            # Get creation date and days since creation
             creation_date = get_product_creation_date(product, reference_date)
             days_since_creation = (today - creation_date).days
             
-            print(f"  🔍 {product.name}: created={creation_date.strftime('%Y-%m-%d')}, days_since_creation={days_since_creation}, has_history={has_history}")
-            
-            # Product is considered "aged unsold" if it has NO sales history but was created 30+ days ago
             is_aged_unsold = (not has_history) and (days_since_creation >= 30)
+            is_deadstock_item = has_history and is_deadstock_flag
             
-            if not has_history and not is_aged_unsold:
-                # New product - created less than 30 days ago
-                new_products_count += 1
-                print(f"     → New product (< 30 days), skipping")
-                continue
+            print(f"  🔍 {product.name}: sold_in_{ref_month_name}={ref_month_sales}, transactions={transaction_count}, has_history={has_history}, days_since_creation={days_since_creation}")
             
-            if is_deadstock_flag or is_aged_unsold:
-                # Deadstock OR aged unsold product - generate AI suggestion
-                
-                # Determine days since last activity
-                if is_deadstock_flag:
+            # ==================== DEADSTOCK & AGED UNSOLD ====================
+            if is_deadstock_item or is_aged_unsold:
+                if is_deadstock_item:
                     days_since_activity = days_since_last_sale
-                    last_activity_date = last_sale
                     product_type = "deadstock"
+                    deadstock_count += 1
+                    print(f"     → DEADSTOCK: Last sale {days_since_activity} days ago - generating AI suggestion")
                 else:
                     days_since_activity = days_since_creation
-                    last_activity_date = None
                     product_type = "aged_unsold"
                     aged_unsold_count += 1
+                    print(f"     → AGED UNSOLD: Created {days_since_activity} days ago, never sold - generating AI suggestion")
                 
-                print(f"     → {product_type}: {days_since_activity} days, generating AI suggestion")
-                
-                # Calculate historical sales velocity
                 _, _, total_quantity, _, _ = get_product_sales_history(product, request.transactions, reference_date)
                 historical_velocity = total_quantity / max(1, days_since_activity) * 30 if days_since_activity > 0 else 0
                 locked_capital = product.stock * product.markupPrice
                 
-                # Generate AI/ML-powered suggestion
                 ai_suggestion = generate_deadstock_ai_suggestion(
                     product, days_since_activity, locked_capital, historical_velocity, 
                     product.category, never_sold=(not has_history)
                 )
                 
-                deadstock_list.append({
-                    'name': product.name,
-                    'days_since': days_since_activity,
-                    'last_sale': last_sale.strftime('%Y-%m-%d') if last_sale else 'Never',
-                    'stock': product.stock,
-                    'locked_capital': locked_capital,
-                    'category': product.category,
-                    'type': product_type,
-                    'ai_suggestion': ai_suggestion['suggestion'],
-                    'ai_suggestion_type': ai_suggestion['suggestion_type'],
-                    'recommended_discount': ai_suggestion['recommended_discount'],
-                    'ml_factors': ai_suggestion['ml_factors']
-                })
-                
-                # Add to API response
                 deadstock_suggestions_for_response.append({
                     'productId': product.id,
                     'suggestion': ai_suggestion['suggestion'],
@@ -618,36 +702,56 @@ async def generate_forecast(request: ForecastRequest):
                     'recommendedDiscount': ai_suggestion['recommended_discount'],
                     'mlFactors': ai_suggestion['ml_factors']
                 })
+                
+                continue
             
-            elif has_history and not is_deadstock_flag:
-                # Active product with recent sales
-                active_products_list.append(product)
-                print(f"     → Active product (recent sales)")
+            # ==================== NEW PRODUCTS ====================
+            if not has_history and days_since_creation < 30:
+                new_products_count += 1
+                print(f"     → NEW PRODUCT: Created {days_since_creation} days ago - excluded")
+                continue
+            
+            # ==================== SINGLE TRANSACTION ====================
+            if has_history and transaction_count <= 1:
+                single_transaction_excluded += 1
+                print(f"     → EXCLUDED: Only {transaction_count} transaction(s) - insufficient data")
+                continue
+            
+            # ==================== ACTIVE PRODUCTS ====================
+            if has_history and transaction_count >= 2 and not is_deadstock_flag:
+                active_products_list.append({
+                    'product': product,
+                    'ref_month_sales': ref_month_sales,
+                    'transaction_count': transaction_count
+                })
+                print(f"     → ACTIVE: {ref_month_sales} units in {ref_month_name} ({transaction_count} transactions) - INCLUDED")
         
-        # Log deadstock products
-        if deadstock_list:
-            print(f"\n💀 DEADSTOCK & AGED UNSOLD PRODUCTS (excluded from Demand Forecasting):")
-            for ds in deadstock_list:
-                type_label = "Aged Unsold" if ds['type'] == 'aged_unsold' else "Deadstock"
-                print(f"     - {ds['name']}: {ds['days_since']} days ({type_label}) | Stock: {ds['stock']} | Capital: ₱{ds['locked_capital']:,.0f}")
-                print(f"       AI Suggestion: {ds['ai_suggestion'][:100]}...")
+        # Sort and limit active products
+        active_products_list.sort(key=lambda x: x['ref_month_sales'], reverse=True)
+        top_active_products = active_products_list[:TOP_SELLING_PRODUCT_LIMIT]
         
-        if active_products_list:
-            print(f"\n✅ ACTIVE PRODUCTS (has recent sales) - INCLUDED in Demand Forecasting:")
-            for ap in active_products_list:
-                print(f"     - {ap.name}: Stock: {ap.stock}")
+        if deadstock_suggestions_for_response:
+            print(f"\n💀 DEADSTOCK & AGED UNSOLD AI SUGGESTIONS GENERATED: {len(deadstock_suggestions_for_response)}")
+            for suggestion in deadstock_suggestions_for_response[:3]:
+                print(f"     - {suggestion['productId'][:30]}: {suggestion['suggestion'][:60]}...")
         
-        if new_products_count > 0:
-            print(f"\n🆕 New products (created < 30 days, never sold): {new_products_count}")
+        if top_active_products:
+            print(f"\n✅ TOP {len(top_active_products)} ACTIVE PRODUCTS in Demand Forecasting:")
+            for idx, item in enumerate(top_active_products):
+                print(f"     {idx+1}. {item['product'].name}: {item['ref_month_sales']} units ({item['transaction_count']} transactions)")
         
-        if aged_unsold_count > 0:
-            print(f"\n⏰ Aged unsold products (created 30+ days ago, never sold): {aged_unsold_count}")
+        print(f"\n📊 SUMMARY:")
+        print(f"     Deadstock AI Suggestions: {deadstock_count}")
+        print(f"     Aged Unsold AI Suggestions: {aged_unsold_count}")
+        print(f"     Active Products in Forecasting: {len(top_active_products)}")
+        print(f"     Excluded (1 transaction): {single_transaction_excluded}")
+        print(f"     New Products: {new_products_count}")
         
-        print("\n📊 PER-PRODUCT ML DEMAND ANALYSIS (30d/60d/90d forecasts):")
+        print("\n📊 PER-PRODUCT ML DEMAND ANALYSIS:")
         print("-" * 60)
         
-        # Process only ACTIVE products (with recent sales history)
-        for product in active_products_list:
+        for item in top_active_products:
+            product = item['product']
             ml_result = calculate_product_demand_ml(product, request.transactions, reference_date)
             
             forecast_30d = ml_result['predicted_demand_30d']
@@ -659,13 +763,9 @@ async def generate_forecast(request: ForecastRequest):
             
             print(f"\n  📈 {product.name}")
             print(f"     Current Stock: {product.stock}")
-            print(f"     Historical Monthly Demand (weighted): {ml_result['avg_monthly']}")
-            print(f"     → ML 30-Day Forecast: {forecast_30d} units")
-            print(f"     → ML 60-Day Forecast: {forecast_60d} units")
-            print(f"     → ML 90-Day Forecast: {forecast_90d} units")
-            print(f"     Days Until Out (30d demand): {days_until_out}")
+            print(f"     Sales in {ref_month_name}: {item['ref_month_sales']} units")
+            print(f"     → ML Forecast: {forecast_30d} → {forecast_60d} → {forecast_90d} units")
             print(f"     Trend: {ml_result['trend']}")
-            print(f"     Confidence: {ml_result['confidence']}")
             
             if (product.stock <= product.reorderPoint or 
                 forecast_30d > product.stock * 0.5 or 
@@ -692,12 +792,8 @@ async def generate_forecast(request: ForecastRequest):
         
         print(f"\n{'='*60}")
         print(f"ML SUMMARY:")
-        print(f"  Total Recommendations: {len(recommendations)}")
-        print(f"  Active Products (in forecasting): {len(active_products_list)}")
-        print(f"  Deadstock Products: {len([d for d in deadstock_list if d['type'] == 'deadstock'])}")
-        print(f"  Aged Unsold Products: {aged_unsold_count}")
-        print(f"  Total Deadstock/Aged AI Suggestions: {len(deadstock_suggestions_for_response)}")
-        print(f"  New Products (excluded, < 30 days): {new_products_count}")
+        print(f"  Recommendations: {len(recommendations)}")
+        print(f"  AI Suggestions: {len(deadstock_suggestions_for_response)}")
         print(f"{'='*60}\n")
         
         return {
