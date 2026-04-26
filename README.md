@@ -303,16 +303,16 @@ For development and testing purposes, use the following pre-configured accounts:
 
 | Field | Value |
 |-------|-------|
-| **Email** | `admin@clinic.local` |
-| **Password** | `admin123` |
+| **Email** | `olasosync@gmail.com` |
+| **Password** | `MTolaso_opticalclinic2026` |
 | **Role** | Administrator |
 | **Access** | Full system access |
 
 **Usage:**
 1. Navigate to `http://localhost:3000`
 2. Click **Login**
-3. Enter email: `admin@clinic.local`
-4. Enter password: `admin123`
+3. Enter email: `olasosync@gmail.com`
+4. Enter password: `MTolaso_opticalclinic2026`
 5. Click **Login**
 
 You will be directed to the Admin Dashboard with access to all features.
