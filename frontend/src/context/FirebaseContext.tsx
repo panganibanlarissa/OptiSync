@@ -326,7 +326,7 @@ const logProductArchive = async (productId: string, productName: string, archive
     const actionText = archived ? 'archived' : 'restored from archive';
     
     await addDoc(activityRef, {
-      type: 'product_archive',  // Change from 'product_archive' to a distinct type
+      type: 'product_archive',
       action: archived ? 'product_archived' : 'product_unarchived',
       description: `${staffName} ${actionText} product "${productName}" (ID: ${productId})${reason ? ` Reason: ${reason}` : ''}`,
       staffName: staffName,
@@ -791,7 +791,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           ...rawData,
           date: rawData.date?.toDate() || new Date(),
           warrantyStartDate: rawData.warrantyStartDate?.toDate?.() || rawData.warrantyStartDate,
-          warrantyEndDate: rawData.warrantyEndDate?.toDate?.() || rawData.warrantyEndDate
+          warrantyEndDate: rawData.warrantyEndDate?.toDate?.() || rawData.warrantyEndDate,
+          processedAt: rawData.processedAt?.toDate?.() || rawData.processedAt || null,
+          replacedAt: rawData.replacedAt?.toDate?.() || rawData.replacedAt || null,
         };
       }) as Transaction[];
 
@@ -831,13 +833,18 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     const transactionsQuery = query(transactionsRef, orderBy("date", "desc"), limit(200));
     
     const unsubTransactions = onSnapshot(transactionsQuery, (snap) => {
-      const fetchedTransactions = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        date: d.data().date?.toDate() || new Date(),
-        warrantyStartDate: d.data().warrantyStartDate?.toDate?.() || d.data().warrantyStartDate,
-        warrantyEndDate: d.data().warrantyEndDate?.toDate?.() || d.data().warrantyEndDate
-      })) as Transaction[];
+      const fetchedTransactions = snap.docs.map((d) => {
+        const rawData = d.data();
+        return {
+          id: d.id,
+          ...rawData,
+          date: rawData.date?.toDate() || new Date(),
+          warrantyStartDate: rawData.warrantyStartDate?.toDate?.() || rawData.warrantyStartDate,
+          warrantyEndDate: rawData.warrantyEndDate?.toDate?.() || rawData.warrantyEndDate,
+          processedAt: rawData.processedAt?.toDate?.() || rawData.processedAt || null,
+          replacedAt: rawData.replacedAt?.toDate?.() || rawData.replacedAt || null,
+        };
+      }) as Transaction[];
 
       setTransactions(fetchedTransactions);
       hasFetchedTransactionsRef.current = true;
@@ -1374,10 +1381,13 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error("Only completed or previously replaced transactions can be processed for replacement");
       }
       
+      // Get current timestamp for when the replacement is initiated
+      const processedTimestamp = new Date();
+      
       await updateDoc(transactionRef, {
         status: "processing_replacement",
         replacementReason: reason,
-        processedAt: new Date(),
+        processedAt: Timestamp.fromDate(processedTimestamp),
         processedBy: processedBy,
         updatedAt: serverTimestamp()
       });
@@ -1389,7 +1399,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
                 ...t, 
                 status: "processing_replacement",
                 replacementReason: reason,
-                processedAt: new Date(),
+                processedAt: processedTimestamp,
                 processedBy: processedBy
               } 
             : t
@@ -1426,9 +1436,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error("Only transactions in 'Processing Replacement' status can be marked as replaced");
       }
       
+      // Get current timestamp for when the replacement is completed
+      const replacedTimestamp = new Date();
+      
       await updateDoc(transactionRef, {
         status: "replaced",
-        replacedAt: new Date(),
+        replacedAt: Timestamp.fromDate(replacedTimestamp),
         replacedBy: replacedBy,
         updatedAt: serverTimestamp()
       });
@@ -1439,7 +1452,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             ? { 
                 ...t, 
                 status: "replaced",
-                replacedAt: new Date(),
+                replacedAt: replacedTimestamp,
                 replacedBy: replacedBy
               } 
             : t
