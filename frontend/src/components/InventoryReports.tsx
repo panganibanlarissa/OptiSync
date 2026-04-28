@@ -285,11 +285,13 @@ export default function InventoryReports({
     });
   };
 
-  // Handle permanent product deletion
+  // Handle permanent product deletion - closes modal after deletion
   const handleDeleteProduct = async (id: string) => {
     try {
       await deleteProduct(id);
       showToastOnly("Product permanently deleted", "success");
+      // Close the edit modal immediately after successful deletion
+      setEditingProduct(null);
     } catch (error) {
       console.error("Error deleting product:", error);
       showNotification("Failed to delete product", "error");
