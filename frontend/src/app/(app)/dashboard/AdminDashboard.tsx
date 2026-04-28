@@ -183,7 +183,16 @@ export default function AdminDashboard() {
   const [showForecastModal, setShowForecastModal] = useState(false);
   
   const { products, transactions } = useFirebase();
-  const { loading, recommendations, forecastData, usingML, dataLoaded, deadstockSuggestions } = useMLForecasting();
+  const { 
+    loading: mlLoading, 
+    recommendations, 
+    forecastData, 
+    usingML, 
+    dataLoaded: mlDataLoaded, 
+    deadstockSuggestions,
+    mlServiceAvailable,
+    mlServiceChecked
+  } = useMLForecasting();
 
   const nextThreeMonths = useMemo(() => getNextThreeMonths(), []);
 
@@ -473,10 +482,17 @@ export default function AdminDashboard() {
     };
   };
 
-  if (loading && !dataLoaded) {
+  // Show loading only on first load when no data is available
+  const isLoading = (!mlDataLoaded && mlLoading) || (products.length === 0 && !mlDataLoaded);
+
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A]"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A] mx-auto mb-4"></div>
+          <p className="text-slate-500 text-sm">Loading dashboard data...</p>
+          <p className="text-slate-400 text-xs mt-2">This may take a moment</p>
+        </div>
       </div>
     );
   }
@@ -494,24 +510,39 @@ export default function AdminDashboard() {
         variants={containerVariants}
         className="min-h-screen p-4 space-y-4"
       >
-        {usingML && hasEnoughDataForML && dataLoaded && (
-          <motion.div 
-            variants={itemVariants}
-            className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
-          >
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            AI-Powered Forecasts Active
-          </motion.div>
-        )}
+        {/* ML Status Message - Only show when data is loaded */}
+        {mlDataLoaded && (
+          <>
+            {usingML && hasEnoughDataForML && mlServiceAvailable && (
+              <motion.div 
+                variants={itemVariants}
+                className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                AI-Powered Forecasts Active - Demand predictions using Prophet ML model
+              </motion.div>
+            )}
 
-        {!usingML && dataLoaded && (
-          <motion.div 
-            variants={itemVariants}
-            className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2"
-          >
-            <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-            Showing actual sales only.
-          </motion.div>
+            {(!usingML || !mlServiceAvailable) && mlServiceChecked && (
+              <motion.div 
+                variants={itemVariants}
+                className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700 flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                Prophet Unavailable - AI features disabled. Showing actual sales only.
+              </motion.div>
+            )}
+
+            {!usingML && mlServiceAvailable && mlServiceChecked && hasEnoughDataForML && (
+              <motion.div 
+                variants={itemVariants}
+                className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-700 flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                ML Service available but insufficient data for predictions. Need more sales transactions.
+              </motion.div>
+            )}
+          </>
         )}
 
         <motion.div
@@ -662,7 +693,7 @@ export default function AdminDashboard() {
                       
                       <div className="border-t border-gray-100 pt-2">
                         <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
-                          {usingML && hasAISuggestion ? 'SUGGESTION' : 'STATUS'}
+                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : 'STATUS'}
                         </p>
                         <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
                           suggestionType === 'critical' ? 'border-red-200' : 
@@ -711,7 +742,7 @@ export default function AdminDashboard() {
                       Demand Forecasting
                     </h2>
                     <p className="text-xs font-medium text-blue-600">
-                      {usingML && hasEnoughDataForML ? 'AI Predictive Insight' : 'Data Analysis'}
+                      {usingML && hasEnoughDataForML && mlServiceAvailable ? 'AI Predictive Insight' : 'Data Analysis'}
                     </p>
                   </div>
                 </div>
@@ -726,7 +757,7 @@ export default function AdminDashboard() {
                 )}
               </div>
               
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && (
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable && (
                 <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
                   <div className="px-3 py-1.5 text-xs font-bold bg-white text-[#0B3C8A] shadow-sm rounded-md">
                     {nextThreeMonths[0]} Forecast
@@ -736,7 +767,7 @@ export default function AdminDashboard() {
             </div>
             
             <div className="p-4 sm:p-5 pt-0">
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 ? (
+              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable ? (
                 <div className="space-y-3">
                   {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
                     <ForecastCard 
@@ -753,15 +784,20 @@ export default function AdminDashboard() {
                     <Database size={20} className="text-gray-400" />
                   </div>
                   <p className="text-sm text-gray-500">
-                    {!usingML 
-                      ? "Prediction service is currently unavailable" 
+                    {!mlServiceAvailable 
+                      ? "Prophet ML service is currently unavailable" 
                       : !hasEnoughDataForML 
-                      ? "Insufficient data for predictions"
+                      ? "Insufficient data for ML predictions"
                       : "No recommendations at this time"}
                   </p>
-                  {!hasEnoughDataForML && usingML && (
+                  {!hasEnoughDataForML && mlServiceAvailable && (
                     <p className="text-xs text-gray-400 mt-2">
                       Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for accurate predictions
+                    </p>
+                  )}
+                  {!mlServiceAvailable && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      ML service is not responding. Showing historical data only.
                     </p>
                   )}
                 </div>
@@ -769,7 +805,7 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
 
-          {/* Performance Heatmap - Fixed: No extra space, sorted by profit */}
+          {/* Performance Heatmap */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
@@ -1034,7 +1070,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-// Forecast Card Component - With stockout date display
+// Forecast Card Component
 function ForecastCard({ data, selectedMonth, onClick }: { 
   data: ForecastDisplayData; 
   selectedMonth: string;
@@ -1043,10 +1079,8 @@ function ForecastCard({ data, selectedMonth, onClick }: {
   const orderQuantity = data.recommendedOrder;
   const needsReorder = orderQuantity > 0;
   
-  // Format stockout day as "Month Day" (e.g., "May 11")
   const getStockoutDate = (stockoutDay: number, forecastMonth: string): string => {
     if (stockoutDay >= 30) return "End of month";
-    // Use the forecast month (e.g., "May") and the stockout day
     return `${forecastMonth} ${stockoutDay}`;
   };
 
@@ -1099,7 +1133,7 @@ function ForecastCard({ data, selectedMonth, onClick }: {
   );
 }
 
-// Forecast Explanation Modal with Stockout Date
+// Forecast Explanation Modal
 function SimplifiedForecastExplanationModal({ 
   explanation, 
   onClose 
@@ -1113,13 +1147,11 @@ function SimplifiedForecastExplanationModal({
   const forecastMonth = explanation.monthlyForecasts[0]?.month || "May";
   const stockoutDay = explanation.stockoutDay;
   
-  // Format stockout date as "Month Day"
   const getStockoutDate = (): string => {
     if (stockoutDay >= 30) return "end of month";
     return `${forecastMonth} ${stockoutDay}`;
   };
   
-  // Calculate order by date (5 days before stockout)
   const getOrderByDate = (): string => {
     if (stockoutDay >= 30) return `${forecastMonth} ${Math.max(1, 30 - 5)}`;
     const orderDay = Math.max(1, stockoutDay - 5);
@@ -1139,22 +1171,17 @@ function SimplifiedForecastExplanationModal({
         exit="exit"
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
       >
-        {/* Header */}
         <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
           <h2 className="text-xl font-bold text-gray-800">{explanation.productName}</h2>
           <p className="text-sm text-gray-500 mt-1">{forecastMonth} Forecast</p>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-6">
-          
-          {/* Forecast Value */}
           <div className="text-center">
             <p className="text-5xl font-bold text-[#0B3C8A]">{totalForecast}</p>
             <p className="text-sm text-gray-500 mt-2">units forecasted</p>
           </div>
 
-          {/* Stats Grid */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-gray-50 rounded-xl p-4 text-center">
               <p className="text-xs text-gray-400 uppercase tracking-wide">Current Stock</p>
@@ -1166,7 +1193,6 @@ function SimplifiedForecastExplanationModal({
             </div>
           </div>
 
-          {/* Stockout Info Card */}
           {needsReorder && (
             <div className="bg-orange-50 rounded-xl p-4 border border-orange-100">
               <p className="text-sm text-orange-800">
@@ -1178,7 +1204,6 @@ function SimplifiedForecastExplanationModal({
             </div>
           )}
 
-          {/* No reorder needed */}
           {!needsReorder && (
             <div className="bg-emerald-50 rounded-xl p-4 text-center border border-emerald-100">
               <p className="text-sm text-emerald-700 font-medium">✓ Stock Sufficient</p>
@@ -1186,7 +1211,6 @@ function SimplifiedForecastExplanationModal({
             </div>
           )}
 
-          {/* Order Instructions */}
           {needsReorder && (
             <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
               <p className="text-sm text-blue-800">
@@ -1198,7 +1222,6 @@ function SimplifiedForecastExplanationModal({
             </div>
           )}
 
-          {/* Trend Card */}
           <div className={`rounded-xl p-4 border ${
             explanation.trend === 'up' ? 'bg-emerald-50 border-emerald-100' : 
             explanation.trend === 'down' ? 'bg-red-50 border-red-100' : 
@@ -1230,7 +1253,6 @@ function SimplifiedForecastExplanationModal({
           </div>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
           <button 
             onClick={onClose}
@@ -1300,7 +1322,7 @@ function StatCard({ data }: { data: StatData }) {
   );
 }
 
-// Deadstock Analysis Modal Component (kept from original)
+// Deadstock Analysis Modal Component
 function DeadstockAnalysisModal({ 
   item, 
   onClose, 
@@ -1348,7 +1370,7 @@ function DeadstockAnalysisModal({
               <div className="p-1.5 bg-blue-100 rounded-lg">
                 <AlertCircle size={18} className="text-blue-600" />
               </div>
-              <h3 className="font-bold text-gray-800">AI Recommendation Summary</h3>
+              <h3 className="font-bold text-gray-800">AI Recommendation</h3>
             </div>
             <p className="text-sm text-gray-700 leading-relaxed">{item.aiSuggestion || 'No AI suggestion available'}</p>
             {item.recommendedDiscount && (

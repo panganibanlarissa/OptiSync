@@ -326,7 +326,7 @@ function DeleteConfirmationModal({
         </div>
         <h3 className="text-sm sm:text-lg font-bold text-gray-900 mb-1 sm:mb-2">Delete Product?</h3>
         <p className="text-[10px] sm:text-sm text-gray-500 mb-4 sm:mb-6">
-          Are you sure you want to delete <span className="font-semibold text-gray-800">&quot;{productName}&quot;</span>? This product will move to Archive List and can be unarchived.
+          Are you sure you want to delete <span className="font-semibold text-gray-800">&quot;{productName}&quot;</span>? This product will be permanently removed from the Inventory.
         </p>
         <div className="flex gap-2 sm:gap-3">
           <button

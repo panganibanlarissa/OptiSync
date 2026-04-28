@@ -54,6 +54,20 @@ interface MLForecastingState {
   mlServiceChecked: boolean;
 }
 
+interface CachedMLData {
+  timestamp: number;
+  usingML: boolean;
+  forecastData: ForecastDataPoint[];
+  recommendations: Recommendation[];
+  deadstockSuggestions: Array<{ productId: string; suggestion: DeadstockAISuggestion }>;
+  mlServiceAvailable: boolean;
+  version: string;
+}
+
+const CACHE_KEY = 'ml_forecast_cache';
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes cache
+const CACHE_VERSION = '1.0';
+
 // Helper to safely convert Firestore timestamp to ISO string
 const formatCreatedAt = (createdAt: any): string | null => {
   if (!createdAt) return null;
@@ -114,6 +128,65 @@ function generateHistoryOnlyData(transactions: any[]): ForecastDataPoint[] {
   return result;
 }
 
+// Save ML data to cache
+function saveToCache(data: {
+  usingML: boolean;
+  forecastData: ForecastDataPoint[];
+  recommendations: Recommendation[];
+  deadstockSuggestions: Map<string, DeadstockAISuggestion>;
+  mlServiceAvailable: boolean;
+}) {
+  try {
+    const cacheData: CachedMLData = {
+      timestamp: Date.now(),
+      usingML: data.usingML,
+      forecastData: data.forecastData,
+      recommendations: data.recommendations,
+      deadstockSuggestions: Array.from(data.deadstockSuggestions.entries()).map(([productId, suggestion]) => ({
+        productId,
+        suggestion
+      })),
+      mlServiceAvailable: data.mlServiceAvailable,
+      version: CACHE_VERSION
+    };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    console.log('ML data cached successfully');
+  } catch (error) {
+    console.error('Failed to cache ML data:', error);
+  }
+}
+
+// Load ML data from cache
+function loadFromCache(): CachedMLData | null {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (!cached) return null;
+    
+    const data: CachedMLData = JSON.parse(cached);
+    
+    // Check if cache is expired
+    if (Date.now() - data.timestamp > CACHE_DURATION) {
+      console.log('ML cache expired');
+      return null;
+    }
+    
+    // Check version compatibility
+    if (data.version !== CACHE_VERSION) {
+      console.log('ML cache version mismatch');
+      return null;
+    }
+    
+    console.log('ML cache hit', {
+      age: Math.round((Date.now() - data.timestamp) / 1000 / 60),
+      minutes: 'minutes ago'
+    });
+    return data;
+  } catch (error) {
+    console.error('Failed to load ML cache:', error);
+    return null;
+  }
+}
+
 export function useMLForecasting() {
   const { products, transactions } = useFirebase();
   const [state, setState] = useState<MLForecastingState>({
@@ -129,62 +202,73 @@ export function useMLForecasting() {
   
   const loadingRef = useRef(false);
   const loadedRef = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const initialLoadDoneRef = useRef(false);
+
+  // Load cached data immediately on mount
+  useEffect(() => {
+    const cachedData = loadFromCache();
+    if (cachedData) {
+      console.log('Loading ML data from cache for instant display');
+      setState({
+        loading: false,
+        usingML: cachedData.usingML,
+        forecastData: cachedData.forecastData,
+        recommendations: cachedData.recommendations,
+        deadstockSuggestions: new Map(cachedData.deadstockSuggestions.map(item => [item.productId, item.suggestion])),
+        dataLoaded: true,
+        mlServiceAvailable: cachedData.mlServiceAvailable,
+        mlServiceChecked: true,
+      });
+      loadedRef.current = true;
+      initialLoadDoneRef.current = true;
+    }
+  }, []);
 
   const loadForecasts = useCallback(async () => {
     // Prevent multiple simultaneous loads
-    if (loadingRef.current || loadedRef.current) {
-      console.log('Skipping forecast load - already loading or loaded');
+    if (loadingRef.current) {
+      console.log('Already loading forecasts, skipping');
       return;
     }
 
-    // Don't load if no products
-    if (!products.length) {
-      console.log('No products available, setting fallback data');
-      setState(prev => ({ 
-        ...prev, 
-        loading: false, 
-        dataLoaded: true,
-        mlServiceChecked: true,
-        mlServiceAvailable: false,
-        usingML: false,
-        forecastData: generateHistoryOnlyData(transactions),
-      }));
-      return;
-    }
-
-    // Cancel any ongoing request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    // If we already loaded from cache, still refresh in background
+    const shouldRefresh = initialLoadDoneRef.current;
     
-    abortControllerRef.current = new AbortController();
     loadingRef.current = true;
     
-    // Set a timeout to prevent infinite loading (5 seconds max)
+    // Set a timeout to prevent infinite loading (8 seconds max for background refresh)
     const timeoutId = setTimeout(() => {
-      if (loadingRef.current) {
-        console.log('ML Forecasting timeout - showing fallback data');
+      if (loadingRef.current && !loadedRef.current) {
+        console.log('ML Forecasting timeout - using fallback');
+        const fallbackData = {
+          usingML: false,
+          forecastData: generateHistoryOnlyData(transactions),
+          recommendations: [],
+          deadstockSuggestions: new Map(),
+          mlServiceAvailable: false,
+        };
+        
         setState(prev => ({
           ...prev,
           loading: false,
           dataLoaded: true,
           mlServiceChecked: true,
-          mlServiceAvailable: false,
-          usingML: false,
-          forecastData: generateHistoryOnlyData(transactions),
-          recommendations: [],
-          deadstockSuggestions: new Map(),
+          ...fallbackData,
         }));
+        
+        if (!initialLoadDoneRef.current) {
+          saveToCache(fallbackData);
+        }
+        
         loadingRef.current = false;
         loadedRef.current = true;
       }
-    }, 5000);
+    }, 8000);
 
     try {
-      console.log('Starting ML forecast load...');
+      console.log(shouldRefresh ? 'Refreshing ML data in background...' : 'Loading ML forecasts...');
       
-      // Prepare data for API with properly formatted createdAt
+      // Prepare data for API
       const productData: ProductData[] = products.map(p => ({
         id: p.id,
         sku: p.sku,
@@ -217,9 +301,8 @@ export function useMLForecasting() {
       let deadstockSuggestions = new Map<string, DeadstockAISuggestion>();
       let usingML = false;
 
-      // Quick health check first (with short timeout)
+      // Quick health check with short timeout
       try {
-        console.log('Checking ML service health...');
         const healthCheckPromise = mlApiClient.healthCheck();
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Health check timeout')), 3000)
@@ -229,18 +312,10 @@ export function useMLForecasting() {
         
         if (healthCheck && healthCheck.status === 'healthy') {
           mlServiceAvailable = true;
-          console.log('✅ Python ML Service is available, using Prophet/Scikit-learn');
+          console.log('✅ ML Service available');
           
           try {
-            console.log('Requesting forecast from ML service...');
             const result = await mlApiClient.generateForecast(productData, transactionData);
-            
-            console.log('🔍 ML API Response:', {
-              usingML: result.usingML,
-              dataPoints: result.dataPoints,
-              recommendationsCount: result.recommendations?.length || 0,
-              deadstockSuggestionsCount: result.deadstockSuggestions?.length || 0
-            });
             
             usingML = result.usingML || false;
             
@@ -264,7 +339,6 @@ export function useMLForecasting() {
             }));
             
             if (result.deadstockSuggestions && Array.isArray(result.deadstockSuggestions)) {
-              console.log('📝 Processing Prophet-enhanced deadstock suggestions:', result.deadstockSuggestions.length);
               result.deadstockSuggestions.forEach((suggestion: any) => {
                 deadstockSuggestions.set(suggestion.productId, {
                   productId: suggestion.productId,
@@ -277,104 +351,108 @@ export function useMLForecasting() {
                     categoryUrgency: 1.0,
                     velocityFactor: 0,
                     finalDiscount: 0,
-                    ml_adjustment: 0,
-                    prophet_confidence: 'low',
-                    predicted_sale_probability: 0,
-                    expected_sales_next_30d: 0,
-                    trend_description: 'No ML data'
                   }
                 });
               });
             }
           } catch (apiError) {
-            console.log('❌ ML API forecast error:', apiError);
-            mlServiceAvailable = false;
-            usingML = false;
+            console.log('ML API error:', apiError);
             forecastData = generateHistoryOnlyData(transactions);
           }
         } else {
-          throw new Error('ML service not available');
+          forecastData = generateHistoryOnlyData(transactions);
         }
       } catch (healthError) {
-        console.log('❌ Python ML Service unavailable. AI features disabled.');
-        mlServiceAvailable = false;
-        usingML = false;
+        console.log('ML Service unavailable');
         forecastData = generateHistoryOnlyData(transactions);
-        recommendations = [];
-        deadstockSuggestions = new Map();
       }
 
-      setState({
-        loading: false,
+      const newState = {
         usingML,
         forecastData,
         recommendations,
         deadstockSuggestions,
-        dataLoaded: true,
         mlServiceAvailable,
+      };
+
+      // Update state
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        dataLoaded: true,
         mlServiceChecked: true,
-      });
+        ...newState,
+      }));
 
+      // Save to cache for future fast loads
+      saveToCache(newState);
+      
       loadedRef.current = true;
+      initialLoadDoneRef.current = true;
 
-      console.group('===== DEMAND FORECASTING AI ANALYSIS =====');
-      console.log('ML Service Source:', mlServiceAvailable ? 'Python (Prophet/SK)' : 'UNAVAILABLE - AI Disabled');
-      console.log('Using ML:', usingML);
-      console.log('Recommendations:', recommendations.length);
-      console.log('Deadstock AI Suggestions:', deadstockSuggestions.size);
-      console.groupEnd();
+      console.log('ML data loaded successfully', {
+        usingML,
+        recommendationsCount: recommendations.length,
+        deadstockCount: deadstockSuggestions.size,
+      });
 
     } catch (error) {
       console.error('Error loading forecasts:', error);
       
-      setState({
-        loading: false,
+      const fallbackData = {
         usingML: false,
         forecastData: generateHistoryOnlyData(transactions),
         recommendations: [],
         deadstockSuggestions: new Map(),
-        dataLoaded: true,
         mlServiceAvailable: false,
+      };
+      
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        dataLoaded: true,
         mlServiceChecked: true,
-      });
+        ...fallbackData,
+      }));
+      
+      if (!initialLoadDoneRef.current) {
+        saveToCache(fallbackData);
+      }
+      
       loadedRef.current = true;
+      initialLoadDoneRef.current = true;
     } finally {
       clearTimeout(timeoutId);
       loadingRef.current = false;
-      abortControllerRef.current = null;
     }
   }, [products, transactions]);
 
-  // Reset loaded state when products/transactions change significantly
+  // Load forecasts when products/transactions are available, but only if no cached data
   useEffect(() => {
-    // Reset flags when data changes significantly
-    const resetTimer = setTimeout(() => {
-      loadedRef.current = false;
-      loadingRef.current = false;
-    }, 500);
-    
-    return () => clearTimeout(resetTimer);
-  }, [products.length, transactions.length]);
+    if (!initialLoadDoneRef.current && !loadedRef.current && !loadingRef.current) {
+      // Small delay to allow cache to load first
+      const timer = setTimeout(() => {
+        if (!initialLoadDoneRef.current && products.length > 0) {
+          loadForecasts();
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [products, transactions, loadForecasts]);
 
+  // Refresh forecasts in background periodically (every 30 minutes)
   useEffect(() => {
-    // Small delay to allow products/transactions to load first
-    const loadTimer = setTimeout(() => {
-      if (!loadedRef.current && !loadingRef.current) {
+    if (!initialLoadDoneRef.current) return;
+    
+    const interval = setInterval(() => {
+      if (!loadingRef.current) {
+        console.log('Background refresh of ML data...');
         loadForecasts();
       }
-    }, 200);
+    }, CACHE_DURATION);
     
-    return () => clearTimeout(loadTimer);
+    return () => clearInterval(interval);
   }, [loadForecasts]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
 
   return state;
 }
