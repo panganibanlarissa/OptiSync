@@ -519,7 +519,7 @@ export default function AdminDashboard() {
                 className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
               >
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                AI-Powered Forecasts Active - Demand predictions using Prophet ML model
+                AI-Powered Forecasts Active - Demand predictions and Deadstock Suggestion using Prophet ML model
               </motion.div>
             )}
 
@@ -529,7 +529,7 @@ export default function AdminDashboard() {
                 className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700 flex items-center gap-2"
               >
                 <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                Prophet Unavailable - AI features disabled. Showing actual sales only.
+                Prophet Unavailable - AI features disabled.
               </motion.div>
             )}
 

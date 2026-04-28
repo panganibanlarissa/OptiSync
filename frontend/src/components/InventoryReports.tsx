@@ -56,7 +56,7 @@ export default function InventoryReports({
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
 }) {
-  const { updateProduct, transactions } = useFirebase();
+  const { updateProduct, transactions, deleteProduct } = useFirebase();
   const { showNotification, showToastOnly } = useNotification();
 
   const resetFilters = () => {
@@ -93,6 +93,7 @@ export default function InventoryReports({
   const [showLocalScanner, setShowLocalScanner] = useState(false);
   const [localScannerMode, setLocalScannerMode] = useState<"search" | "adjust">("search");
   const [pendingArchive, setPendingArchive] = useState<null | { id: string; archived: boolean; name?: string }>(null);
+  
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
 
   // Helper function to calculate days since last sale for a product
@@ -284,6 +285,17 @@ export default function InventoryReports({
     });
   };
 
+  // Handle permanent product deletion
+  const handleDeleteProduct = async (id: string) => {
+    try {
+      await deleteProduct(id);
+      showToastOnly("Product permanently deleted", "success");
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      showNotification("Failed to delete product", "error");
+    }
+  };
+
   const handleSaveProduct = async (formData: ProductFormData) => {
     try {
       if (adjustingProduct && onProductAdjust) {
@@ -332,15 +344,6 @@ export default function InventoryReports({
     } catch (error) {
       console.error('Error saving product:', error);
       showNotification('Failed to save product', 'error');
-    }
-  };
-
-  const handleDeleteProduct = (id: string) => {
-    if (viewingProduct?.id === id) {
-      setViewingProduct(null);
-    }
-    if (onProductDelete) {
-      onProductDelete(id);
     }
   };
 
@@ -615,614 +618,613 @@ export default function InventoryReports({
   }, [products, transactions]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
-    >
-      {/* Header - UPDATED with gradient background to match Activity Logs */}
-      <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="p-2 bg-[#0B3C8A] rounded-lg shadow-md">
-              <BarChart3 className="text-white" size={18} />
+    <>
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
+      >
+        {/* Header */}
+        <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-2 bg-[#0B3C8A] rounded-lg shadow-md">
+                <BarChart3 className="text-white" size={18} />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-lg font-bold text-gray-800 leading-tight">
+                  Inventory
+                </h2>
+                <p className="text-[9px] sm:text-[11px] text-gray-500">
+                  Browse and manage inventory items.
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-sm sm:text-lg font-bold text-gray-800 leading-tight">
-                Inventory
-              </h2>
-              <p className="text-[9px] sm:text-[11px] text-gray-500">
-                Browse and manage inventory items.
+
+            <div className="flex flex-row flex-wrap items-center gap-1.5 sm:gap-2">
+              <button
+                onClick={() => {
+                  if (onOpenScanner) {
+                    onOpenScanner();
+                    return;
+                  }
+                  setLocalScannerMode("adjust");
+                  setShowLocalScanner(true);
+                }}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-200 whitespace-nowrap"
+                title="Scan QR Code to add stock"
+              >
+                <QrCode size={14} />
+                <span className="hidden sm:inline">Scan QR</span>
+                <span className="sm:hidden">Scan</span>
+              </button>
+              
+              <button
+                onClick={() => setAddingProduct({
+                  sku: "",
+                  name: "",
+                  category: "",
+                  specifications: "",
+                  baseCost: 0,
+                  markupPrice: 0,
+                  supplierInfo: "",
+                  stock: 0,
+                  lastMovedDaysAgo: 0,
+                  imageColor: "bg-slate-100",
+                  image: null,
+                  leadTimeDays: 0,
+                  reorderPoint: 0,
+                })}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-1 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
+              >
+                <span className="text-lg font-bold mr-1">+</span>
+                <span className="hidden sm:inline">Add New Product</span>
+                <span className="sm:hidden">Add</span>
+              </button>
+
+              {userRole === 'admin' && (
+                <>
+                  <button
+                    onClick={() => setShowArchiveList(true)}
+                    className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-200 whitespace-nowrap"
+                  >
+                    Archive List
+                  </button>
+
+                  <button
+                    onClick={exportToPDF}
+                    disabled={filteredProducts.length === 0}
+                    className="flex items-center justify-center gap-1.5 sm:gap-2 border bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
+                  >
+                    <FileText size={14} />
+                    <span className="hidden sm:inline"> Download PDF</span>
+                    <span className="sm:hidden">PDF</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Search and Filters Section */}
+        <div className="shrink-0 px-3 sm:px-5 pt-3 sm:pt-4 bg-slate-50 border-b border-gray-100">
+          <div className="relative mb-3">
+            <div className="flex items-stretch">
+              <div className="relative flex-grow">
+                <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                <input
+                  type="text"
+                  placeholder="Search SKU or Item..."
+                  value={effectiveSearchQuery}
+                  onChange={(e) => {
+                    if (setSearchQuery) setSearchQuery(e.target.value);
+                    else handleFilterChange("searchQuery", e.target.value);
+                  }}
+                  className="w-full pl-8 sm:pl-9 pr-20 sm:pr-24 py-1.5 sm:py-2 rounded-l-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400"
+                />
+                {effectiveSearchQuery && (
+                  <button
+                    onClick={() => {
+                      if (setSearchQuery) setSearchQuery("");
+                      else handleFilterChange("searchQuery", "");
+                    }}
+                    className="absolute right-12 sm:right-14 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setLocalScannerMode("search");
+                    setShowLocalScanner(true);
+                  }}
+                  className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0B3C8A] transition-colors p-1"
+                  title="Scan QR code to search product"
+                >
+                  <QrCode size={14} />
+                </button>
+              </div>
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 border border-l-0 border-gray-300 rounded-r-md text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                  showFilters 
+                    ? "bg-[#0B3C8A] text-white border-[#0B3C8A]" 
+                    : "bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <Filter size={14} />
+                <span>Filters</span>
+                <ChevronDown
+                  size={12}
+                  className={`transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-3 pb-3"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div>
+                  <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                    Category
+                  </label>
+                  <select
+                    value={filters.category}
+                    onChange={(e) => handleFilterChange("category", e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                    Stock Status
+                  </label>
+                  <select
+                    value={filters.stockStatus}
+                    onChange={(e) => handleFilterChange("stockStatus", e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="healthy">Healthy Stock</option>
+                    <option value="low">Low Stock</option>
+                    <option value="out">Out of Stock</option>
+                    <option value="deadstock">Deadstock</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={filters.dateRange.startDate}
+                    onChange={(e) =>
+                      handleFilterChange("dateRange", {
+                        ...filters.dateRange,
+                        startDate: e.target.value,
+                      })
+                    }
+                    onKeyDown={handleDateKeyDown}
+                    className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={filters.dateRange.endDate}
+                    onChange={(e) =>
+                      handleFilterChange("dateRange", {
+                        ...filters.dateRange,
+                        endDate: e.target.value,
+                      })
+                    }
+                    onKeyDown={handleDateKeyDown}
+                    className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    onClick={resetFilters}
+                    className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Results Summary and Table */}
+        <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Total Products
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
+                {filteredProducts.length}
+              </p>
+            </div>
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Total Units
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
+                {filteredProducts.reduce((sum, p) => sum + p.stock, 0)}
+              </p>
+            </div>
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Inventory Value
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
+                ₱
+                {(
+                  filteredProducts.reduce((sum, p) => sum + p.markupPrice * p.stock, 0) / 1000
+                ).toFixed(0)}
+                K
+              </p>
+            </div>
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Low Stock Items
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-orange-600 mt-1">
+                {filteredProducts.filter(
+                  (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
+                ).length}
+              </p>
+            </div>
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Deadstock
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-600 mt-1">
+                {deadstockCount}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-row flex-wrap items-center gap-1.5 sm:gap-2">
-            <button
-              onClick={() => {
-                if (onOpenScanner) {
-                  onOpenScanner();
-                  return;
-                }
-                setLocalScannerMode("adjust");
-                setShowLocalScanner(true);
-              }}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-200 whitespace-nowrap"
-              title="Scan QR Code to add stock"
-            >
-              <QrCode size={14} />
-              <span className="hidden sm:inline">Scan QR</span>
-              <span className="sm:hidden">Scan</span>
-            </button>
-            
-            <button
-              onClick={() => setAddingProduct({
-                sku: "",
-                name: "",
-                category: "",
-                specifications: "",
-                baseCost: 0,
-                markupPrice: 0,
-                supplierInfo: "",
-                stock: 0,
-                lastMovedDaysAgo: 0,
-                imageColor: "bg-slate-100",
-                image: null,
-                leadTimeDays: 0,
-                reorderPoint: 0,
-              })}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-1 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
-            >
-              <span className="text-lg font-bold mr-1">+</span>
-              <span className="hidden sm:inline">Add New Product</span>
-              <span className="sm:hidden">Add</span>
-            </button>
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            {filteredProducts.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px] sm:text-xs">
+                  <thead className="bg-slate-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
+                        SKU
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
+                        Product Name
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
+                        Category
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Sold
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Damaged
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Total Stock
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Status
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredProducts.map((product) => {
+                      const statuses = getProductStatus(product);
+                      const statusColor = getStatusColor(statuses);
+                      const statusText = statuses.join(" | ");
+                      const isArchived = (product as any).archived === true;
+                      const isDimmed = isArchived || product.stock === 0;
 
-            {userRole === 'admin' && (
-              <>
-                <button
-                  onClick={() => setShowArchiveList(true)}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:bg-blue-200 whitespace-nowrap"
-                >
-                  Archive List
-                </button>
-
-                <button
-                  onClick={exportToPDF}
-                  disabled={filteredProducts.length === 0}
-                  className="flex items-center justify-center gap-1.5 sm:gap-2 border bg-[#0B3C8A] hover:bg-[#082F6E] text-white px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors hover:shadow-sm whitespace-nowrap"
-                >
-                  <FileText size={14} />
-                  <span className="hidden sm:inline"> Download PDF</span>
-                  <span className="sm:hidden">PDF</span>
-                </button>
-
-              </>
+                      return (
+                        <tr
+                          key={product.id}
+                          className={`transition-colors ${isDimmed ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
+                        >
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 font-mono text-gray-600">
+                            {product.sku}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-800 max-w-xs truncate">
+                            {product.name}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-gray-600">
+                            {product.category}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
+                            {(product as any).totalSold || 0}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
+                            {(product as any).damageExchanged || 0}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
+                            {product.stock}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
+                            <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
+                              {statusText}
+                            </span>
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                title="View Details"
+                                onClick={() => setViewingProduct(product)}
+                                className="p-1.5 hover:bg-blue-100 rounded transition-colors text-blue-600"
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <button
+                                title="Adjust Stock"
+                                onClick={() => handleAdjustProduct(product)}
+                                className="p-1.5 hover:bg-purple-100 rounded transition-colors text-purple-600"
+                              >
+                                <ArrowRightLeft size={14} />
+                              </button>
+                              <button
+                                title="Edit"
+                                onClick={() => handleEditProduct(product)}
+                                className="p-1.5 hover:bg-orange-100 rounded transition-colors text-orange-600"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                title="QR Code"
+                                onClick={() => setSelectedQRProduct({ id: product.id, sku: product.sku, name: product.name, price: product.markupPrice })}
+                                className="p-1.5 hover:bg-green-100 rounded transition-colors text-green-600"
+                              >
+                                <QrCode size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-8 text-center">
+                <p className="text-gray-500 text-xs sm:text-sm">
+                  No products match your filters.
+                </p>
+              </div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Search and Filters Section */}
-      <div className="shrink-0 px-3 sm:px-5 pt-3 sm:pt-4 bg-slate-50 border-b border-gray-100">
-        <div className="relative mb-3">
-          <div className="flex items-stretch">
-            <div className="relative flex-grow">
-              <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-              <input
-                type="text"
-                placeholder="Search SKU or Item..."
-                value={effectiveSearchQuery}
-                onChange={(e) => {
-                  if (setSearchQuery) setSearchQuery(e.target.value);
-                  else handleFilterChange("searchQuery", e.target.value);
-                }}
-                className="w-full pl-8 sm:pl-9 pr-20 sm:pr-24 py-1.5 sm:py-2 rounded-l-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all text-gray-700 placeholder-gray-400"
-              />
-              {effectiveSearchQuery && (
-                <button
-                  onClick={() => {
-                    if (setSearchQuery) setSearchQuery("");
-                    else handleFilterChange("searchQuery", "");
-                  }}
-                  className="absolute right-12 sm:right-14 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors p-1"
-                  title="Clear search"
-                >
-                  <X size={14} />
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  setLocalScannerMode("search");
-                  setShowLocalScanner(true);
-                }}
-                className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#0B3C8A] transition-colors p-1"
-                title="Scan QR code to search product"
-              >
-                <QrCode size={14} />
-              </button>
-            </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 border border-l-0 border-gray-300 rounded-r-md text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
-                showFilters 
-                  ? "bg-[#0B3C8A] text-white border-[#0B3C8A]" 
-                  : "bg-white text-gray-700 hover:bg-gray-50"
-              }`}
-            >
-              <Filter size={14} />
-              <span>Filters</span>
-              <ChevronDown
-                size={12}
-                className={`transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
-              />
-            </button>
-          </div>
-        </div>
-
-        {showFilters && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-3 pb-3"
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div>
-                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                  Category
-                </label>
-                <select
-                  value={filters.category}
-                  onChange={(e) => handleFilterChange("category", e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
-                >
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
+        {/* Archive List Modal */}
+        {showArchiveList && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-auto max-h-[80vh]">
+              <div className="flex justify-between items-center p-3 border-b">
+                <h3 className="font-bold text-gray-800 text-lg">Archive List</h3>
+                <button onClick={() => setShowArchiveList(false)} className="text-gray-500 px-2 py-1 hover:text-gray-700 transition-colors">Close</button>
               </div>
-
-              <div>
-                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                  Stock Status
-                </label>
-                <select
-                  value={filters.stockStatus}
-                  onChange={(e) => handleFilterChange("stockStatus", e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] transition-all"
-                >
-                  <option value="all">All Status</option>
-                  <option value="healthy">Healthy Stock</option>
-                  <option value="low">Low Stock</option>
-                  <option value="out">Out of Stock</option>
-                  <option value="deadstock">Deadstock</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.dateRange.startDate}
-                  onChange={(e) =>
-                    handleFilterChange("dateRange", {
-                      ...filters.dateRange,
-                      startDate: e.target.value,
-                    })
-                  }
-                  onKeyDown={handleDateKeyDown}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] sm:text-[11px] font-semibold text-gray-600 block mb-1.5">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.dateRange.endDate}
-                  onChange={(e) =>
-                    handleFilterChange("dateRange", {
-                      ...filters.dateRange,
-                      endDate: e.target.value,
-                    })
-                  }
-                  onKeyDown={handleDateKeyDown}
-                  className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  onClick={resetFilters}
-                  className="w-full px-2.5 py-2 text-[10px] sm:text-[11px] font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-                >
-                  Reset Filters
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Results Summary and Table */}
-      <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
-          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-              Total Products
-            </p>
-            <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
-              {filteredProducts.length}
-            </p>
-          </div>
-          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-              Total Units
-            </p>
-            <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
-              {filteredProducts.reduce((sum, p) => sum + p.stock, 0)}
-            </p>
-          </div>
-          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-              Inventory Value
-            </p>
-            <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
-              ₱
-              {(
-                filteredProducts.reduce((sum, p) => sum + p.markupPrice * p.stock, 0) / 1000
-              ).toFixed(0)}
-              K
-            </p>
-          </div>
-          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-              Low Stock Items
-            </p>
-            <p className="text-lg sm:text-2xl font-bold text-orange-600 mt-1">
-              {filteredProducts.filter(
-                (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
-              ).length}
-            </p>
-          </div>
-          <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-            <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-              Deadstock
-            </p>
-            <p className="text-lg sm:text-2xl font-bold text-gray-600 mt-1">
-              {deadstockCount}
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          {filteredProducts.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[10px] sm:text-xs">
-                <thead className="bg-slate-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
-                      SKU
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
-                      Product Name
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-left font-semibold text-gray-700">
-                      Category
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Sold
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Damaged
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Total Stock
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Status
-                    </th>
-                    <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredProducts.map((product) => {
-                    const statuses = getProductStatus(product);
-                    const statusColor = getStatusColor(statuses);
-                    const statusText = statuses.join(" | ");
-                    const isArchived = (product as any).archived === true;
-                    const isDimmed = isArchived || product.stock === 0;
-
-                    return (
-                      <tr
-                        key={product.id}
-                        className={`transition-colors ${isDimmed ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
-                      >
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 font-mono text-gray-600">
-                          {product.sku}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-800 max-w-xs truncate">
-                          {product.name}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-gray-600">
-                          {product.category}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
-                          {(product as any).totalSold || 0}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
-                          {(product as any).damageExchanged || 0}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
-                          {product.stock}
-                        </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
-                          <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
-                            {statusText}
+              <div className="p-4">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-700 border-b border-gray-200">
+                      <th className="py-2 font-semibold">SKU</th>
+                      <th className="py-2 font-semibold">Name</th>
+                      <th className="py-2 font-semibold">Category</th>
+                      <th className="py-2 font-semibold">Status</th>
+                      <th className="py-2 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.filter(p => (p as any).archived === true).map((p) => (
+                      <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="py-2 font-mono text-gray-800">{p.sku}</td>
+                        <td className="py-2 text-gray-800 font-medium">{p.name}</td>
+                        <td className="py-2 text-gray-700">{p.category}</td>
+                        <td className="py-2">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
+                            {(p as any).deleted ? 'Deleted' : 'Archived'}
                           </span>
                         </td>
-                        <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              title="View Details"
-                              onClick={() => setViewingProduct(product)}
-                              className="p-1.5 hover:bg-blue-100 rounded transition-colors text-blue-600"
-                            >
-                              <Eye size={14} />
-                            </button>
-                            <button
-                              title="Adjust Stock"
-                              onClick={() => handleAdjustProduct(product)}
-                              className="p-1.5 hover:bg-purple-100 rounded transition-colors text-purple-600"
-                            >
-                              <ArrowRightLeft size={14} />
-                            </button>
-                            <button
-                              title="Edit"
-                              onClick={() => handleEditProduct(product)}
-                              className="p-1.5 hover:bg-orange-100 rounded transition-colors text-orange-600"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button
-                              title="QR Code"
-                              onClick={() => setSelectedQRProduct({ id: product.id, sku: product.sku, name: product.name, price: product.markupPrice })}
-                              className="p-1.5 hover:bg-green-100 rounded transition-colors text-green-600"
-                            >
-                              <QrCode size={14} />
-                            </button>
+                        <td className="py-2">
+                          <div className="flex gap-2">
+                            {userRole === 'admin' ? (
+                              <button 
+                                onClick={() => setPendingArchive({ id: p.id, archived: false, name: p.name })} 
+                                className="px-3 py-1 bg-green-50 text-green-700 rounded-md text-xs font-medium hover:bg-green-100 transition-colors"
+                              >
+                                Unarchive
+                              </button>
+                            ) : (
+                              <span className="text-sm text-gray-500">N/A</span>
+                            )}
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="p-8 text-center">
-              <p className="text-gray-500 text-xs sm:text-sm">
-                No products match your filters.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Archive List Modal */}
-      {showArchiveList && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-auto max-h-[80vh]">
-            <div className="flex justify-between items-center p-3 border-b">
-              <h3 className="font-bold text-gray-800 text-lg">Archive List</h3>
-              <button onClick={() => setShowArchiveList(false)} className="text-gray-500 px-2 py-1 hover:text-gray-700 transition-colors">Close</button>
-            </div>
-            <div className="p-4">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-700 border-b border-gray-200">
-                    <th className="py-2 font-semibold">SKU</th>
-                    <th className="py-2 font-semibold">Name</th>
-                    <th className="py-2 font-semibold">Category</th>
-                    <th className="py-2 font-semibold">Status</th>
-                    <th className="py-2 font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.filter(p => (p as any).archived === true).map((p) => (
-                    <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-2 font-mono text-gray-800">{p.sku}</td>
-                      <td className="py-2 text-gray-800 font-medium">{p.name}</td>
-                      <td className="py-2 text-gray-700">{p.category}</td>
-                      <td className="py-2">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
-                          {(p as any).deleted ? 'Deleted' : 'Archived'}
-                        </span>
-                      </td>
-                      <td className="py-2">
-                        <div className="flex gap-2">
-                          {userRole === 'admin' ? (
-                            <button 
-                              onClick={() => setPendingArchive({ id: p.id, archived: false, name: p.name })} 
-                              className="px-3 py-1 bg-green-50 text-green-700 rounded-md text-xs font-medium hover:bg-green-100 transition-colors"
-                            >
-                              Unarchive
-                            </button>
-                          ) : (
-                            <span className="text-sm text-gray-500">N/A</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Archive Confirmation Modal */}
-      {pendingArchive && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
-            <h3 className="font-bold text-xl text-gray-900 mb-3">
-              {pendingArchive.archived ? "Confirm Archive" : "Confirm Unarchive"}
-            </h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Are you sure you want to {pendingArchive.archived ? "archive" : "unarchive"} "<span className="font-semibold text-gray-800">{pendingArchive.name || pendingArchive.id}</span>"?
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setPendingArchive(null)}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  if (onProductArchive) {
-                    try {
-                      await onProductArchive(pendingArchive.id, pendingArchive.archived);
-                    } catch (err) {
-                      console.error('Archive action failed', err);
-                    }
-                  }
-                  setPendingArchive(null);
-                  setShowArchiveList(false);
-                }}
-                className="px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-sm"
-              >
+        {/* Archive Confirmation Modal */}
+        {pendingArchive && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
+              <h3 className="font-bold text-xl text-gray-900 mb-3">
                 {pendingArchive.archived ? "Confirm Archive" : "Confirm Unarchive"}
-              </button>
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to {pendingArchive.archived ? "archive" : "unarchive"} "<span className="font-semibold text-gray-800">{pendingArchive.name || pendingArchive.id}</span>"?
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setPendingArchive(null)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (onProductArchive) {
+                      try {
+                        await onProductArchive(pendingArchive.id, pendingArchive.archived);
+                      } catch (err) {
+                        console.error('Archive action failed', err);
+                      }
+                    }
+                    setPendingArchive(null);
+                    setShowArchiveList(false);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-sm"
+                >
+                  {pendingArchive.archived ? "Confirm Archive" : "Confirm Unarchive"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Edit Product Modal */}
-      {editingProduct && (
-        <ProductModal
-          mode="edit"
-          product={editingProduct}
-          products={products}
-          onClose={() => setEditingProduct(null)}
-          onSave={handleSaveProduct}
-          onDelete={handleDeleteProduct}
-          onArchive={(id: string, archived?: boolean) => {
-            if (onProductArchive) onProductArchive(id, !!archived);
-          }}
-          userRole={userRole}
-        />
-      )}
+        {/* Edit Product Modal - with delete functionality */}
+        {editingProduct && (
+          <ProductModal
+            mode="edit"
+            product={editingProduct}
+            products={products}
+            onClose={() => setEditingProduct(null)}
+            onSave={handleSaveProduct}
+            onDelete={handleDeleteProduct}
+            onArchive={onProductArchive}
+            userRole={userRole}
+          />
+        )}
 
-      {/* Adjust Stock Modal */}
-      {adjustingProduct && (
-        <ProductModal
-          mode="adjust"
-          product={adjustingProduct}
-          products={products}
-          onClose={() => setAdjustingProduct(null)}
-          onSave={handleSaveProduct}
-          userRole={userRole}
-        />
-      )}
+        {/* Adjust Stock Modal */}
+        {adjustingProduct && (
+          <ProductModal
+            mode="adjust"
+            product={adjustingProduct}
+            products={products}
+            onClose={() => setAdjustingProduct(null)}
+            onSave={handleSaveProduct}
+            userRole={userRole}
+          />
+        )}
 
-      {/* Add Product Modal */}
-      {addingProduct && (
-        <ProductModal
-          mode="add"
-          product={addingProduct}
-          products={products}
-          onClose={() => setAddingProduct(null)}
-          onSave={async (data: ProductFormData) => {
-            try {
-              let addedProductId: string | undefined;
-              if (onAddProduct) {
-                const result = await onAddProduct(data);
-                if (typeof result === "string") {
-                  addedProductId = result;
+        {/* Add Product Modal */}
+        {addingProduct && (
+          <ProductModal
+            mode="add"
+            product={addingProduct}
+            products={products}
+            onClose={() => setAddingProduct(null)}
+            onSave={async (data: ProductFormData) => {
+              try {
+                let addedProductId: string | undefined;
+                if (onAddProduct) {
+                  const result = await onAddProduct(data);
+                  if (typeof result === "string") {
+                    addedProductId = result;
+                  }
+                } else {
+                  await fetch('/api/products', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                  });
                 }
-              } else {
-                await fetch('/api/products', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(data),
-                });
+
+                const fallbackProduct = products.find(
+                  (p) => p.sku === data.sku || (p.name === data.name && p.category === data.category)
+                );
+                const resolvedProductId = addedProductId || fallbackProduct?.id;
+
+                if (resolvedProductId) {
+                  setSelectedQRProduct({
+                    id: resolvedProductId,
+                    sku: data.sku,
+                    name: data.name,
+                    price: data.markupPrice,
+                  });
+                }
+              } catch (err) {
+                console.error('Failed to add product from reports modal', err);
+              } finally {
+                setAddingProduct(null);
               }
+            }}
+            userRole={userRole}
+          />
+        )}
 
-              const fallbackProduct = products.find(
-                (p) => p.sku === data.sku || (p.name === data.name && p.category === data.category)
-              );
-              const resolvedProductId = addedProductId || fallbackProduct?.id;
-
-              if (resolvedProductId) {
-                setSelectedQRProduct({
-                  id: resolvedProductId,
-                  sku: data.sku,
-                  name: data.name,
-                  price: data.markupPrice,
-                });
+        {/* Local QR Scanner */}
+        {showLocalScanner && (
+          <QRScannerModal
+            onClose={() => setShowLocalScanner(false)}
+            products={products.map(p => ({ id: p.id, sku: p.sku, name: p.name, stock: p.stock }))}
+            onProductFound={(id: string) => {
+              setShowLocalScanner(false);
+              const prod = products.find(p => p.id === id);
+              if (!prod) return;
+              if (localScannerMode === "search") {
+                if (setSearchQuery) setSearchQuery(prod.id);
+                else handleFilterChange("searchQuery", prod.id);
+                return;
               }
-            } catch (err) {
-              console.error('Failed to add product from reports modal', err);
-            } finally {
-              setAddingProduct(null);
-            }
-          }}
-          userRole={userRole}
-        />
-      )}
+              if (onProductAdjust) {
+                onProductAdjust(prod.id, prod.stock + 1, "Received via QR Scan");
+              }
+            }}
+            mode={localScannerMode}
+          />
+        )}
 
-      {/* Local QR Scanner */}
-      {showLocalScanner && (
-        <QRScannerModal
-          onClose={() => setShowLocalScanner(false)}
-          products={products.map(p => ({ id: p.id, sku: p.sku, name: p.name, stock: p.stock }))}
-          onProductFound={(id: string) => {
-            setShowLocalScanner(false);
-            const prod = products.find(p => p.id === id);
-            if (!prod) return;
-            if (localScannerMode === "search") {
-              if (setSearchQuery) setSearchQuery(prod.id);
-              else handleFilterChange("searchQuery", prod.id);
-              return;
-            }
-            if (onProductAdjust) {
-              onProductAdjust(prod.id, prod.stock + 1, "Received via QR Scan");
-            }
-          }}
-          mode={localScannerMode}
-        />
-      )}
+        {/* QR Code Modal */}
+        {selectedQRProduct && (
+          <QRCodeModal
+            productId={selectedQRProduct.id}
+            productSku={selectedQRProduct.sku}
+            productName={selectedQRProduct.name}
+            productPrice={selectedQRProduct.price}
+            onClose={() => setSelectedQRProduct(null)}
+          />
+        )}
 
-      {/* QR Code Modal */}
-      {selectedQRProduct && (
-        <QRCodeModal
-          productId={selectedQRProduct.id}
-          productSku={selectedQRProduct.sku}
-          productName={selectedQRProduct.name}
-          productPrice={selectedQRProduct.price}
-          onClose={() => setSelectedQRProduct(null)}
-        />
-      )}
-
-      {/* Product Details Modal */}
-      {viewingProduct && (
-        <ProductDetailsModal
-          product={viewingProduct}
-          onClose={() => setViewingProduct(null)}
-        />
-      )}
-    </motion.div>
+        {/* Product Details Modal */}
+        {viewingProduct && (
+          <ProductDetailsModal
+            product={viewingProduct}
+            onClose={() => setViewingProduct(null)}
+          />
+        )}
+      </motion.div>
+    </>
   );
 }
