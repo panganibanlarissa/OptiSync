@@ -1,5 +1,5 @@
 // src/hooks/useMLForecasting.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { mlApiClient, ProductData, TransactionData, DeadstockSuggestion } from '@/services/mlApiClient';
 
@@ -35,7 +35,6 @@ export interface DeadstockAISuggestion {
     categoryUrgency: number;
     velocityFactor: number;
     finalDiscount: number;
-    // NEW ML fields
     ml_adjustment?: number;
     prophet_confidence?: string;
     predicted_sale_probability?: number;
@@ -52,6 +51,7 @@ interface MLForecastingState {
   deadstockSuggestions: Map<string, DeadstockAISuggestion>;
   dataLoaded: boolean;
   mlServiceAvailable: boolean;
+  mlServiceChecked: boolean;
 }
 
 // Helper to safely convert Firestore timestamp to ISO string
@@ -124,17 +124,66 @@ export function useMLForecasting() {
     deadstockSuggestions: new Map(),
     dataLoaded: false,
     mlServiceAvailable: false,
+    mlServiceChecked: false,
   });
+  
+  const loadingRef = useRef(false);
+  const loadedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadForecasts = useCallback(async () => {
-    if (!products.length) {
-      setState(prev => ({ ...prev, loading: false, dataLoaded: true }));
+    // Prevent multiple simultaneous loads
+    if (loadingRef.current || loadedRef.current) {
+      console.log('Skipping forecast load - already loading or loaded');
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true }));
+    // Don't load if no products
+    if (!products.length) {
+      console.log('No products available, setting fallback data');
+      setState(prev => ({ 
+        ...prev, 
+        loading: false, 
+        dataLoaded: true,
+        mlServiceChecked: true,
+        mlServiceAvailable: false,
+        usingML: false,
+        forecastData: generateHistoryOnlyData(transactions),
+      }));
+      return;
+    }
+
+    // Cancel any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    abortControllerRef.current = new AbortController();
+    loadingRef.current = true;
+    
+    // Set a timeout to prevent infinite loading (5 seconds max)
+    const timeoutId = setTimeout(() => {
+      if (loadingRef.current) {
+        console.log('ML Forecasting timeout - showing fallback data');
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          dataLoaded: true,
+          mlServiceChecked: true,
+          mlServiceAvailable: false,
+          usingML: false,
+          forecastData: generateHistoryOnlyData(transactions),
+          recommendations: [],
+          deadstockSuggestions: new Map(),
+        }));
+        loadingRef.current = false;
+        loadedRef.current = true;
+      }
+    }, 5000);
 
     try {
+      console.log('Starting ML forecast load...');
+      
       // Prepare data for API with properly formatted createdAt
       const productData: ProductData[] = products.map(p => ({
         id: p.id,
@@ -168,70 +217,85 @@ export function useMLForecasting() {
       let deadstockSuggestions = new Map<string, DeadstockAISuggestion>();
       let usingML = false;
 
+      // Quick health check first (with short timeout)
       try {
-        const healthCheck = await mlApiClient.healthCheck();
+        console.log('Checking ML service health...');
+        const healthCheckPromise = mlApiClient.healthCheck();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 3000)
+        );
+        
+        const healthCheck = await Promise.race([healthCheckPromise, timeoutPromise]) as any;
         
         if (healthCheck && healthCheck.status === 'healthy') {
           mlServiceAvailable = true;
           console.log('✅ Python ML Service is available, using Prophet/Scikit-learn');
           
-          const result = await mlApiClient.generateForecast(productData, transactionData);
-          
-          console.log('🔍 ML API Response:', {
-            usingML: result.usingML,
-            dataPoints: result.dataPoints,
-            recommendationsCount: result.recommendations?.length || 0,
-            deadstockSuggestionsCount: result.deadstockSuggestions?.length || 0
-          });
-          
-          usingML = result.usingML || false;
-          
-          if (usingML) {
-            forecastData = result.forecastData || [];
-          } else {
-            forecastData = generateHistoryOnlyData(transactions);
-          }
-          
-          recommendations = (result.recommendations || []).map((rec: any) => ({
-            productId: rec.productId || '',
-            productName: rec.productName || '',
-            currentStock: typeof rec.currentStock === 'number' ? rec.currentStock : 0,
-            predictedDemand30d: typeof rec.predictedDemand30d === 'number' ? rec.predictedDemand30d : 0,
-            predictedDemand60d: typeof rec.predictedDemand60d === 'number' ? rec.predictedDemand60d : 0,
-            predictedDemand90d: typeof rec.predictedDemand90d === 'number' ? rec.predictedDemand90d : 0,
-            recommendedOrder: typeof rec.recommendedOrder === 'number' ? rec.recommendedOrder : 0,
-            daysUntilOut: typeof rec.daysUntilOut === 'number' ? rec.daysUntilOut : 0,
-            trend: rec.trend || 'stable',
-            confidence: rec.confidence || 'low'
-          }));
-          
-          if (result.deadstockSuggestions && Array.isArray(result.deadstockSuggestions)) {
-            console.log('📝 Processing Prophet-enhanced deadstock suggestions:', result.deadstockSuggestions);
-            result.deadstockSuggestions.forEach((suggestion: any) => {
-              deadstockSuggestions.set(suggestion.productId, {
-                productId: suggestion.productId,
-                suggestion: suggestion.suggestion,
-                suggestionType: suggestion.suggestionType || 'info',
-                recommendedDiscount: suggestion.recommendedDiscount || 0,
-                mlFactors: suggestion.mlFactors || {
-                  daysFactor: 0,
-                  capitalFactor: 0,
-                  categoryUrgency: 1.0,
-                  velocityFactor: 0,
-                  finalDiscount: 0,
-                  ml_adjustment: 0,
-                  prophet_confidence: 'low',
-                  predicted_sale_probability: 0,
-                  expected_sales_next_30d: 0,
-                  trend_description: 'No ML data'
-                }
-              });
+          try {
+            console.log('Requesting forecast from ML service...');
+            const result = await mlApiClient.generateForecast(productData, transactionData);
+            
+            console.log('🔍 ML API Response:', {
+              usingML: result.usingML,
+              dataPoints: result.dataPoints,
+              recommendationsCount: result.recommendations?.length || 0,
+              deadstockSuggestionsCount: result.deadstockSuggestions?.length || 0
             });
+            
+            usingML = result.usingML || false;
+            
+            if (usingML) {
+              forecastData = result.forecastData || [];
+            } else {
+              forecastData = generateHistoryOnlyData(transactions);
+            }
+            
+            recommendations = (result.recommendations || []).map((rec: any) => ({
+              productId: rec.productId || '',
+              productName: rec.productName || '',
+              currentStock: typeof rec.currentStock === 'number' ? rec.currentStock : 0,
+              predictedDemand30d: typeof rec.predictedDemand30d === 'number' ? rec.predictedDemand30d : 0,
+              predictedDemand60d: typeof rec.predictedDemand60d === 'number' ? rec.predictedDemand60d : 0,
+              predictedDemand90d: typeof rec.predictedDemand90d === 'number' ? rec.predictedDemand90d : 0,
+              recommendedOrder: typeof rec.recommendedOrder === 'number' ? rec.recommendedOrder : 0,
+              daysUntilOut: typeof rec.daysUntilOut === 'number' ? rec.daysUntilOut : 0,
+              trend: rec.trend || 'stable',
+              confidence: rec.confidence || 'low'
+            }));
+            
+            if (result.deadstockSuggestions && Array.isArray(result.deadstockSuggestions)) {
+              console.log('📝 Processing Prophet-enhanced deadstock suggestions:', result.deadstockSuggestions.length);
+              result.deadstockSuggestions.forEach((suggestion: any) => {
+                deadstockSuggestions.set(suggestion.productId, {
+                  productId: suggestion.productId,
+                  suggestion: suggestion.suggestion,
+                  suggestionType: suggestion.suggestionType || 'info',
+                  recommendedDiscount: suggestion.recommendedDiscount || 0,
+                  mlFactors: suggestion.mlFactors || {
+                    daysFactor: 0,
+                    capitalFactor: 0,
+                    categoryUrgency: 1.0,
+                    velocityFactor: 0,
+                    finalDiscount: 0,
+                    ml_adjustment: 0,
+                    prophet_confidence: 'low',
+                    predicted_sale_probability: 0,
+                    expected_sales_next_30d: 0,
+                    trend_description: 'No ML data'
+                  }
+                });
+              });
+            }
+          } catch (apiError) {
+            console.log('❌ ML API forecast error:', apiError);
+            mlServiceAvailable = false;
+            usingML = false;
+            forecastData = generateHistoryOnlyData(transactions);
           }
         } else {
           throw new Error('ML service not available');
         }
-      } catch (apiError) {
+      } catch (healthError) {
         console.log('❌ Python ML Service unavailable. AI features disabled.');
         mlServiceAvailable = false;
         usingML = false;
@@ -248,13 +312,16 @@ export function useMLForecasting() {
         deadstockSuggestions,
         dataLoaded: true,
         mlServiceAvailable,
+        mlServiceChecked: true,
       });
+
+      loadedRef.current = true;
 
       console.group('===== DEMAND FORECASTING AI ANALYSIS =====');
       console.log('ML Service Source:', mlServiceAvailable ? 'Python (Prophet/SK)' : 'UNAVAILABLE - AI Disabled');
       console.log('Using ML:', usingML);
       console.log('Recommendations:', recommendations.length);
-      console.log('Deadstock AI Suggestions (Prophet-enhanced):', deadstockSuggestions.size);
+      console.log('Deadstock AI Suggestions:', deadstockSuggestions.size);
       console.groupEnd();
 
     } catch (error) {
@@ -268,13 +335,46 @@ export function useMLForecasting() {
         deadstockSuggestions: new Map(),
         dataLoaded: true,
         mlServiceAvailable: false,
+        mlServiceChecked: true,
       });
+      loadedRef.current = true;
+    } finally {
+      clearTimeout(timeoutId);
+      loadingRef.current = false;
+      abortControllerRef.current = null;
     }
   }, [products, transactions]);
 
+  // Reset loaded state when products/transactions change significantly
   useEffect(() => {
-    loadForecasts();
+    // Reset flags when data changes significantly
+    const resetTimer = setTimeout(() => {
+      loadedRef.current = false;
+      loadingRef.current = false;
+    }, 500);
+    
+    return () => clearTimeout(resetTimer);
+  }, [products.length, transactions.length]);
+
+  useEffect(() => {
+    // Small delay to allow products/transactions to load first
+    const loadTimer = setTimeout(() => {
+      if (!loadedRef.current && !loadingRef.current) {
+        loadForecasts();
+      }
+    }, 200);
+    
+    return () => clearTimeout(loadTimer);
   }, [loadForecasts]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   return state;
 }
