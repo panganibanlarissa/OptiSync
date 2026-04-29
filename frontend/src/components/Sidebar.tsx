@@ -50,7 +50,7 @@ export default function Sidebar({ children }: SidebarProps) {
     await logout();
   };
 
-  const displayName = appUser?.email?.split('@')[0] || "User";
+  const displayName = appUser?.name || appUser?.email?.split('@')[0] || "User";
   const displayRole = appUser?.role === "admin" ? "Administrator" : "Staff";
   const roleColorClass = appUser?.role === "admin" ? "text-purple-500" : "text-green-500";
 
