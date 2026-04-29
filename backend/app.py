@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
 import warnings
+import asyncio
 warnings.filterwarnings('ignore')
 
 # Suppress cmdstanpy and prophet warnings
@@ -102,6 +103,75 @@ class ForecastResponse(BaseModel):
     deadstockSuggestions: List[Dict[str, Any]] = []
     usingML: bool
     dataPoints: int
+
+# ==================== CACHING SYSTEM ====================
+class ForecastCache:
+    """In-memory cache for forecast results with request deduplication"""
+    def __init__(self):
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.pending_requests: Dict[str, asyncio.Event] = {}
+        self.cache_ttl = 60 * 60  # 1 hour
+    
+    def get_cache_key(self, products: List[Product], transactions: List[Transaction]) -> str:
+        """Generate a cache key based on products and transactions"""
+        products_hash = hashlib.md5(
+            json.dumps([(p.id, p.stock) for p in products], sort_keys=True).encode()
+        ).hexdigest()[:8]
+        
+        transactions_hash = hashlib.md5(
+            json.dumps([t.id for t in transactions], sort_keys=True).encode()
+        ).hexdigest()[:8]
+        
+        return f"forecast_{products_hash}_{transactions_hash}"
+    
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve cached forecast if still valid"""
+        if key in self.cache:
+            cached_data = self.cache[key]
+            age = (datetime.now(timezone.utc).timestamp() - cached_data['timestamp']) / 60
+            
+            if age < self.cache_ttl / 60:  # Not expired
+                print(f"✅ CACHE HIT: Returning cached forecast (age: {int(age)}m)")
+                return cached_data['data']
+            else:
+                print(f"⏱️ CACHE EXPIRED: Cached data is {int(age)}m old, refreshing...")
+                del self.cache[key]
+        
+        return None
+    
+    def set(self, key: str, data: Dict[str, Any]) -> None:
+        """Store forecast result in cache"""
+        self.cache[key] = {
+            'timestamp': datetime.now(timezone.utc).timestamp(),
+            'data': data
+        }
+        print(f"💾 CACHE STORED: Forecast cached for next 30 minutes")
+    
+    def is_pending(self, key: str) -> bool:
+        """Check if a forecast request is currently being processed"""
+        return key in self.pending_requests
+    
+    def get_pending_event(self, key: str) -> asyncio.Event:
+        """Get or create a pending event for request deduplication"""
+        if key not in self.pending_requests:
+            self.pending_requests[key] = asyncio.Event()
+        return self.pending_requests[key]
+    
+    def mark_pending(self, key: str) -> None:
+        """Mark a request as pending"""
+        self.get_pending_event(key).clear()
+    
+    def mark_complete(self, key: str) -> None:
+        """Mark a pending request as complete"""
+        if key in self.pending_requests:
+            self.pending_requests[key].set()
+    
+    def clear(self) -> None:
+        """Clear all cached data"""
+        self.cache.clear()
+        self.pending_requests.clear()
+
+forecast_cache = ForecastCache()
 
 # Constants
 SEASONAL_MULTIPLIERS = [1.4, 1.1, 1.3, 1.35, 1.2, 1.1, 0.85, 0.8, 0.9, 1.0, 1.2, 1.5]
@@ -793,9 +863,38 @@ async def health_check():
 async def generate_forecast(request: ForecastRequest):
     """
     Generate sales forecast and product recommendations using Prophet ML model.
-    Uses ALL historical data (March + April) with proper stockout date calculation.
+    Uses ALL historical data with proper stockout date calculation.
+    Implements caching and request deduplication for performance.
     """
     try:
+        # Check cache first
+        cache_key = forecast_cache.get_cache_key(request.products, request.transactions)
+        
+        # Try to get from cache
+        cached_result = forecast_cache.get(cache_key)
+        if cached_result:
+            return cached_result
+        
+        # Check if another request is already calculating this forecast
+        if forecast_cache.is_pending(cache_key):
+            print(f"⏳ DUPLICATE REQUEST: Waiting for ongoing forecast calculation...")
+            pending_event = forecast_cache.get_pending_event(cache_key)
+            
+            # Wait up to 60 seconds for the pending request to complete
+            try:
+                await asyncio.wait_for(asyncio.to_thread(pending_event.wait), timeout=60)
+                
+                # After pending request completes, try cache again
+                cached_result = forecast_cache.get(cache_key)
+                if cached_result:
+                    print(f"✅ Got result from pending request via cache")
+                    return cached_result
+            except asyncio.TimeoutError:
+                print(f"⚠️ Pending request timeout, proceeding with new calculation")
+        
+        # Mark this request as pending
+        forecast_cache.mark_pending(cache_key)
+        
         completed_txns = [t for t in request.transactions if t.status == 'completed']
         
         if completed_txns:
@@ -983,18 +1082,25 @@ async def generate_forecast(request: ForecastRequest):
         print(f"  Prophet Model: {'Active' if len(completed_txns) >= 10 else 'Insufficient Data'}")
         print(f"{'='*60}\n")
         
-        return {
+        result = {
             "forecastData": forecast_data,
             "recommendations": recommendations[:10],
             "deadstockSuggestions": deadstock_suggestions_for_response,
             "usingML": len(completed_txns) >= 10,
             "dataPoints": len(completed_txns)
         }
+        
+        # Store in cache before returning
+        forecast_cache.set(cache_key, result)
+        forecast_cache.mark_complete(cache_key)
+        
+        return result
             
     except Exception as e:
         print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
+        forecast_cache.mark_complete(cache_key)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

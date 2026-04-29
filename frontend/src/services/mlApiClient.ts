@@ -68,7 +68,7 @@ class MLApiClient {
 
   constructor() {
     this.baseUrl = ML_API_URL;
-    this.timeout = 30000; // 30 seconds
+    this.timeout = 60000; // 60 seconds (increased from 30s to allow Prophet model fitting)
   }
 
   async healthCheck(): Promise<{ status: string; ml_engine: string; version: string } | null> {

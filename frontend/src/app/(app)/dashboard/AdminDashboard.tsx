@@ -513,7 +513,17 @@ export default function AdminDashboard() {
         {/* ML Status Message - Only show when data is loaded */}
         {mlDataLoaded && (
           <>
-            {usingML && hasEnoughDataForML && mlServiceAvailable && (
+            {mlLoading && (
+              <motion.div 
+                variants={itemVariants}
+                className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
+              >
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                Refreshing AI insights in background...
+              </motion.div>
+            )}
+
+            {!mlLoading && usingML && hasEnoughDataForML && mlServiceAvailable && (
               <motion.div 
                 variants={itemVariants}
                 className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
@@ -523,7 +533,7 @@ export default function AdminDashboard() {
               </motion.div>
             )}
 
-            {(!usingML || !mlServiceAvailable) && mlServiceChecked && (
+            {!mlLoading && (!usingML || !mlServiceAvailable) && mlServiceChecked && (
               <motion.div 
                 variants={itemVariants}
                 className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700 flex items-center gap-2"
@@ -533,7 +543,7 @@ export default function AdminDashboard() {
               </motion.div>
             )}
 
-            {!usingML && mlServiceAvailable && mlServiceChecked && hasEnoughDataForML && (
+            {!mlLoading && !usingML && mlServiceAvailable && mlServiceChecked && hasEnoughDataForML && (
               <motion.div 
                 variants={itemVariants}
                 className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-700 flex items-center gap-2"
@@ -670,6 +680,7 @@ export default function AdminDashboard() {
                   const hasAISuggestion = usingML && item.aiSuggestion;
                   const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
                   const daysToShow = item.daysSinceSale;
+                  const isAILoading = mlLoading && hasEnoughDataForML;
                   
                   return (
                     <div 
@@ -693,20 +704,27 @@ export default function AdminDashboard() {
                       
                       <div className="border-t border-gray-100 pt-2">
                         <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
-                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : 'STATUS'}
+                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : isAILoading ? 'AI SUGGESTION (LOADING)' : 'STATUS'}
                         </p>
                         <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
                           suggestionType === 'critical' ? 'border-red-200' : 
                           suggestionType === 'warning' ? 'border-orange-200' : 
                           'border-blue-200'
                         }`}>
-                          <p className={`text-xs ${
-                            suggestionType === 'critical' ? 'text-red-600' : 
-                            suggestionType === 'warning' ? 'text-orange-600' : 
-                            'text-blue-600'
-                          } leading-relaxed flex-1`}>
-                            {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
-                          </p>
+                          {isAILoading && !item.aiSuggestion ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                              <p className="text-xs text-gray-500">Analyzing item...</p>
+                            </div>
+                          ) : (
+                            <p className={`text-xs ${
+                              suggestionType === 'critical' ? 'text-red-600' : 
+                              suggestionType === 'warning' ? 'text-orange-600' : 
+                              'text-blue-600'
+                            } leading-relaxed flex-1`}>
+                              {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
+                            </p>
+                          )}
                           <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
                         </div>
                       </div>
@@ -767,7 +785,16 @@ export default function AdminDashboard() {
             </div>
             
             <div className="p-4 sm:p-5 pt-0">
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable ? (
+              {mlLoading && hasEnoughDataForML && (
+                <div className="flex flex-col items-center justify-center text-center py-8">
+                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-blue-100 flex items-center justify-center">
+                    <div className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-gray-600">Loading AI forecasts...</p>
+                  <p className="text-xs text-gray-400 mt-1">This may take a moment</p>
+                </div>
+              )}
+              {!mlLoading && usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable ? (
                 <div className="space-y-3">
                   {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
                     <ForecastCard 
@@ -778,7 +805,7 @@ export default function AdminDashboard() {
                     />
                   ))}
                 </div>
-              ) : (
+              ) : !mlLoading ? (
                 <div className="flex flex-col items-center justify-center text-center py-8">
                   <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
                     <Database size={20} className="text-gray-400" />
@@ -801,7 +828,7 @@ export default function AdminDashboard() {
                     </p>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
           </motion.div>
 

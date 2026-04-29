@@ -374,8 +374,8 @@ export default function LandingPage() {
 
           <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 lg:gap-12">
             
-            {/* TABS CONTROLLER */}
-            <div className="lg:w-[40%] flex flex-col gap-3 sm:gap-4">
+            {/* DESKTOP LAYOUT - TABS ON LEFT */}
+            <div className="hidden lg:flex lg:w-[40%] flex-col gap-3 sm:gap-4">
               
               <button 
                 onClick={() => setActiveTab("checkout")}
@@ -417,7 +417,118 @@ export default function LandingPage() {
               </button>
             </div>
 
-            {/* VISUAL MOCKUPS AREA */}
+            {/* MOBILE LAYOUT - STACKED TABS WITH MOCKUPS */}
+            <div className="lg:hidden flex flex-col gap-6 sm:gap-8 w-full">
+              
+              {/* CHECKOUT TAB */}
+              <div>
+                <button 
+                  onClick={() => setActiveTab("checkout")}
+                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'checkout' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
+                >
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'checkout' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                    <ShoppingCart size={20} className="sm:w-6 sm:h-6" />
+                  </div>
+                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'checkout' ? 'text-slate-900' : 'text-slate-600'}`}>Point of Sale</h3>
+                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
+                    Fast patient checkouts with cart management, receipt generation, and transaction history. Process sales instantly and track every transaction.
+                  </p>
+                </button>
+                {activeTab === 'checkout' && (
+                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4">
+                    <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                       <div className="bg-slate-50 p-3 sm:p-4 border-b border-slate-100 flex justify-between items-center">
+                          <div className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5"><ShoppingCart size={16} className={THEME_TEXT}/> Sales Order</div>
+                          <div className="text-[10px] sm:text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">Processing</div>
+                       </div>
+                       <div className="p-3 sm:p-4 space-y-2 bg-white">
+                          <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
+                             <div><div className="font-bold text-xs text-slate-800">Air Optix Monthly Contacts</div><div className="text-[10px] text-slate-400">Qty: 2</div></div>
+                             <div className="font-black text-sm text-slate-800">₱3,000</div>
+                          </div>
+                          <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
+                             <div><div className="font-bold text-xs text-slate-800">Essilor Anti-Rad Lenses</div><div className="text-[10px] text-slate-400">Qty: 1</div></div>
+                             <div className="font-black text-sm text-slate-800">₱3,200</div>
+                          </div>
+                       </div>
+                       <div className="bg-slate-50 p-3 border-t border-slate-200">
+                          <div className="flex justify-between text-xs mb-2"><span>Total</span><span className="font-bold">₱6,200</span></div>
+                          <div className="w-full bg-[#0B3C8A] text-white text-center py-2 rounded-lg text-sm font-bold">Complete Sale</div>
+                       </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* INVENTORY TAB */}
+              <div>
+                <button 
+                  onClick={() => setActiveTab("inventory")}
+                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'inventory' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
+                >
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'inventory' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                    <Package size={20} className="sm:w-6 sm:h-6" />
+                  </div>
+                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'inventory' ? 'text-slate-900' : 'text-slate-600'}`}>Inventory Catalog</h3>
+                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
+                    Organize all frames and lenses in one place. Get automatic alerts for low stock, deadstock items, and manage restock adjustments.
+                  </p>
+                </button>
+                {activeTab === 'inventory' && (
+                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4 space-y-3">
+                    <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                       <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-3 border-b font-bold text-xs text-slate-800 flex items-center gap-2">
+                         <Barcode size={14} className="text-blue-600"/> Quick QR Lookup
+                       </div>
+                       <div className="p-4 space-y-3">
+                          <div className="bg-slate-50 rounded-lg p-3 border border-dashed text-center">
+                             <div className="w-16 h-16 bg-white border-2 border-slate-300 rounded-lg mx-auto mb-2 flex items-center justify-center">
+                                <Package size={24} className="text-slate-400"/>
+                             </div>
+                             <p className="text-[10px] text-slate-500">Scan product QR code to retrieve details</p>
+                          </div>
+                       </div>
+                    </div>
+                    <div className="bg-white p-3 rounded-xl shadow-lg border-l-4 border-l-orange-500">
+                       <div className="flex items-start gap-3">
+                          <div className="bg-orange-50 p-1.5 rounded-lg text-orange-600"><AlertTriangle size={16}/></div>
+                          <div><h4 className="font-bold text-xs">Low Stock Warning</h4><p className="text-[10px] text-slate-500">Essilor Crizal Prevencia — Only 8 units remaining</p></div>
+                       </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* REPORTS TAB */}
+              <div>
+                <button 
+                  onClick={() => setActiveTab("reports")}
+                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'reports' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
+                >
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'reports' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                    <FileText size={20} className="sm:w-6 sm:h-6" />
+                  </div>
+                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'reports' ? 'text-slate-900' : 'text-slate-600'}`}>Transaction Reports</h3>
+                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
+                    View all sales transactions with detailed filtering and export complete transaction ledgers as PDF.
+                  </p>
+                </button>
+                {activeTab === 'reports' && (
+                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4 space-y-3">
+                    <div className="bg-white p-4 rounded-xl shadow-lg border">
+                       <div className="flex justify-between items-center mb-2"><div className="font-bold text-xs flex items-center gap-1"><TrendingUp size={14} className={THEME_TEXT}/> Total Revenue</div><div className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">This Month</div></div>
+                       <div className="text-2xl font-black text-slate-900">₱245,800</div>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl shadow-lg border flex items-center justify-between">
+                       <div><h4 className="font-bold text-xs">PDF Report</h4><p className="text-[10px] text-slate-500">Complete transaction ledger</p></div>
+                       <button className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[10px] font-bold">Export</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* VISUAL MOCKUPS AREA - DESKTOP */}
             <div className="hidden lg:flex lg:w-[60%] bg-slate-200/50 rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-8 items-center justify-center relative overflow-hidden min-h-[350px] sm:min-h-[450px]">
                <div className="relative z-10 w-full max-w-md sm:max-w-xl">
                  {activeTab === 'checkout' && (

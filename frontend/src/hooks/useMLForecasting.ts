@@ -67,6 +67,9 @@ interface CachedMLData {
 const CACHE_KEY = 'ml_forecast_cache';
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes cache
 const CACHE_VERSION = '1.0';
+const INITIAL_LOAD_TIMEOUT = 20000; // 20 seconds for initial load (increased from 8)
+const HEALTH_CHECK_TIMEOUT = 8000; // 8 seconds for health check (increased from 3)
+const BACKGROUND_REFRESH_TIMEOUT = 45000; // 45 seconds for background refresh
 
 // Helper to safely convert Firestore timestamp to ISO string
 const formatCreatedAt = (createdAt: any): string | null => {
@@ -236,10 +239,12 @@ export function useMLForecasting() {
     
     loadingRef.current = true;
     
-    // Set a timeout to prevent infinite loading (8 seconds max for background refresh)
+    // Set a timeout to prevent infinite loading
+    // Use longer timeout for initial load, shorter for background refresh
+    const timeoutDuration = initialLoadDoneRef.current ? BACKGROUND_REFRESH_TIMEOUT : INITIAL_LOAD_TIMEOUT;
     const timeoutId = setTimeout(() => {
       if (loadingRef.current && !loadedRef.current) {
-        console.log('ML Forecasting timeout - using fallback');
+        console.log(`ML Forecasting timeout (${timeoutDuration / 1000}s) - using fallback`);
         const fallbackData = {
           usingML: false,
           forecastData: generateHistoryOnlyData(transactions),
@@ -305,7 +310,7 @@ export function useMLForecasting() {
       try {
         const healthCheckPromise = mlApiClient.healthCheck();
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Health check timeout')), 3000)
+          setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT)
         );
         
         const healthCheck = await Promise.race([healthCheckPromise, timeoutPromise]) as any;
