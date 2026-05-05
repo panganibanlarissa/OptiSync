@@ -16,7 +16,14 @@ import {
   Clock,
   Sparkles,
   Barcode,
-  ChevronUp
+  ChevronUp,
+  MapPin,
+  Phone,
+  Eye,
+  Heart,
+  Star,
+  Facebook,
+  Glasses
 } from "lucide-react";
 import { collection, getDocs, query, limit, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -36,28 +43,48 @@ const FALLBACK_PRODUCTS = [
   },
   {
     id: "fallback-2",
+    name: "Cat Eye Designer Frames",
+    category: "Frames",
+    image: "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=500&h=500&fit=crop",
+    price: 3500,
+  },
+  {
+    id: "fallback-3",
+    name: "Round Metal Frames",
+    category: "Frames",
+    image: "https://images.unsplash.com/photo-1495164469619-ca4171e43f38?w=500&h=500&fit=crop",
+    price: 2200,
+  },
+  {
+    id: "fallback-4",
+    name: "Wayfarer Style Sunglasses",
+    category: "Sunglasses",
+    image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=500&h=500&fit=crop",
+    price: 4000,
+  },
+  {
+    id: "fallback-5",
     name: "Blue Light Blocking Lenses",
     category: "Lenses",
     image: "https://images.unsplash.com/photo-1591076482161-42ce6da69f5a?w=500&h=500&fit=crop",
     price: 1500,
   },
   {
-    id: "fallback-3",
-    name: "Biotrue Contact Solution",
-    category: "Solutions",
+    id: "fallback-6",
+    name: "Anti-Glare Lenses",
+    category: "Lenses",
     image: "https://images.unsplash.com/photo-1584036561566-baf8f5f1b144?w=500&h=500&fit=crop",
-    price: 450,
+    price: 1800,
   },
 ];
 
 // Clinic ID - same as in FirebaseContext
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
-export default function LandingPage() {
+export default function ClinicLandingPage() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"checkout" | "inventory" | "reports">("checkout");
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
@@ -77,8 +104,6 @@ export default function LandingPage() {
     const fetchProducts = async () => {
       try {
         setLoading(true);
-        console.log("Fetching real products from Firestore...");
-        
         const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
         const productsQuery = query(productsRef, orderBy("createdAt", "desc"), limit(12));
         const snapshot = await getDocs(productsQuery);
@@ -86,20 +111,15 @@ export default function LandingPage() {
         const fetchedProducts = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
-          price: doc.data().markupPrice || doc.data().price || 0
         }));
-        
-        console.log(`Loaded ${fetchedProducts.length} real products from Firestore`);
         
         if (fetchedProducts.length > 0) {
           setProducts(fetchedProducts);
         } else {
-          console.log("No products in Firestore, using fallback data");
           setProducts(FALLBACK_PRODUCTS);
         }
       } catch (error) {
         console.error("Error fetching products from Firestore:", error);
-        console.log("Using fallback products due to error");
         setProducts(FALLBACK_PRODUCTS);
       } finally {
         setLoading(false);
@@ -117,13 +137,18 @@ export default function LandingPage() {
     setImageErrors(prev => new Set([...prev, productId]));
   };
 
+  // Get best selling products (from category or marked favorites)
+  const bestSellingFrames = products
+    .filter(p => p.category === "Frames" || p.category?.includes("Frame"))
+    .slice(0, 8);
+
   // Display loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B3C8A] mx-auto mb-4"></div>
-          <p className="text-slate-500">Loading products...</p>
+          <p className="text-slate-500">Loading our products...</p>
         </div>
       </div>
     );
@@ -135,31 +160,32 @@ export default function LandingPage() {
       {/* --- 1. NAVBAR --- */}
       <header 
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled ? "bg-white/90 backdrop-blur-md shadow-sm py-3" : "bg-transparent py-4 sm:py-5"
+          isScrolled ? "bg-white/90 backdrop-blur-md shadow-sm py-3" : "bg-slate-100 py-3"
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} />
+            <Image src="/logo.png?v=1" alt="M.T. Olaso Logo" width={42} height={42} />
             <div className="flex flex-col leading-none">
-              <span className="font-bold text-base sm:text-lg text-slate-900 tracking-tight">OlasoSync</span>
+              <span className="font-bold text-base sm:text-md text-slate-900 tracking-tight">M.T. Olaso Optical Clinic</span>
             </div>
           </div>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
+            <a href="#bestselling" className="hover:text-[#0B3C8A] transition-colors">Best Sellers</a>
+            <a href="#services" className="hover:text-[#0B3C8A] transition-colors">Services</a>
+            <a href="#location" className="hover:text-[#0B3C8A] transition-colors">Map</a>
+            <a href="#contact" className="hover:text-[#0B3C8A] transition-colors">Facebook</a>
             <a href="#products" className="hover:text-[#0B3C8A] transition-colors">Products</a>
-            <a href="#features" className="hover:text-[#0B3C8A] transition-colors">System Features</a>
-            <a href="#workflow" className="hover:text-[#0B3C8A] transition-colors">How it Works</a>
-            <a href="#about" className="hover:text-[#0B3C8A] transition-colors">About</a>
           </nav>
 
           <div className="hidden md:flex items-center gap-4">
-            <Link 
-              href="/login" 
-              className={`px-6 py-2.5 ${THEME_BG} text-white rounded-xl font-bold text-sm hover:bg-[#08306B] transition-all shadow-lg shadow-blue-900/20 hover:-translate-y-0.5 active:scale-95`}
+            <a 
+              href="/login"
+              className="px-5 py-2 bg-[#0B3C8A] text-white rounded-lg font-bold text-sm hover:bg-[#08306B] transition-all"
             >
               Login
-            </Link>
+            </a>
           </div>
 
           <button className="md:hidden text-slate-600 p-1" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
@@ -169,132 +195,308 @@ export default function LandingPage() {
 
         {mobileMenuOpen && (
           <div className="md:hidden absolute top-full left-0 w-full bg-white border-b border-slate-100 p-5 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-top-5">
-            <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Our Products</a>
-            <a href="#features" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>System Features</a>
-            <a href="#workflow" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>How it Works</a>
-            <a href="#about" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>About</a>
+            <a href="#bestselling" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Best Sellers</a>
+            <a href="#services" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Services</a>
+            <a href="#location" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Map</a>
+            <a href="#contact" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Facebook</a>
+            <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Products</a>
             <div className="h-px bg-slate-100 my-1"></div>
-            <Link href="/login" className={`w-full text-center py-3.5 ${THEME_BG} text-white rounded-xl font-bold text-base`} onClick={() => setMobileMenuOpen(false)}>
-              Log In
-            </Link>
+            <a href="/login" className={`w-full text-center py-3.5 ${THEME_BG} text-white rounded-xl font-bold text-base`} onClick={() => setMobileMenuOpen(false)}>
+              Login
+            </a>
           </div>
         )}
       </header>
 
-      {/* --- 2. HERO SECTION --- */}
-      <section className="relative pt-28 pb-16 md:pt-40 md:pb-28 overflow-hidden px-4 sm:px-6">
-        <div className="absolute top-0 right-0 -mt-20 -mr-20 w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-blue-100/50 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-[250px] sm:w-[400px] h-[250px] sm:h-[400px] bg-purple-100/40 rounded-full blur-3xl pointer-events-none"></div>
+      {/* --- 2. HERO SECTION WITH BACKGROUND IMAGE --- */}
+      <section className="relative h-[500px] sm:h-[600px] md:h-[700px] overflow-hidden pt-24">
+        {/* Background Image with Dim Overlay */}
+        <div className="absolute inset-0">
+          <Image 
+            src="/images/clinic-bg.jpg" 
+            alt="Clinic Background" 
+            fill 
+            className="object-cover"
+            priority
+          />
+        </div>
+        
+        <div className="absolute inset-0 bg-black/50"></div>
 
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center relative z-10">
-          
-          <div className="animate-in slide-in-from-bottom-10 fade-in duration-700 mt-8 sm:mt-0 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-[10px] sm:text-xs font-bold mb-6">
-               <Sparkles size={14} /> AI Reorder and Deadstock Alerts
-            </div>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-slate-900 leading-[1.1] mb-5 tracking-tight">
-                Seamless Stock, <br className="hidden sm:block" />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#0B3C8A] to-purple-600">
-                 Faster Checkouts
-              </span>
+        {/* Content */}
+        <div className="relative z-10 h-full flex items-center justify-center px-4 sm:px-6">
+          <div className="text-center max-w-3xl mx-auto">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white leading-[1.1] mb-4 tracking-tight">
+              M.T. Olaso Optical Clinic
             </h1>
-            <p className="text-base sm:text-lg text-slate-500 mb-8 leading-relaxed max-w-lg mx-auto lg:mx-0 font-medium">
-              Streamline your optical clinic with an integrated POS system, real-time inventory tracking, and comprehensive transaction reports. Manage sales, stock levels, and staff access all in one platform.
+            <p className="text-base sm:text-lg text-blue-50 leading-relaxed max-w-xl mx-auto">
+              Computerized Eye Examination • Premium Frames • Quality Lenses
             </p>
-            
-            <div className="flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
-              <Link 
-                href="/login" 
-                className={`px-8 py-3.5 sm:py-4 ${THEME_BG} text-white rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg hover:bg-[#08306B] transition-all shadow-xl shadow-blue-900/20 hover:-translate-y-1 flex items-center justify-center gap-2`}
-              >
-                Access Now <ArrowRight size={18} />
-              </Link>
-            </div>
-
-            <div className="mt-8 sm:mt-10 flex flex-wrap items-center justify-center lg:justify-start gap-3 sm:gap-4 text-xs sm:text-sm text-slate-500 font-bold">
-              <span className="flex items-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> Fast Checkouts</span>
-              <span className="flex items-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> Stock Monitoring</span>
-              <span className="flex items-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> PDF Reports</span>
-            </div>
           </div>
-
-          {/* Abstract Dashboard Mockup */}
-          <div className="relative h-[300px] sm:h-[400px] lg:h-[500px] flex items-center justify-center animate-in zoom-in-95 fade-in duration-1000 delay-200 mt-4 sm:mt-0">
-            <div className="relative w-full max-w-[280px] sm:max-w-sm lg:max-w-lg aspect-square">
-                <div className="absolute inset-0 bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 p-4 sm:p-6 flex flex-col overflow-hidden rotate-[-2deg] hover:rotate-0 transition-all duration-500">
-                   <div className="flex items-center justify-between mb-4 sm:mb-6 border-b border-slate-100 pb-3 sm:pb-4">
-                      <div className="flex gap-1.5 sm:gap-2">
-                         <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-slate-200"></div>
-                         <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-slate-200"></div>
-                      </div>
-                      <div className="w-24 sm:w-32 h-2 bg-blue-50 rounded-full"></div>
-                   </div>
-                   <div className="flex gap-2 sm:gap-4 items-end h-24 sm:h-32 mb-4 sm:mb-6 px-2 sm:px-4">
-                      <div className="w-1/5 h-[40%] bg-blue-100 rounded-t-md sm:rounded-t-lg"></div>
-                      <div className="w-1/5 h-[70%] bg-blue-200 rounded-t-md sm:rounded-t-lg"></div>
-                      <div className="w-1/5 h-[50%] bg-blue-100 rounded-t-md sm:rounded-t-lg"></div>
-                      <div className="w-1/5 h-[90%] bg-gradient-to-t from-[#0B3C8A] to-purple-500 rounded-t-md sm:rounded-t-lg relative shadow-lg">
-                         <div className="absolute -top-6 sm:-top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded shadow-lg whitespace-nowrap">AI Forecast</div>
-                      </div>
-                      <div className="w-1/5 h-[60%] bg-purple-200 rounded-t-md sm:rounded-t-lg"></div>
-                   </div>
-                   <div className="space-y-2 sm:space-y-3">
-                      <div className="h-10 sm:h-12 w-full bg-slate-50 rounded-xl flex items-center justify-between px-3 sm:px-4 border border-slate-100">
-                         <div className="flex items-center gap-2 sm:gap-3">
-                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600"><AlertTriangle size={12} className="sm:w-[14px] sm:h-[14px]"/></div>
-                            <div className="w-16 sm:w-24 h-1.5 sm:h-2 bg-slate-200 rounded-full"></div>
-                         </div>
-                         <div className="w-6 sm:w-8 h-3 sm:h-4 bg-orange-200 rounded-full"></div>
-                      </div>
-                      <div className="h-10 sm:h-12 w-full bg-slate-50 rounded-xl flex items-center justify-between px-3 sm:px-4 border border-slate-100">
-                         <div className="flex items-center gap-2 sm:gap-3">
-                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600"><CheckCircle2 size={12} className="sm:w-[14px] sm:h-[14px]"/></div>
-                            <div className="w-20 sm:w-32 h-1.5 sm:h-2 bg-slate-200 rounded-full"></div>
-                         </div>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="absolute -right-2 sm:-right-4 lg:-right-12 top-6 sm:top-20 bg-white p-2.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl border border-slate-100 animate-bounce duration-1000 z-20">
-                   <div className="flex items-center gap-2 sm:gap-3">
-                      <div className="bg-emerald-100 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-emerald-600">
-                         <ShoppingCart className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
-                      </div>
-                      <div>
-                         <p className="text-[7px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider">New Sale</p>
-                         <p className="font-black text-xs sm:text-base text-slate-800">₱4,500.00</p>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="absolute -left-2 sm:-left-4 lg:-left-12 bottom-12 sm:bottom-32 bg-white p-2.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl border border-slate-100 animate-bounce duration-1000 delay-300 z-20">
-                   <div className="flex items-center gap-2 sm:gap-3">
-                      <div className="bg-orange-100 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-orange-600">
-                         <Clock className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
-                      </div>
-                      <div>
-                         <p className="text-[7px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider">Unsold Item</p>
-                         <p className="font-black text-[10px] sm:text-sm text-slate-800">No sales 30+ days</p>
-                      </div>
-                   </div>
-                </div>
-            </div>
-          </div>
-
         </div>
       </section>
 
-      {/* --- 3. PRODUCTS SHOWCASE - REAL FIRESTORE PRODUCTS --- */}
+      {/* --- 3. BEST SELLING PRODUCTS --- */}
+      {bestSellingFrames.length > 0 && (
+          <section id="bestselling" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Best Selling Frames</h2>
+              <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
+                Our most popular frames, loved by our customers for style, comfort, and durability.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+              {bestSellingFrames.map((product, idx) => {
+                const hasImageError = imageErrors.has(product.id);
+                const productImage = product.image || product.productImage;
+                const isValidImage = !hasImageError && productImage && typeof productImage === 'string' && productImage.startsWith('http');
+                
+                return (
+                  <div
+                    key={product.id}
+                    className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-2xl hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-2 flex flex-col relative"
+                  >
+                    <div className="absolute top-3 right-3 bg-yellow-400 text-yellow-900 px-2 py-1 rounded-lg text-[10px] font-bold z-10 flex items-center gap-1">
+                      <Star size={12} className="fill-current" /> Best Seller
+                    </div>
+                    <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
+                      {isValidImage ? (
+                        <div className="relative w-full h-full">
+                          <Image
+                            src={productImage}
+                            alt={product.name}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                            className="object-cover transition-transform duration-500 group-hover:scale-110"
+                            onError={() => handleImageError(product.id)}
+                            priority={idx < 4}
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+                          <Package className="w-16 h-16 text-slate-300" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4 sm:p-5 flex flex-col flex-1">
+                      <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
+                        {product.name}
+                      </h3>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* --- 3.5 SERVICES SECTION --- */}
+      <section id="services" className="py-16 sm:py-24 px-4 sm:px-6 bg-[#0B3C8A]">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-100 mb-3 sm:mb-4">What We Offer</h2>
+            <p className="text-slate-300 text-base sm:text-lg font-medium px-2">
+              Complete eye care services designed to help you see better and feel confident
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+            {/* Service 1: Eye Check */}
+            <div className="group relative bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl border border-blue-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#0B3C8A] flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <Eye size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Eye Check</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                We test your eyes using modern equipment to find your exact prescription and check eye health.
+              </p>
+            </div>
+
+            {/* Service 2: Frame Styles */}
+            <div className="group relative bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl border border-purple-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-purple-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <Sparkles size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Frame Styles</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                Choose from a variety of beautiful frames that match your face and personal style.
+              </p>
+            </div>
+
+            {/* Service 3: Lens Types */}
+            <div className="group relative bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-2xl border border-emerald-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-emerald-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <CheckCircle2 size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Lens Types</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                Get lenses that protect your eyes from blue light, reduce glare, and keep you comfortable.
+              </p>
+            </div>
+
+            {/* Service 4: Perfect Fit */}
+            <div className="group relative bg-gradient-to-br from-rose-50 to-rose-100 rounded-2xl border border-rose-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-rose-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <Heart size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Perfect Fit</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                Our experts adjust your frames so they fit perfectly and feel comfortable all day long.
+              </p>
+            </div>
+
+            {/* Service 5: Made Just For You */}
+            <div className="group relative bg-gradient-to-br from-amber-50 to-amber-100 rounded-2xl border border-amber-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <Barcode size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Made Just For You</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                Your lenses are crafted with precision to match your exact eye prescription perfectly.
+              </p>
+            </div>
+
+            {/* Service 6: Expert Advice */}
+            <div className="group relative bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-2xl border border-indigo-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-indigo-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
+                <Clock size={32} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Expert Advice</h3>
+              <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
+                Get helpful tips on caring for your glasses and choosing the right frames for you.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* --- 4. FULL-WIDTH MAP SECTION --- */}
+      <section id="location" className="py-16 sm:py-24 px-4 sm:px-6 bg-slate-50">
+        <div className="max-w-7xl mx-auto mb-10 sm:mb-16">
+          <div className="text-center max-w-3xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Where to Find Us</h2>
+            <p className="text-slate-600 text-base sm:text-lg font-medium px-2">
+              Visit us at our clinic location. We're conveniently situated in Olongapo City.
+            </p>
+          </div>
+        </div>
+        <div className="h-[500px] sm:h-[600px] md:h-[700px] w-full rounded-2xl overflow-hidden shadow-lg">
+          <iframe
+            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3865.2355!2d120.2816!3d14.3691!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397d6e6c6c6c6c6d%3A0x1234567890abcdef!2s43%20Magsaysay%20Drive%2C%20Olongapo%20City!5e0!3m2!1sen!2sph!4v1715000000"
+            width="100%"
+            height="100%"
+            style={{ border: 0 }}
+            allowFullScreen
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            className="w-full h-full"
+          />
+        </div>
+      </section>
+
+      {/* --- 5. FULL-WIDTH FACEBOOK SECTION --- */}
+      <section id="contact" className="py-12 sm:py-16 bg-[#0B3C8A] px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Section Header */}
+          <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Connect With Us</h2>
+            <p className="text-slate-200 text-base sm:text-lg font-medium">
+              Follow our Facebook page for the latest updates, eyewear trends, and clinic news.
+            </p>
+          </div>
+
+          {/* Facebook Card */}
+          <div className="max-w-6xl mx-auto">
+            <div className="bg-white rounded-3xl overflow-hidden shadow-2xl">
+              {/* Cover Photo */}
+              <div className="relative h-[200px] sm:h-[240px] bg-gradient-to-br from-[#0B3C8A] via-blue-600 to-blue-700 overflow-hidden">
+                <div className="absolute inset-0 flex items-center justify-center opacity-20">
+                  <Glasses size={150} className="text-white" />
+                </div>
+              </div>
+
+              {/* Profile Section */}
+              <div className="relative px-6 sm:px-8 pb-8 sm:pb-10">
+                {/* Profile Picture */}
+                <div className="flex justify-start -mt-16 sm:-mt-24 mb-6">
+                  <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-2xl border-4 border-white shadow-xl bg-gradient-to-br from-blue-100 to-slate-100 flex items-center justify-center flex-shrink-0">
+                    <Glasses size={64} className="text-[#0B3C8A]" />
+                  </div>
+                </div>
+
+                {/* Clinic Info */}
+                <div className="mb-6">
+                  <h3 className="text-2xl sm:text-3xl font-black text-slate-900 mb-1">M.T. Olaso Optical Clinic</h3>
+                  <p className="text-slate-500 text-sm sm:text-base font-bold flex items-center gap-2">
+                    <Facebook size={16} className="text-[#0B3C8A]" />
+                    434 followers
+                  </p>
+                  <p className="text-slate-600 text-sm sm:text-base mt-3 leading-relaxed max-w-2xl">
+                    Your trusted destination for premium eyewear, professional vision care, and expert optical advice. We provide the latest technology and personalized service to help you see your best.
+                  </p>
+                </div>
+
+                {/* Contact Info Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8 py-6 border-t border-b border-slate-200">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <MapPin size={20} className="text-[#0B3C8A]" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Address</p>
+                      <p className="text-sm font-bold text-slate-900">43 Magsaysay Drive</p>
+                      <p className="text-xs text-slate-600">Olongapo City, Zambales</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Phone size={20} className="text-[#0B3C8A]" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Phone</p>
+                      <p className="text-sm font-bold text-slate-900">0922 825 4918</p>
+                      <p className="text-xs text-slate-600">For appointments</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Clock size={20} className="text-[#0B3C8A]" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Hours</p>
+                      <p className="text-sm font-bold text-slate-900">9:30 AM - 6:30 PM</p>
+                      <p className="text-xs text-slate-600">Mon - Sat (Closed Sun)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CTA Button */}
+                <a 
+                  href="https://www.facebook.com/olasoOptical/" 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full text-center px-8 py-3 sm:py-4 bg-[#0B3C8A] text-white rounded-xl font-bold text-base sm:text-lg hover:bg-[#08306B] transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                >
+                  <Facebook size={20} /> 
+                  <span>Visit Our Facebook Page</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* --- 6. PRODUCTS LIST --- */}
       <section id="products" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Our Products</h2>
             <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
-              Quality optical frames, lenses, and contact solutions for your vision needs.
+              Explore our wide selection of premium frames, lenses, and accessories for every style and prescription need.
             </p>
-            {products.length > 0 && products[0].id && !products[0].id.startsWith('fallback') && (
-              <p className="text-xs text-emerald-600 mt-2">✓ Live products from inventory</p>
-            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
@@ -331,19 +533,6 @@ export default function LandingPage() {
                     <h3 className="text-xs sm:text-sm font-bold text-slate-800 line-clamp-2 leading-snug">
                       {product.name}
                     </h3>
-                    {product.specifications && (
-                      <p className="text-[10px] sm:text-xs text-slate-400 mt-1 line-clamp-2">
-                        {product.specifications}
-                      </p>
-                    )}
-                    <div className="mt-auto pt-3 flex items-center justify-between">
-                      <span className="text-[10px] sm:text-xs font-medium text-slate-400 px-2 py-0.5 bg-slate-100 rounded-full">
-                        {product.category || "Uncategorized"}
-                      </span>
-                      <p className="text-sm sm:text-base font-bold text-slate-900">
-                        ₱{(product.markupPrice || product.price || 0).toLocaleString()}
-                      </p>
-                    </div>
                   </div>
                 </div>
               );
@@ -353,289 +542,49 @@ export default function LandingPage() {
           {products.length === 0 && !loading && (
             <div className="text-center py-12">
               <Package className="w-16 h-16 mx-auto text-slate-300 mb-4" />
-              <p className="text-slate-500">No products found in inventory.</p>
+              <p className="text-slate-500">No products found in our inventory.</p>
             </div>
           )}
         </div>
       </section>
-
-      {/* Rest of the sections remain the same... */}
-      
-      {/* --- 4. SYSTEM FEATURES TABS --- */}
-      <section id="features" className="py-16 sm:py-24 bg-slate-50 px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto">
-          
-          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
-            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Core Features Built for Your Clinic</h2>
-            <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
-              All the tools you need to run your optical clinic efficiently and securely.
-            </p>
-          </div>
-
-          <div className="flex flex-col lg:flex-row gap-6 sm:gap-8 lg:gap-12">
-            
-            {/* DESKTOP LAYOUT - TABS ON LEFT */}
-            <div className="hidden lg:flex lg:w-[40%] flex-col gap-3 sm:gap-4">
-              
-              <button 
-                onClick={() => setActiveTab("checkout")}
-                className={`text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'checkout' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl lg:scale-[1.02]' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-              >
-                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'checkout' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  <ShoppingCart size={20} className="sm:w-6 sm:h-6" />
-                </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'checkout' ? 'text-slate-900' : 'text-slate-600'}`}>Point of Sale</h3>
-                <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  Fast patient checkouts with cart management, receipt generation, and transaction history. Process sales instantly and track every transaction.
-                </p>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab("inventory")}
-                className={`text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'inventory' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl lg:scale-[1.02]' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-              >
-                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'inventory' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  <Package size={20} className="sm:w-6 sm:h-6" />
-                </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'inventory' ? 'text-slate-900' : 'text-slate-600'}`}>Inventory Catalog</h3>
-                <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  Organize all frames and lenses in one place. Get automatic alerts for low stock, deadstock items, and manage restock adjustments.
-                </p>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab("reports")}
-                className={`text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'reports' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl lg:scale-[1.02]' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-              >
-                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'reports' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  <FileText size={20} className="sm:w-6 sm:h-6" />
-                </div>
-                <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'reports' ? 'text-slate-900' : 'text-slate-600'}`}>Transaction Reports</h3>
-                <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                  View all sales transactions with detailed filtering and export complete transaction ledgers as PDF.
-                </p>
-              </button>
-            </div>
-
-            {/* MOBILE LAYOUT - STACKED TABS WITH MOCKUPS */}
-            <div className="lg:hidden flex flex-col gap-6 sm:gap-8 w-full">
-              
-              {/* CHECKOUT TAB */}
-              <div>
-                <button 
-                  onClick={() => setActiveTab("checkout")}
-                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'checkout' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-                >
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'checkout' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                    <ShoppingCart size={20} className="sm:w-6 sm:h-6" />
-                  </div>
-                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'checkout' ? 'text-slate-900' : 'text-slate-600'}`}>Point of Sale</h3>
-                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                    Fast patient checkouts with cart management, receipt generation, and transaction history. Process sales instantly and track every transaction.
-                  </p>
-                </button>
-                {activeTab === 'checkout' && (
-                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4">
-                    <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                       <div className="bg-slate-50 p-3 sm:p-4 border-b border-slate-100 flex justify-between items-center">
-                          <div className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5"><ShoppingCart size={16} className={THEME_TEXT}/> Sales Order</div>
-                          <div className="text-[10px] sm:text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">Processing</div>
-                       </div>
-                       <div className="p-3 sm:p-4 space-y-2 bg-white">
-                          <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
-                             <div><div className="font-bold text-xs text-slate-800">Air Optix Monthly Contacts</div><div className="text-[10px] text-slate-400">Qty: 2</div></div>
-                             <div className="font-black text-sm text-slate-800">₱3,000</div>
-                          </div>
-                          <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
-                             <div><div className="font-bold text-xs text-slate-800">Essilor Anti-Rad Lenses</div><div className="text-[10px] text-slate-400">Qty: 1</div></div>
-                             <div className="font-black text-sm text-slate-800">₱3,200</div>
-                          </div>
-                       </div>
-                       <div className="bg-slate-50 p-3 border-t border-slate-200">
-                          <div className="flex justify-between text-xs mb-2"><span>Total</span><span className="font-bold">₱6,200</span></div>
-                          <div className="w-full bg-[#0B3C8A] text-white text-center py-2 rounded-lg text-sm font-bold">Complete Sale</div>
-                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* INVENTORY TAB */}
-              <div>
-                <button 
-                  onClick={() => setActiveTab("inventory")}
-                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'inventory' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-                >
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'inventory' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                    <Package size={20} className="sm:w-6 sm:h-6" />
-                  </div>
-                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'inventory' ? 'text-slate-900' : 'text-slate-600'}`}>Inventory Catalog</h3>
-                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                    Organize all frames and lenses in one place. Get automatic alerts for low stock, deadstock items, and manage restock adjustments.
-                  </p>
-                </button>
-                {activeTab === 'inventory' && (
-                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4 space-y-3">
-                    <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-                       <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-3 border-b font-bold text-xs text-slate-800 flex items-center gap-2">
-                         <Barcode size={14} className="text-blue-600"/> Quick QR Lookup
-                       </div>
-                       <div className="p-4 space-y-3">
-                          <div className="bg-slate-50 rounded-lg p-3 border border-dashed text-center">
-                             <div className="w-16 h-16 bg-white border-2 border-slate-300 rounded-lg mx-auto mb-2 flex items-center justify-center">
-                                <Package size={24} className="text-slate-400"/>
-                             </div>
-                             <p className="text-[10px] text-slate-500">Scan product QR code to retrieve details</p>
-                          </div>
-                       </div>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl shadow-lg border-l-4 border-l-orange-500">
-                       <div className="flex items-start gap-3">
-                          <div className="bg-orange-50 p-1.5 rounded-lg text-orange-600"><AlertTriangle size={16}/></div>
-                          <div><h4 className="font-bold text-xs">Low Stock Warning</h4><p className="text-[10px] text-slate-500">Essilor Crizal Prevencia — Only 8 units remaining</p></div>
-                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* REPORTS TAB */}
-              <div>
-                <button 
-                  onClick={() => setActiveTab("reports")}
-                  className={`w-full text-left p-4 sm:p-6 rounded-2xl transition-all duration-300 border-2 ${activeTab === 'reports' ? 'bg-white border-[#0B3C8A] shadow-md sm:shadow-xl' : 'bg-white/50 border-transparent hover:bg-white hover:border-slate-200'}`}
-                >
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-3 sm:mb-4 shadow-sm ${activeTab === 'reports' ? 'bg-[#0B3C8A] text-white' : 'bg-slate-100 text-slate-500'}`}>
-                    <FileText size={20} className="sm:w-6 sm:h-6" />
-                  </div>
-                  <h3 className={`text-lg sm:text-xl font-black mb-1.5 sm:mb-2 ${activeTab === 'reports' ? 'text-slate-900' : 'text-slate-600'}`}>Transaction Reports</h3>
-                  <p className="text-slate-500 text-xs sm:text-sm leading-relaxed font-medium">
-                    View all sales transactions with detailed filtering and export complete transaction ledgers as PDF.
-                  </p>
-                </button>
-                {activeTab === 'reports' && (
-                  <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 mt-4 space-y-3">
-                    <div className="bg-white p-4 rounded-xl shadow-lg border">
-                       <div className="flex justify-between items-center mb-2"><div className="font-bold text-xs flex items-center gap-1"><TrendingUp size={14} className={THEME_TEXT}/> Total Revenue</div><div className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">This Month</div></div>
-                       <div className="text-2xl font-black text-slate-900">₱245,800</div>
-                    </div>
-                    <div className="bg-white p-4 rounded-xl shadow-lg border flex items-center justify-between">
-                       <div><h4 className="font-bold text-xs">PDF Report</h4><p className="text-[10px] text-slate-500">Complete transaction ledger</p></div>
-                       <button className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[10px] font-bold">Export</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* VISUAL MOCKUPS AREA - DESKTOP */}
-            <div className="hidden lg:flex lg:w-[60%] bg-slate-200/50 rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-8 items-center justify-center relative overflow-hidden min-h-[350px] sm:min-h-[450px]">
-               <div className="relative z-10 w-full max-w-md sm:max-w-xl">
-                 {activeTab === 'checkout' && (
-                   <div className="animate-in slide-in-from-right-8 fade-in duration-500 bg-white rounded-xl sm:rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 p-3 sm:p-4 border-b border-slate-100 flex justify-between items-center">
-                         <div className="font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5"><ShoppingCart size={16} className={THEME_TEXT}/> Sales Order</div>
-                         <div className="text-[10px] sm:text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">Processing</div>
-                      </div>
-                      <div className="p-3 sm:p-4 space-y-2 bg-white">
-                         <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
-                            <div><div className="font-bold text-xs text-slate-800">Air Optix Monthly Contacts</div><div className="text-[10px] text-slate-400">Qty: 2</div></div>
-                            <div className="font-black text-sm text-slate-800">₱3,000</div>
-                         </div>
-                         <div className="flex justify-between items-center p-2 border border-slate-100 rounded-lg">
-                            <div><div className="font-bold text-xs text-slate-800">Essilor Anti-Rad Lenses</div><div className="text-[10px] text-slate-400">Qty: 1</div></div>
-                            <div className="font-black text-sm text-slate-800">₱3,200</div>
-                         </div>
-                      </div>
-                      <div className="bg-slate-50 p-3 border-t border-slate-200">
-                         <div className="flex justify-between text-xs mb-2"><span>Total</span><span className="font-bold">₱6,200</span></div>
-                         <div className="w-full bg-[#0B3C8A] text-white text-center py-2 rounded-lg text-sm font-bold">Complete Sale</div>
-                      </div>
-                   </div>
-                 )}
-                 {activeTab === 'inventory' && (
-                   <div className="animate-in slide-in-from-right-8 fade-in duration-500 space-y-3 w-full">
-                      <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-                         <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-3 border-b font-bold text-xs text-slate-800 flex items-center gap-2">
-                           <Barcode size={14} className="text-blue-600"/> Quick QR Lookup
-                         </div>
-                         <div className="p-4 space-y-3">
-                            <div className="bg-slate-50 rounded-lg p-3 border border-dashed text-center">
-                               <div className="w-16 h-16 bg-white border-2 border-slate-300 rounded-lg mx-auto mb-2 flex items-center justify-center">
-                                  <Package size={24} className="text-slate-400"/>
-                               </div>
-                               <p className="text-[10px] text-slate-500">Scan product QR code to retrieve details</p>
-                            </div>
-                         </div>
-                      </div>
-                      <div className="bg-white p-3 rounded-xl shadow-lg border-l-4 border-l-orange-500">
-                         <div className="flex items-start gap-3">
-                            <div className="bg-orange-50 p-1.5 rounded-lg text-orange-600"><AlertTriangle size={16}/></div>
-                            <div><h4 className="font-bold text-xs">Low Stock Warning</h4><p className="text-[10px] text-slate-500">Essilor Crizal Prevencia — Only 8 units remaining</p></div>
-                         </div>
-                      </div>
-                   </div>
-                 )}
-                 {activeTab === 'reports' && (
-                   <div className="animate-in slide-in-from-right-8 fade-in duration-500 space-y-3 w-full">
-                      <div className="bg-white p-4 rounded-xl shadow-lg border">
-                         <div className="flex justify-between items-center mb-2"><div className="font-bold text-xs flex items-center gap-1"><TrendingUp size={14} className={THEME_TEXT}/> Total Revenue</div><div className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">This Month</div></div>
-                         <div className="text-2xl font-black text-slate-900">₱245,800</div>
-                      </div>
-                      <div className="bg-white p-4 rounded-xl shadow-lg border flex items-center justify-between">
-                         <div><h4 className="font-bold text-xs">PDF Report</h4><p className="text-[10px] text-slate-500">Complete transaction ledger</p></div>
-                         <button className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-[10px] font-bold">Export</button>
-                      </div>
-                   </div>
-                 )}
-               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* --- 5. STATS STRIP --- */}
-      <section className="bg-[#0B3C8A] py-12 sm:py-16 text-white relative overflow-hidden px-4">
-        <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8 text-center relative z-10">
-          <div><h4 className="text-2xl sm:text-3xl font-black">Automatic</h4><p className="text-blue-200 text-[10px] sm:text-xs uppercase tracking-wider">Low Stock Alerts</p></div>
-          <div><h4 className="text-2xl sm:text-3xl font-black">Real-Time</h4><p className="text-blue-200 text-[10px] sm:text-xs uppercase tracking-wider">Inventory Tracking</p></div>
-          <div><h4 className="text-2xl sm:text-3xl font-black">Secure</h4><p className="text-blue-200 text-[10px] sm:text-xs uppercase tracking-wider">Staff & Admin Access</p></div>
-          <div><h4 className="text-2xl sm:text-3xl font-black">Instant</h4><p className="text-blue-200 text-[10px] sm:text-xs uppercase tracking-wider">Transaction Reports</p></div>
-        </div>
-      </section>
-
-      {/* --- 6. WORKFLOW SECTION --- */}
-      <section id="workflow" className="py-16 sm:py-24 bg-white px-4 sm:px-6">
-        <div className="max-w-7xl mx-auto text-center mb-12 sm:mb-16">
-          <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-4">How It Simplifies Your Work</h2>
-          <p className="text-slate-500 text-base sm:text-lg">A complete workflow designed for clinic staff and managers.</p>
-        </div>
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12 text-center">
-          <div><div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-slate-400 font-black text-2xl">1</div><h4 className="text-xl font-bold mb-2">Secure Access</h4><p className="text-slate-500 text-sm">Staff and admins log in with role-based accounts.</p></div>
-          <div><div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#0B3C8A] font-black text-2xl">2</div><h4 className="text-xl font-bold mb-2">Process & Track</h4><p className="text-slate-500 text-sm">Complete patient sales instantly with our POS system.</p></div>
-          <div><div className="w-16 h-16 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-purple-600 font-black text-2xl">3</div><h4 className="text-xl font-bold mb-2">Report & Manage</h4><p className="text-slate-500 text-sm">Export ledgers for accounting and compliance.</p></div>
-        </div>
-      </section>
-
-      {/* --- 7. FOOTER --- */}
-      <footer id="about" className="bg-slate-50 border-t border-slate-200 pt-16 pb-8 px-4 sm:px-6">
+      <footer className="bg-[#0B3C8A] text-white pt-16 pb-8 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-start gap-10 mb-12">
             <div className="max-w-xs">
               <div className="flex items-center gap-3 mb-4">
-                <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} />
-                <span className="font-bold text-lg text-slate-900">OlasoSync</span>
+                <Image src="/logo.png?v=1" alt="M.T. Olaso Logo" width={42} height={42} />
+                <div>
+                  <span className="font-bold text-lg text-slate-200">M.T. Olaso Optical Clinic</span>
+                </div>
               </div>
-              <p className="text-slate-500 text-sm">Empowering vision care with easy-to-use technology.</p>
+              <p className="text-slate-200 text-sm">Your trusted destination for premium eyewear and professional vision care in Olongapo City.</p>
             </div>
-            <div className="grid grid-cols-2 gap-16 text-sm">
-              <div><h5 className="font-black text-slate-900 mb-4 uppercase text-xs">Address</h5><ul className="space-y-2 text-slate-500 text-xs"><li>M.T. Olaso Optical Clinic</li><li>43 Magsaysay Dr Olongapo City</li><li>Zambales</li></ul></div>
-              <div><h5 className="font-black text-slate-900 mb-4 uppercase text-xs">Contact</h5><ul className="space-y-2 text-slate-500 text-xs"><li>Phone: 0922 825 4918</li><li>Hours: Mon-Fri 10AM-6PM</li></ul></div>
+            <div className="grid grid-cols-2 gap-12 text-sm">
+              <div>
+                <h5 className="font-black text-white mb-4 uppercase text-xs">Quick Links</h5>
+                <ul className="space-y-2 text-slate-200 text-xs">
+                  <li><a href="#bestselling" className="hover:text-white transition-colors">Best Sellers</a></li>
+                  <li><a href="#services" className="hover:text-white transition-colors">Services</a></li>
+                  <li><a href="#location" className="hover:text-white transition-colors">Map</a></li>
+                  <li><a href="#contact" className="hover:text-white transition-colors">Facebook</a></li>
+                  <li><a href="#products" className="hover:text-white transition-colors">Products</a></li>
+                </ul>
+              </div>
+              <div>
+                <h5 className="font-black text-white mb-4 uppercase text-xs">Contact</h5>
+                <ul className="space-y-2 text-slate-200 text-xs">
+                  <li>43 Magsaysay Dr, Olongapo</li>
+                  <li>0922 825 4918</li>
+                  <li>Mon-Sat: 9:30AM-6:30PM</li>
+                  <li><a href="https://www.facebook.com/olasoOptical/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors flex items-center gap-1">
+                    <Facebook size={14} /> Facebook
+                  </a></li>
+                </ul>
+              </div>
             </div>
           </div>
-          <div className="border-t border-slate-200 pt-6 text-center text-[10px] text-slate-400">
-            <p>© 2026 OlasoSync. All rights reserved. | Data Privacy Compliant (RA 10173)</p>
+          <div className="border-t border-slate-200 pt-8 text-center text-xs text-slate-200">
+            <p>© 2026 M.T. Olaso Optical Clinic. All rights reserved.</p>
           </div>
         </div>
       </footer>
