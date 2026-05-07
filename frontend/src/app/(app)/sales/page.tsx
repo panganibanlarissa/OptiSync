@@ -117,6 +117,8 @@ interface Transaction {
   replacedBy?: string;
   processedAt?: Date;
   processedBy?: string;
+  idDocument?: string;
+  idNumber?: string;
 }
 
 const normalizeDiscountPercentage = (raw?: number): number => {
@@ -243,6 +245,8 @@ export default function SalesPage() {
   const [referenceNumber, setReferenceNumber] = useState<string>("");
   const [showOnlineConfirm, setShowOnlineConfirm] = useState(false);
   const [discountType, setDiscountType] = useState<"none" | "loyalty" | "pwd">("none");
+  const [idDocument, setIdDocument] = useState<string>("");
+  const [idNumber, setIdNumber] = useState<string>("");
 
   const searchParams = useSearchParams();
 
@@ -519,6 +523,8 @@ export default function SalesPage() {
     setWarrantyEndDate("");
     setReferenceNumber("");
     setDiscountType("none");
+    setIdDocument("");
+    setIdNumber("");
   };
 
   const processCheckout = async (paymentMethodToUse: "cash" | "online", amountReceivedForCash?: number) => {
@@ -562,6 +568,11 @@ export default function SalesPage() {
       if (warrantyStartDate && warrantyEndDate) {
         newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
         newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
+      }
+      // Include PWD/Senior ID info when applicable
+      if (discountType === 'pwd') {
+        if (idDocument) newTransactionData.idDocument = idDocument;
+        if (idNumber) newTransactionData.idNumber = idNumber;
       }
       
       const transactionId = await addTransaction(newTransactionData);
@@ -773,6 +784,21 @@ export default function SalesPage() {
     doc.text(`Customer: ${trx.patientName}`, leftMargin, currentY);
     currentY += 3;
 
+    // Include ID info for PWD/Senior if present
+    if (trx.discountType === 'pwd' && (trx.idDocument || trx.idNumber)) {
+      doc.setFontSize(6);
+      doc.setFont('Helvetica', 'normal');
+      if (trx.idDocument) {
+        doc.text(`ID Type: ${trx.idDocument}`, leftMargin, currentY);
+        currentY += 2.3;
+      }
+      if (trx.idNumber) {
+        doc.text(`ID Number: ${trx.idNumber}`, leftMargin, currentY);
+        currentY += 2.3;
+      }
+      currentY += 0.5;
+    }
+
     drawDashedDivider(currentY);
     currentY += 2.5;
 
@@ -788,11 +814,21 @@ export default function SalesPage() {
 
     trx.items.forEach(item => {
       const lineAmount = item.quantity * item.price;
-      const lineAmountStr = `${lineAmount.toLocaleString()}`;
-      const displayName = `${item.name} (x${item.quantity})`;
+      const unitPriceStr = `${item.price.toLocaleString()}`;
+      const displayName = `${item.name}@${item.quantity}`;
       doc.text(displayName, leftMargin, currentY);
+      doc.text(unitPriceStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
+      currentY += 2;
+      
+      const lineAmountStr = `${lineAmount.toLocaleString()}`;
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(5.5);
+      doc.text('Total:', leftMargin + 2, currentY);
+      doc.setFont('Helvetica', 'bold');
       doc.text(lineAmountStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
-      currentY += 2.3;
+      currentY += 2.5;
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(6);
     });
 
     drawDashedDivider(currentY);
@@ -1396,6 +1432,30 @@ export default function SalesPage() {
                         className="w-full pl-6 sm:pl-8 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border-2 border-gray-300 text-sm sm:text-base font-bold focus:outline-none focus:border-[#0B3C8A] text-gray-800"
                       />
                     </div>
+                    {/* PWD/Senior ID inputs */}
+                    {discountType === 'pwd' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Valid ID</label>
+                        <select
+                          value={idDocument}
+                          onChange={(e) => setIdDocument(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                        >
+                          <option value="PWD ID">PWD ID</option>
+                          <option value="Senior Citizen ID">Senior Citizen ID</option>
+                          <option value="Other">Other</option>
+                        </select>
+
+                        <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">ID Number</label>
+                        <input
+                          type="text"
+                          placeholder="Enter ID number (optional)"
+                          value={idNumber}
+                          onChange={(e) => setIdNumber(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+                        />
+                      </div>
+                    )}
                     {amountReceive && !isNaN(parseFloat(amountReceive)) && parseFloat(amountReceive) >= total && (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 sm:p-2.5">
                         <div className="flex justify-between items-center text-xs sm:text-sm">
@@ -1712,6 +1772,18 @@ export default function SalesPage() {
                   </div>
                 </div>
               )}
+              {lastTransaction.discountType === 'pwd' && (
+                <div className="bg-blue-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm border border-blue-200">
+                  <div className="flex justify-between">
+                    <span className="text-blue-700 font-semibold">ID Type</span>
+                    <span className="font-medium text-gray-800">{lastTransaction.idDocument || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-blue-700 font-semibold">ID Number</span>
+                    <span className="font-medium text-gray-800">{lastTransaction.idNumber || 'N/A'}</span>
+                  </div>
+                </div>
+              )}
               
               {lastTransaction.paymentMethod && (
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-gray-200">
@@ -1907,12 +1979,15 @@ export default function SalesPage() {
                 </div>
                 <div className="divide-y divide-slate-100">
                   {transactionToView.items.map((item, index) => (
-                    <div key={`${item.id}-${index}`} className="px-4 py-2.5 flex justify-between items-center hover:bg-slate-50 transition-colors">
-                      <div className="flex flex-col">
-                        <span className="text-sm text-slate-700 font-medium">{item.name}</span>
-                        <span className="text-[11px] text-slate-400">Quantity: {item.quantity} × ₱{item.price.toLocaleString()}</span>
+                    <div key={`${item.id}-${index}`} className="px-4 py-3 hover:bg-slate-50 transition-colors">
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-sm text-slate-700 font-medium">{item.name}@{item.quantity}</span>
+                        <span className="text-sm font-semibold text-slate-700">₱{item.price.toLocaleString()}</span>
                       </div>
-                      <span className="font-bold text-slate-800">₱{(item.price * item.quantity).toLocaleString()}</span>
+                      <div className="flex justify-between items-center pl-4">
+                        <span className="text-[11px] text-slate-500">Total:</span>
+                        <span className="font-bold text-slate-800">₱{(item.price * item.quantity).toLocaleString()}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1937,6 +2012,18 @@ export default function SalesPage() {
                       <span className="font-bold text-emerald-700">
                         -₱{transactionToView.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
+                    </div>
+                  )}
+                  {transactionToView.discountType === 'pwd' && (
+                    <div className="mt-2 bg-blue-50 rounded-lg p-3 border border-blue-100">
+                      <div className="flex justify-between">
+                        <span className="text-xs text-blue-700 font-semibold">ID Type</span>
+                        <span className="font-medium text-slate-700">{transactionToView.idDocument || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-blue-700 font-semibold">ID Number</span>
+                        <span className="font-medium text-slate-700">{transactionToView.idNumber || 'N/A'}</span>
+                      </div>
                     </div>
                   )}
                   <div className="border-t border-slate-200 pt-2 mt-2">
