@@ -86,6 +86,7 @@ export default function ClinicLandingPage() {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
+  const [bestSellersByTransactions, setBestSellersByTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
 
@@ -129,6 +130,62 @@ export default function ClinicLandingPage() {
     fetchProducts();
   }, []);
 
+  // Fetch transactions and calculate best sellers
+  useEffect(() => {
+    const fetchBestSellers = async () => {
+      try {
+        const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
+        const transactionsSnapshot = await getDocs(transactionsRef);
+        
+        // Count sales for each product
+        const productSalesCount: { [key: string]: number } = {};
+        
+        transactionsSnapshot.docs.forEach(doc => {
+          const transaction = doc.data();
+          if (transaction.items && Array.isArray(transaction.items)) {
+            transaction.items.forEach((item: any) => {
+              const productId = item.productId || item.id;
+              if (productId) {
+                productSalesCount[productId] = (productSalesCount[productId] || 0) + (item.quantity || 1);
+              }
+            });
+          }
+        });
+        
+        // Sort products by sales count and get top 8
+        const sortedBestSellers = products
+          .map(product => ({
+            ...product,
+            salesCount: productSalesCount[product.id] || 0,
+          }))
+          .sort((a, b) => b.salesCount - a.salesCount)
+          .slice(0, 8)
+          .filter(p => p.salesCount > 0); // Only show products with actual sales
+        
+        // If less than 8 products with sales, fall back to category filter
+        if (sortedBestSellers.length === 0) {
+          const fallback = products
+            .filter(p => p.category === "Frames" || p.category?.includes("Frame"))
+            .slice(0, 8);
+          setBestSellersByTransactions(fallback);
+        } else {
+          setBestSellersByTransactions(sortedBestSellers);
+        }
+      } catch (error) {
+        console.error("Error fetching best sellers from transactions:", error);
+        // Fall back to category filter
+        const fallback = products
+          .filter(p => p.category === "Frames" || p.category?.includes("Frame"))
+          .slice(0, 8);
+        setBestSellersByTransactions(fallback);
+      }
+    };
+    
+    if (products.length > 0) {
+      fetchBestSellers();
+    }
+  }, [products]);
+
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -136,11 +193,6 @@ export default function ClinicLandingPage() {
   const handleImageError = (productId: string) => {
     setImageErrors(prev => new Set([...prev, productId]));
   };
-
-  // Get best selling products (from category or marked favorites)
-  const bestSellingFrames = products
-    .filter(p => p.category === "Frames" || p.category?.includes("Frame"))
-    .slice(0, 8);
 
   // Display loading state
   if (loading) {
@@ -165,9 +217,9 @@ export default function ClinicLandingPage() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Image src="/logo.png?v=1" alt="M.T. Olaso Logo" width={42} height={42} />
+            <Image src="/images/clinic-logo.jpg" alt="M.T. Olaso Logo" width={42} height={42} />
             <div className="flex flex-col leading-none">
-              <span className="font-bold text-base sm:text-md text-slate-900 tracking-tight">M.T. Olaso Optical Clinic</span>
+              <span className="font-bold text-base sm:text-md text-[#0B3C8A] tracking-tight">M.T. Olaso Optical Clinic</span>
             </div>
           </div>
 
@@ -226,29 +278,41 @@ export default function ClinicLandingPage() {
         {/* Content */}
         <div className="relative z-10 h-full flex items-center justify-center px-4 sm:px-6">
           <div className="text-center max-w-3xl mx-auto">
+            <div className="mb-2 sm:mb-3 flex justify-center">
+              <div className="bg-white rounded-lg overflow-hidden shadow-2xl inline-block">
+                <Image
+                  src="/images/clinic-logo.jpg"
+                  alt="M.T. Olaso Optical Clinic Logo"
+                  width={400}
+                  height={120}
+                  className="object-cover"
+                  priority
+                />
+              </div>
+            </div>
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white leading-[1.1] mb-4 tracking-tight">
               M.T. Olaso Optical Clinic
             </h1>
             <p className="text-base sm:text-lg text-blue-50 leading-relaxed max-w-xl mx-auto">
-              Computerized Eye Examination • Premium Frames • Quality Lenses
+              Advanced Eye Examination • Premium Frames • Quality Lenses
             </p>
           </div>
         </div>
       </section>
 
       {/* --- 3. BEST SELLING PRODUCTS --- */}
-      {bestSellingFrames.length > 0 && (
+      {bestSellersByTransactions.length > 0 && (
           <section id="bestselling" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
           <div className="max-w-7xl mx-auto">
             <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
-              <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Best Selling Frames</h2>
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Best Selling Products</h2>
               <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
-                Our most popular frames, loved by our customers for style, comfort, and durability.
+                Our most popular products loved by our customers based on actual sales.
               </p>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-              {bestSellingFrames.map((product, idx) => {
+              {bestSellersByTransactions.map((product, idx) => {
                 const hasImageError = imageErrors.has(product.id);
                 const productImage = product.image || product.productImage;
                 const isValidImage = !hasImageError && productImage && typeof productImage === 'string' && productImage.startsWith('http');
@@ -256,7 +320,7 @@ export default function ClinicLandingPage() {
                 return (
                   <div
                     key={product.id}
-                    className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-2xl hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-2 flex flex-col relative"
+                    className="group bg-white rounded-2xl border border-slate-300 overflow-hidden hover:shadow-2xl hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-2 flex flex-col relative"
                   >
                     <div className="absolute top-3 right-3 bg-yellow-400 text-yellow-900 px-2 py-1 rounded-lg text-[10px] font-bold z-10 flex items-center gap-1">
                       <Star size={12} className="fill-current" /> Best Seller
@@ -304,69 +368,69 @@ export default function ClinicLandingPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-            {/* Service 1: Eye Check */}
+            {/* Service 1: Comprehensive Eye Exams */}
             <div className="group relative bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl border border-blue-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#0B3C8A] flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <Eye size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Eye Check</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Comprehensive Eye Exams</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                We test your eyes using modern equipment to find your exact prescription and check eye health.
+                Advanced eye testing to determine your prescription and detect vision problems early.
               </p>
             </div>
 
-            {/* Service 2: Frame Styles */}
+            {/* Service 2: Designer Frames Collection */}
             <div className="group relative bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl border border-purple-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-purple-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <Sparkles size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Frame Styles</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Designer Frames</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                Choose from a variety of beautiful frames that match your face and personal style.
+                Curated selection of premium and designer frames from top brands for every style preference.
               </p>
             </div>
 
-            {/* Service 3: Lens Types */}
+            {/* Service 3: Specialized Lens Options */}
             <div className="group relative bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-2xl border border-emerald-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-emerald-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <CheckCircle2 size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Lens Types</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Specialized Lens Options</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                Get lenses that protect your eyes from blue light, reduce glare, and keep you comfortable.
+                Blue light,progressive, and photochromic lenses tailored to your lifestyle needs.
               </p>
             </div>
 
-            {/* Service 4: Perfect Fit */}
+            {/* Service 4: Frame Fitting & Adjustment */}
             <div className="group relative bg-gradient-to-br from-rose-50 to-rose-100 rounded-2xl border border-rose-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-rose-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <Heart size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Perfect Fit</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Frame Fitting & Adjustment</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                Our experts adjust your frames so they fit perfectly and feel comfortable all day long.
+                Professional fitting and precise adjustments to ensure comfort and optimal vision correction.
               </p>
             </div>
 
-            {/* Service 5: Made Just For You */}
+            {/* Service 5: Contact Lens Services */}
             <div className="group relative bg-gradient-to-br from-amber-50 to-amber-100 rounded-2xl border border-amber-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-amber-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <Barcode size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Made Just For You</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Contact Lens Services</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                Your lenses are crafted with precision to match your exact eye prescription perfectly.
+                Comprehensive contact lens fitting, care, and maintenance guidance from experienced opticians.
               </p>
             </div>
 
-            {/* Service 6: Expert Advice */}
+            {/* Service 6: Eye Health Education */}
             <div className="group relative bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-2xl border border-indigo-200 p-6 sm:p-8 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-indigo-600 flex items-center justify-center mb-4 sm:mb-6 text-white">
                 <Clock size={32} />
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Expert Advice</h3>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mb-2 sm:mb-3">Eye Health Education</h3>
               <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                Get helpful tips on caring for your glasses and choosing the right frames for you.
+                Expert guidance on eye care, UV protection, and preventative measures for long-term vision health.
               </p>
             </div>
           </div>
@@ -401,21 +465,25 @@ export default function ClinicLandingPage() {
       <section id="contact" className="py-12 sm:py-16 bg-[#0B3C8A] px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           {/* Section Header */}
-          <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-10">
             <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Connect With Us</h2>
             <p className="text-slate-200 text-base sm:text-lg font-medium">
-              Follow our Facebook page for the latest updates, eyewear trends, and clinic news.
+              Follow our Facebook page for the latest updates and clinic news.
             </p>
           </div>
 
           {/* Facebook Card */}
           <div className="max-w-6xl mx-auto">
-            <div className="bg-white rounded-3xl overflow-hidden shadow-2xl">
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-2xl">
               {/* Cover Photo */}
-              <div className="relative h-[200px] sm:h-[240px] bg-gradient-to-br from-[#0B3C8A] via-blue-600 to-blue-700 overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                  <Glasses size={150} className="text-white" />
-                </div>
+              <div className="relative h-[200px] sm:h-[240px] overflow-hidden bg-slate-100">
+                <Image
+                  src="/images/clinic-logo.jpg"
+                  alt="Cover Photo"
+                  fill
+                  className="object-cover"
+                  priority
+                />
               </div>
 
               {/* Profile Section */}
@@ -508,7 +576,7 @@ export default function ClinicLandingPage() {
               return (
                 <div
                   key={product.id}
-                  className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg hover:border-slate-300 transition-all duration-300 hover:-translate-y-1 flex flex-col"
+                  className="group bg-white rounded-xl border border-slate-300 overflow-hidden hover:shadow-lg hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-1 flex flex-col"
                 >
                   <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
                     {isValidImage ? (
@@ -552,7 +620,7 @@ export default function ClinicLandingPage() {
           <div className="flex flex-col md:flex-row justify-between items-start gap-10 mb-12">
             <div className="max-w-xs">
               <div className="flex items-center gap-3 mb-4">
-                <Image src="/logo.png?v=1" alt="M.T. Olaso Logo" width={42} height={42} />
+                <Image src="/images/clinic-logo.jpg" alt="M.T. Olaso Logo" width={42} height={42} />
                 <div>
                   <span className="font-bold text-lg text-slate-200">M.T. Olaso Optical Clinic</span>
                 </div>
