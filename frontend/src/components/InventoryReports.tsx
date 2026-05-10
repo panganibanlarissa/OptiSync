@@ -15,6 +15,7 @@ import {
   ArrowRightLeft,
 } from "lucide-react";
 import jsPDF from "jspdf";
+import "@/lib/fonts/NotoSans-Regular-normal.js";
 import autoTable from "jspdf-autotable";
 import ProductModal, { ProductFormData } from "./ProductModal";
 import QRCodeModal from "./QRCodeModal";
@@ -426,13 +427,14 @@ export default function InventoryReports({
     return "text-green-600 bg-green-50 border border-green-200";
   };
 
-  // Export to PDF
+    // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF({
       orientation: "landscape",
       unit: "mm",
       format: "a4",
     });
+    doc.setFont("NotoSans-Regular", "normal");
 
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -450,8 +452,8 @@ export default function InventoryReports({
         ((product as any).totalSold || 0).toString(),
         ((product as any).damageExchanged || 0).toString(),
         product.stock.toString(),
-        `PHP ${product.baseCost.toLocaleString()}`,
-        `PHP ${product.markupPrice.toLocaleString()}`,
+        `₱${product.baseCost.toLocaleString()}`,
+        `₱${product.markupPrice.toLocaleString()}`,
         product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
         getProductStatus(product).join(" | "),
       ];
@@ -459,14 +461,17 @@ export default function InventoryReports({
 
     const addHeader = (pageNumber: number) => {
       doc.setPage(pageNumber);
+      doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(16);
       doc.setTextColor(0, 0, 0);
       doc.text("M.T. Olaso Optical Clinic", pageWidth / 2, 15, { align: "center" });
       
+      doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(12);
       doc.setTextColor(40, 40, 40);
       doc.text("Inventory Stock Report", pageWidth / 2, 22, { align: "center" });
       
+      doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(9);
       doc.setTextColor(100, 100, 100);
       doc.text(`Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`, pageWidth / 2, 28, { align: "center" });
@@ -496,6 +501,7 @@ export default function InventoryReports({
     addHeader(1);
 
     if (filterSummary.length > 0) {
+      doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(9);
       doc.setTextColor(100, 100, 100);
       doc.text(`Filters: ${filterSummary.join(" | ")}`, 14, 37);
@@ -522,7 +528,7 @@ export default function InventoryReports({
       startY: filterSummary.length > 0 ? 42 : 37,
       margin: { top: 37, right: 10, bottom: 30, left: 10 },
       styles: {
-        font: "helvetica",
+        font: "NotoSans-Regular",
         fontSize: 8,
         cellPadding: 2,
         overflow: "linebreak",
@@ -530,7 +536,7 @@ export default function InventoryReports({
         textColor: [0, 0, 0],
       },
       headStyles: {
-        fillColor: [0, 0, 0],
+        fillColor: [100, 100, 100],
         textColor: [255, 255, 255],
         fontStyle: "bold",
         halign: "center",
@@ -573,6 +579,7 @@ export default function InventoryReports({
       doc.setDrawColor(200, 200, 200);
       doc.line(14, lineY, pageWidth - 14, lineY);
       
+      doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       const footerText = "Inventory Stock Report - M.T. Olaso Optical Clinic";
@@ -581,10 +588,12 @@ export default function InventoryReports({
     }
 
     const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
     doc.text("Summary", 14, finalY);
     
+    doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
     doc.text(`Total Products: ${filteredProducts.length}`, 14, finalY + 8);
@@ -596,7 +605,7 @@ export default function InventoryReports({
       (sum, p) => sum + p.markupPrice * p.stock,
       0
     );
-    doc.text(`Total Inventory Value: PHP ${totalValue.toLocaleString()}`, 14, finalY + 20);
+    doc.text(`Total Inventory Value: ₱${totalValue.toLocaleString()}`, 14, finalY + 20);
     
     const lowStockCount = filteredProducts.filter(
       (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
