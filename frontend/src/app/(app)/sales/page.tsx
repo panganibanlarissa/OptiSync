@@ -34,7 +34,8 @@ import {
   Clock,
   Repeat,
   CheckCheck,
-  Eye
+  Eye,
+  Phone
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
@@ -94,6 +95,7 @@ interface CartItem {
 interface Transaction {
   id: string;
   patientName: string;
+  contactNumber?: string;
   items: CartItem[];
   subtotal?: number;
   discountType?: "none" | "loyalty" | "pwd";
@@ -247,6 +249,9 @@ export default function SalesPage() {
   const [discountType, setDiscountType] = useState<"none" | "loyalty" | "pwd">("none");
   const [idDocument, setIdDocument] = useState<string>("");
   const [idNumber, setIdNumber] = useState<string>("");
+  const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
+  const [outOfStockMessage, setOutOfStockMessage] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
 
   const searchParams = useSearchParams();
 
@@ -405,14 +410,20 @@ export default function SalesPage() {
 
   const handleAddToCartClick = (product: Product) => {
     if (product.archived) {
-      showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
+      setOutOfStockMessage(
+        `${product.name} is archived and cannot be sold.`
+      );
+      setShowOutOfStockModal(true);
       return;
     }
     const currentReserved = tempReservedStock.get(product.id) || 0;
     const actualStock = product.stock;
     const availableForThis = actualStock - currentReserved;
     if (availableForThis <= 0) {
-      showToastOnly(`❌ ${product.name} is out of stock`, "error");
+      setOutOfStockMessage(
+        `${product.name} is currently out of stock.`
+      );
+      setShowOutOfStockModal(true);
       return;
     }
     setPendingProduct(product);
@@ -469,40 +480,44 @@ export default function SalesPage() {
   };
 
   const updateQuantity = (id: string, delta: number) => {
-    setCart(prevCart => {
-      const item = prevCart.find(i => i.id === id);
-      if (!item) return prevCart;
-      
-      const newQty = item.quantity + delta;
-      if (newQty < 1) return prevCart;
-      
-      const product = activeProducts.find(p => p.id === id);
-      if (!product) return prevCart;
-      
-      const currentReservedForOthers = prevCart
-        .filter(i => i.id !== id)
-        .reduce((sum, i) => sum + i.quantity, 0);
-      
-      if (delta > 0 && (currentReservedForOthers + newQty) > product.stock) {
-        showToastOnly(`Cannot exceed available stock! Only ${product.stock - currentReservedForOthers} left`, "error");
-        return prevCart;
-      }
-      
-      setTempReservedStock(prevMap => {
-        const newMap = new Map(prevMap);
-        if (newQty === 0) {
-          newMap.delete(id);
-        } else {
-          newMap.set(id, newQty);
-        }
-        return newMap;
-      });
-      
-      return prevCart.map(cartItem =>
-        cartItem.id === id ? { ...cartItem, quantity: newQty } : cartItem
+  setCart(prevCart => {
+    const item = prevCart.find(i => i.id === id);
+    if (!item) return prevCart;
+
+    const product = activeProducts.find(p => p.id === id);
+    if (!product) return prevCart;
+
+    const newQty = item.quantity + delta;
+
+    if (newQty < 1) {
+      return prevCart;
+    }
+
+    // ONLY compare this item's quantity against its own stock
+    if (delta > 0 && newQty > product.stock) {
+      setOutOfStockMessage(
+        product.stock <= 0
+          ? `${product.name} is currently out of stock.`
+          : `Cannot exceed available stock. Only ${product.stock} item(s) available for ${product.name}.`
       );
+
+      setShowOutOfStockModal(true);
+      return prevCart;
+    }
+
+    setTempReservedStock(prevMap => {
+      const newMap = new Map(prevMap);
+      newMap.set(id, newQty);
+      return newMap;
     });
-  };
+
+    return prevCart.map(cartItem =>
+      cartItem.id === id
+        ? { ...cartItem, quantity: newQty }
+        : cartItem
+    );
+  });
+};
 
   const removeFromCart = (id: string) => {
     setTempReservedStock(prev => {
@@ -517,6 +532,7 @@ export default function SalesPage() {
     setCart([]);
     setTempReservedStock(new Map());
     setPatientName("");
+    setContactNumber("");
     setPaymentMethod("cash");
     setAmountReceive("");
     setWarrantyStartDate("");
@@ -542,6 +558,7 @@ export default function SalesPage() {
       
       const newTransactionData: any = {
         patientName: patientName || "Walk-in Patient",
+        contactNumber: contactNumber || "",
         items: cart,
         subtotal: subtotal,
         discountType: discountType,
@@ -1060,7 +1077,7 @@ export default function SalesPage() {
 
       {/* POS Tab */}
       {activeTab === "pos" ? (
-        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
+        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 items-start">
           {/* Product Grid Section */}
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
             <div className="shrink-0 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
@@ -1131,9 +1148,15 @@ export default function SalesPage() {
                             if ((product.availableStock ?? 0) > 0 && !product.archived) {
                               handleAddToCartClick(product);
                             } else if (product.archived) {
-                              showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
+                              setOutOfStockMessage(
+                                `${product.name} is archived and cannot be sold.`
+                              );
+                              setShowOutOfStockModal(true);
                             } else {
-                              showToastOnly(`❌ ${product.name} is out of stock`, "error");
+                              setOutOfStockMessage(
+                                `${product.name} is currently out of stock.`
+                              );
+                              setShowOutOfStockModal(true);
                             }
                           }}
                           className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${
@@ -1245,6 +1268,21 @@ export default function SalesPage() {
                   className="w-full pl-8 sm:pl-9 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
                 />
               </div>
+              <div className="relative">
+                <Phone className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                
+                <input
+                  type="text"
+                  placeholder="Contact Number (Optional)"
+                  value={contactNumber}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/[^0-9]/g, "");
+                    setContactNumber(value);
+                  }}
+                  maxLength={11}
+                  className="w-full pl-8 sm:pl-9 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+                />
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1.5 sm:space-y-2" style={{ maxHeight: 'calc(100vh - 280px)', overflowX: 'hidden' }}>
@@ -1302,8 +1340,11 @@ export default function SalesPage() {
                             </span>
                             <button
                               onClick={() => updateQuantity(item.id, 1)}
-                              className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"
-                              disabled={item.quantity >= maxPossible}
+                              className={`p-0.5 sm:p-1 transition-colors ${
+                                item.quantity >= maxPossible
+                                  ? "text-red-500 hover:bg-red-50"
+                                  : "hover:bg-gray-100 text-gray-600"
+                              }`}
                             >
                               <Plus size={12} />
                             </button>
@@ -1424,7 +1465,7 @@ export default function SalesPage() {
                       <span className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm sm:text-base">₱</span>
                       <input
                         id="amountReceive"
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         placeholder={`${total.toLocaleString()}`}
                         value={amountReceive}
@@ -1878,7 +1919,7 @@ export default function SalesPage() {
                     <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
                       <User size={12} className="text-blue-600" />
                     </div>
-                    <p className="font-semibold text-slate-800 text-sm">{transactionToView.patientName || "Walk-in Patient"}</p>
+                    <p className="font-semibold text-slate-800 text-sm">{transactionToView.patientName || "Walk-in Patient"} ({transactionToView?.contactNumber || "N/A"})</p>
                   </div>
                 </div>
                 <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
@@ -2233,6 +2274,47 @@ export default function SalesPage() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Out of Stock Modal */}
+      <AnimatePresence>
+        {showOutOfStockModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20 }}
+              className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden"
+            >
+              <div className="flex flex-col items-center text-center p-6">
+                <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                  <AlertTriangle className="text-red-600 w-8 h-8" />
+                </div>
+
+                <h2 className="text-xl font-bold text-gray-800 mb-2">
+                  Out of Stock
+                </h2>
+
+                <p className="text-sm text-gray-600 mb-6">
+                  {outOfStockMessage}
+                </p>
+
+                <button
+                  onClick={() => setShowOutOfStockModal(false)}
+                  className="w-full py-2.5 rounded-xl bg-[#0B3C8A] hover:bg-[#082F6E] text-white font-semibold transition-colors"
+                >
+                  OK
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
