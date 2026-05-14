@@ -10,6 +10,7 @@ import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase } from "@/context/FirebaseContext";
 import Image from "next/image";
 import QRScannerModal from "@/components/QRScannerModal";
+import ReplacementRequestModal from "@/components/ReplacementRequestModal";
 import {
   ShoppingCart,
   Trash2,
@@ -35,7 +36,8 @@ import {
   Repeat,
   CheckCheck,
   Eye,
-  Phone
+  Phone,
+  CalendarDays
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
 
@@ -96,6 +98,8 @@ interface Transaction {
   id: string;
   patientName: string;
   contactNumber?: string;
+  idType?: string;
+  idNumber?: string;
   items: CartItem[];
   subtotal?: number;
   discountType?: "none" | "loyalty" | "pwd";
@@ -119,8 +123,15 @@ interface Transaction {
   replacedBy?: string;
   processedAt?: Date;
   processedBy?: string;
-  idDocument?: string;
-  idNumber?: string;
+  // Replacement request fields
+  replacementRequestId?: string;
+  replacementRequestedAt?: Date;
+  replacementRequestedBy?: string;
+  replacementApprovedAt?: Date;
+  replacementApprovedBy?: string;
+  replacementRejectedAt?: Date;
+  replacementRejectedBy?: string;
+  replacementRejectionReason?: string;
 }
 
 const normalizeDiscountPercentage = (raw?: number): number => {
@@ -213,7 +224,9 @@ export default function SalesPage() {
     isOnline,
     userName,
     userRole,
-    userId
+    userId,
+    replacementRequests,
+    fetchReplacementRequests
   } = useFirebase();
 
   const [activeTab, setActiveTab] = useState<"pos" | "history">("pos");
@@ -222,6 +235,9 @@ export default function SalesPage() {
   const [syncing, setSyncing] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [patientName, setPatientName] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+  const [idType, setIdType] = useState("");
+  const [idNumber, setIdNumber] = useState("");
   const [tempReservedStock, setTempReservedStock] = useState<Map<string, number>>(new Map());
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showAddToCartModal, setShowAddToCartModal] = useState(false);
@@ -247,13 +263,17 @@ export default function SalesPage() {
   const [referenceNumber, setReferenceNumber] = useState<string>("");
   const [showOnlineConfirm, setShowOnlineConfirm] = useState(false);
   const [discountType, setDiscountType] = useState<"none" | "loyalty" | "pwd">("none");
-  const [idDocument, setIdDocument] = useState<string>("");
-  const [idNumber, setIdNumber] = useState<string>("");
-  const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
-  const [outOfStockMessage, setOutOfStockMessage] = useState("");
-  const [contactNumber, setContactNumber] = useState("");
+  const [showReplacementRequestModal, setShowReplacementRequestModal] = useState(false);
+  const [transactionForReplacementRequest, setTransactionForReplacementRequest] = useState<Transaction | null>(null);
 
   const searchParams = useSearchParams();
+
+  // Fetch replacement requests for checking pending status
+  useEffect(() => {
+    if (userRole === "admin") {
+      fetchReplacementRequests(false);
+    }
+  }, [userRole, fetchReplacementRequests]);
 
   const activeProducts = useMemo(() => {
     return (firebaseProducts as Product[]).filter(product => !product.archived);
@@ -280,14 +300,14 @@ export default function SalesPage() {
       monthsSet.add(monthKey);
     });
     
-    const sortedMonths = Array.from(monthsSet).sort((a, b) => {
+    const sortedMonths = Array.from(monthsSet).sort((a: string, b: string) => {
       const [yearA, monthA] = a.split('-').map(Number);
       const [yearB, monthB] = b.split('-').map(Number);
       if (yearA !== yearB) return yearB - yearA;
       return monthB - monthA;
     });
     
-    return sortedMonths.map(key => {
+    return sortedMonths.map((key: string) => {
       const [year, month] = key.split('-').map(Number);
       return { key, display: `${monthNames[month]} ${year}` };
     });
@@ -410,20 +430,14 @@ export default function SalesPage() {
 
   const handleAddToCartClick = (product: Product) => {
     if (product.archived) {
-      setOutOfStockMessage(
-        `${product.name} is archived and cannot be sold.`
-      );
-      setShowOutOfStockModal(true);
+      showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
       return;
     }
     const currentReserved = tempReservedStock.get(product.id) || 0;
     const actualStock = product.stock;
     const availableForThis = actualStock - currentReserved;
     if (availableForThis <= 0) {
-      setOutOfStockMessage(
-        `${product.name} is currently out of stock.`
-      );
-      setShowOutOfStockModal(true);
+      showToastOnly(`❌ ${product.name} is out of stock`, "error");
       return;
     }
     setPendingProduct(product);
@@ -480,44 +494,40 @@ export default function SalesPage() {
   };
 
   const updateQuantity = (id: string, delta: number) => {
-  setCart(prevCart => {
-    const item = prevCart.find(i => i.id === id);
-    if (!item) return prevCart;
-
-    const product = activeProducts.find(p => p.id === id);
-    if (!product) return prevCart;
-
-    const newQty = item.quantity + delta;
-
-    if (newQty < 1) {
-      return prevCart;
-    }
-
-    // ONLY compare this item's quantity against its own stock
-    if (delta > 0 && newQty > product.stock) {
-      setOutOfStockMessage(
-        product.stock <= 0
-          ? `${product.name} is currently out of stock.`
-          : `Cannot exceed available stock. Only ${product.stock} item(s) available for ${product.name}.`
+    setCart(prevCart => {
+      const item = prevCart.find(i => i.id === id);
+      if (!item) return prevCart;
+      
+      const newQty = item.quantity + delta;
+      if (newQty < 1) return prevCart;
+      
+      const product = activeProducts.find(p => p.id === id);
+      if (!product) return prevCart;
+      
+      const currentReservedForOthers = prevCart
+        .filter(i => i.id !== id)
+        .reduce((sum, i) => sum + i.quantity, 0);
+      
+      if (delta > 0 && (currentReservedForOthers + newQty) > product.stock) {
+        showToastOnly(`Cannot exceed available stock! Only ${product.stock - currentReservedForOthers} left`, "error");
+        return prevCart;
+      }
+      
+      setTempReservedStock(prevMap => {
+        const newMap = new Map(prevMap);
+        if (newQty === 0) {
+          newMap.delete(id);
+        } else {
+          newMap.set(id, newQty);
+        }
+        return newMap;
+      });
+      
+      return prevCart.map(cartItem =>
+        cartItem.id === id ? { ...cartItem, quantity: newQty } : cartItem
       );
-
-      setShowOutOfStockModal(true);
-      return prevCart;
-    }
-
-    setTempReservedStock(prevMap => {
-      const newMap = new Map(prevMap);
-      newMap.set(id, newQty);
-      return newMap;
     });
-
-    return prevCart.map(cartItem =>
-      cartItem.id === id
-        ? { ...cartItem, quantity: newQty }
-        : cartItem
-    );
-  });
-};
+  };
 
   const removeFromCart = (id: string) => {
     setTempReservedStock(prev => {
@@ -533,14 +543,14 @@ export default function SalesPage() {
     setTempReservedStock(new Map());
     setPatientName("");
     setContactNumber("");
+    setIdType("");
+    setIdNumber("");
     setPaymentMethod("cash");
     setAmountReceive("");
     setWarrantyStartDate("");
     setWarrantyEndDate("");
     setReferenceNumber("");
     setDiscountType("none");
-    setIdDocument("");
-    setIdNumber("");
   };
 
   const processCheckout = async (paymentMethodToUse: "cash" | "online", amountReceivedForCash?: number) => {
@@ -573,6 +583,12 @@ export default function SalesPage() {
         paymentMethod: paymentMethodToUse,
       };
       
+      // Only add ID fields if discount type is "pwd" (PWD/Senior)
+      if (discountType === "pwd") {
+        newTransactionData.idType = idType || "";
+        newTransactionData.idNumber = idNumber || "";
+      }
+      
       if (paymentMethodToUse === "cash" && amountReceivedForCash !== undefined) {
         newTransactionData.amountReceive = amountReceivedForCash;
         newTransactionData.change = amountReceivedForCash - total;
@@ -585,11 +601,6 @@ export default function SalesPage() {
       if (warrantyStartDate && warrantyEndDate) {
         newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
         newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
-      }
-      // Include PWD/Senior ID info when applicable
-      if (discountType === 'pwd') {
-        if (idDocument) newTransactionData.idDocument = idDocument;
-        if (idNumber) newTransactionData.idNumber = idNumber;
       }
       
       const transactionId = await addTransaction(newTransactionData);
@@ -635,6 +646,7 @@ export default function SalesPage() {
           transactionId,
           receiptNumber: transactionId.slice(-8).toUpperCase(),
           patientName: patientName || "Walk-in Patient",
+          contactNumber: contactNumber || "",
           itemCount,
           total,
           items: cart,
@@ -654,6 +666,7 @@ export default function SalesPage() {
             transactionId,
             receiptNumber: transactionId.slice(-8).toUpperCase(),
             patientName: patientName || "Walk-in Patient",
+            contactNumber: contactNumber || "",
             itemCount,
             total,
             staffName: currentUser.name,
@@ -799,22 +812,19 @@ export default function SalesPage() {
     }
 
     doc.text(`Customer: ${trx.patientName}`, leftMargin, currentY);
-    currentY += 3;
-
-    // Include ID info for PWD/Senior if present
-    if (trx.discountType === 'pwd' && (trx.idDocument || trx.idNumber)) {
-      doc.setFontSize(6);
-      doc.setFont('Helvetica', 'normal');
-      if (trx.idDocument) {
-        doc.text(`ID Type: ${trx.idDocument}`, leftMargin, currentY);
-        currentY += 2.3;
-      }
-      if (trx.idNumber) {
-        doc.text(`ID Number: ${trx.idNumber}`, leftMargin, currentY);
-        currentY += 2.3;
-      }
-      currentY += 0.5;
+    currentY += 2.5;
+    
+    if (trx.contactNumber) {
+      doc.text(`Contact: ${trx.contactNumber}`, leftMargin, currentY);
+      currentY += 2.5;
     }
+    
+    if (trx.discountType === "pwd" && trx.idType && trx.idNumber) {
+      doc.text(`${trx.idType} ID: ${trx.idNumber}`, leftMargin, currentY);
+      currentY += 2.5;
+    }
+    
+    currentY += 0.5;
 
     drawDashedDivider(currentY);
     currentY += 2.5;
@@ -831,21 +841,11 @@ export default function SalesPage() {
 
     trx.items.forEach(item => {
       const lineAmount = item.quantity * item.price;
-      const unitPriceStr = `${item.price.toLocaleString()}`;
-      const displayName = `${item.name}@${item.quantity}`;
-      doc.text(displayName, leftMargin, currentY);
-      doc.text(unitPriceStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
-      currentY += 2;
-      
       const lineAmountStr = `${lineAmount.toLocaleString()}`;
-      doc.setFont('Helvetica', 'normal');
-      doc.setFontSize(5.5);
-      doc.text('Total:', leftMargin + 2, currentY);
-      doc.setFont('Helvetica', 'bold');
+      const displayName = `${item.name} (x${item.quantity})`;
+      doc.text(displayName, leftMargin, currentY);
       doc.text(lineAmountStr, pageWidth - rightMargin - 8, currentY, { align: 'right' });
-      currentY += 2.5;
-      doc.setFont('Helvetica', 'normal');
-      doc.setFontSize(6);
+      currentY += 2.3;
     });
 
     drawDashedDivider(currentY);
@@ -1041,6 +1041,18 @@ export default function SalesPage() {
     }
   };
 
+  // Check if a transaction has a pending replacement request
+  const hasPendingReplacementRequest = (transactionId: string): boolean => {
+    return replacementRequests.some(
+      r => r.transactionId === transactionId && r.status === "pending"
+    );
+  };
+
+  // Get replacement request details for a transaction
+  const getReplacementRequestForTransaction = (transactionId: string) => {
+    return replacementRequests.find(r => r.transactionId === transactionId);
+  };
+
   return (
     <div className="flex flex-col w-full font-sans p-2 sm:p-4 box-border">
       {/* Header Tabs */}
@@ -1077,7 +1089,7 @@ export default function SalesPage() {
 
       {/* POS Tab */}
       {activeTab === "pos" ? (
-        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 items-start">
+        <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
           {/* Product Grid Section */}
           <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 lg:min-h-0">
             <div className="shrink-0 p-2 sm:p-4 border-b border-gray-100 bg-slate-50 space-y-2 sm:space-y-3">
@@ -1148,15 +1160,9 @@ export default function SalesPage() {
                             if ((product.availableStock ?? 0) > 0 && !product.archived) {
                               handleAddToCartClick(product);
                             } else if (product.archived) {
-                              setOutOfStockMessage(
-                                `${product.name} is archived and cannot be sold.`
-                              );
-                              setShowOutOfStockModal(true);
+                              showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
                             } else {
-                              setOutOfStockMessage(
-                                `${product.name} is currently out of stock.`
-                              );
-                              setShowOutOfStockModal(true);
+                              showToastOnly(`❌ ${product.name} is out of stock`, "error");
                             }
                           }}
                           className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${
@@ -1258,6 +1264,8 @@ export default function SalesPage() {
                   </button>
                 )}
               </div>
+              
+              {/* Patient Name */}
               <div className="relative">
                 <User className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
                 <input
@@ -1268,18 +1276,15 @@ export default function SalesPage() {
                   className="w-full pl-8 sm:pl-9 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
                 />
               </div>
+              
+              {/* Contact Number - directly below patient name */}
               <div className="relative">
                 <Phone className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                
                 <input
-                  type="text"
+                  type="tel"
                   placeholder="Contact Number (Optional)"
                   value={contactNumber}
-                  onChange={(e) => {
-                    const value = e.target.value.replace(/[^0-9]/g, "");
-                    setContactNumber(value);
-                  }}
-                  maxLength={11}
+                  onChange={(e) => setContactNumber(e.target.value)}
                   className="w-full pl-8 sm:pl-9 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
                 />
               </div>
@@ -1340,11 +1345,8 @@ export default function SalesPage() {
                             </span>
                             <button
                               onClick={() => updateQuantity(item.id, 1)}
-                              className={`p-0.5 sm:p-1 transition-colors ${
-                                item.quantity >= maxPossible
-                                  ? "text-red-500 hover:bg-red-50"
-                                  : "hover:bg-gray-100 text-gray-600"
-                              }`}
+                              className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"
+                              disabled={item.quantity >= maxPossible}
                             >
                               <Plus size={12} />
                             </button>
@@ -1457,6 +1459,30 @@ export default function SalesPage() {
                   </div>
                 </div>
 
+                {/* ID Type and ID Number - Only visible when PWD/Senior discount is selected */}
+                {discountType === "pwd" && (
+                  <div className="space-y-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={idType}
+                        onChange={(e) => setIdType(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-md border border-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 bg-white"
+                      >
+                        <option value="">Select ID Type</option>
+                        <option value="PWD">PWD ID</option>
+                        <option value="Senior Citizen">Senior Citizen ID</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="ID Number"
+                        value={idNumber}
+                        onChange={(e) => setIdNumber(e.target.value)}
+                        className="w-full px-2 py-1.5 rounded-md border border-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Amount Receive for Cash */}
                 {paymentMethod === "cash" && (
                   <div className="space-y-1.5">
@@ -1465,7 +1491,7 @@ export default function SalesPage() {
                       <span className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm sm:text-base">₱</span>
                       <input
                         id="amountReceive"
-                        type="text"
+                        type="number"
                         inputMode="decimal"
                         placeholder={`${total.toLocaleString()}`}
                         value={amountReceive}
@@ -1473,30 +1499,6 @@ export default function SalesPage() {
                         className="w-full pl-6 sm:pl-8 pr-2 sm:pr-3 py-1.5 sm:py-2 rounded-md border-2 border-gray-300 text-sm sm:text-base font-bold focus:outline-none focus:border-[#0B3C8A] text-gray-800"
                       />
                     </div>
-                    {/* PWD/Senior ID inputs */}
-                    {discountType === 'pwd' && (
-                      <div className="space-y-2">
-                        <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Valid ID</label>
-                        <select
-                          value={idDocument}
-                          onChange={(e) => setIdDocument(e.target.value)}
-                          className="w-full px-3 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
-                        >
-                          <option value="PWD ID">PWD ID</option>
-                          <option value="Senior Citizen ID">Senior Citizen ID</option>
-                          <option value="Other">Other</option>
-                        </select>
-
-                        <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">ID Number</label>
-                        <input
-                          type="text"
-                          placeholder="Enter ID number (optional)"
-                          value={idNumber}
-                          onChange={(e) => setIdNumber(e.target.value)}
-                          className="w-full px-3 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
-                        />
-                      </div>
-                    )}
                     {amountReceive && !isNaN(parseFloat(amountReceive)) && parseFloat(amountReceive) >= total && (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 sm:p-2.5">
                         <div className="flex justify-between items-center text-xs sm:text-sm">
@@ -1658,6 +1660,7 @@ export default function SalesPage() {
                       const warrantyStatus = getWarrantyStatus(trx);
                       const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
                       const canProcessReplacement = trx.status === "completed" && warrantyStatus.active;
+                      const hasPendingRequest = hasPendingReplacementRequest(trx.id);
                       const statusBadge = getStatusBadge(trx.status);
                       
                       return (
@@ -1691,6 +1694,9 @@ export default function SalesPage() {
                               {statusBadge.icon}
                               {statusBadge.text}
                             </span>
+                            {hasPendingRequest && (
+                              <div className="text-[8px] text-amber-600 mt-0.5 font-medium">Request Pending</div>
+                            )}
                           </td>
                           <td className="p-2 sm:p-3 text-right">
                             <div className="flex items-center justify-end gap-1 sm:gap-1.5">
@@ -1708,11 +1714,34 @@ export default function SalesPage() {
                               >
                                 <Receipt size={14} />
                               </button>
-                              {canProcessReplacement && hasWarranty && (
+                              
+                              {/* REQUEST REPLACEMENT BUTTON - STAFF ONLY */}
+                              {userRole === "staff" && trx.status === "completed" && isWarrantyValid(trx) && !hasPendingRequest && (
+                                <button
+                                  onClick={() => {
+                                    setTransactionForReplacementRequest(trx);
+                                    setShowReplacementRequestModal(true);
+                                  }}
+                                  className="p-1 sm:p-1.5 text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                                  title="Request Replacement (Under Warranty)"
+                                >
+                                  <Repeat size={14} />
+                                </button>
+                              )}
+                              
+                              {/* Show pending indicator for staff */}
+                              {userRole === "staff" && trx.status === "completed" && hasPendingRequest && (
+                                <span className="p-1 sm:p-1.5 text-amber-400" title="Replacement request pending approval">
+                                  <Repeat size={14} />
+                                </span>
+                              )}
+                              
+                              {/* ADMIN PROCESS REPLACEMENT BUTTON - ADMIN ONLY (Purple/Violet Repeat icon) */}
+                              {userRole === "admin" && canProcessReplacement && hasWarranty && (
                                 <button
                                   onClick={() => openReplacementModal(trx)}
                                   className="p-1 sm:p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                  title="Process Replacement (Under Warranty)"
+                                  title="Process Replacement (Admin)"
                                 >
                                   <Repeat size={14} />
                                 </button>
@@ -1813,18 +1842,6 @@ export default function SalesPage() {
                   </div>
                 </div>
               )}
-              {lastTransaction.discountType === 'pwd' && (
-                <div className="bg-blue-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm border border-blue-200">
-                  <div className="flex justify-between">
-                    <span className="text-blue-700 font-semibold">ID Type</span>
-                    <span className="font-medium text-gray-800">{lastTransaction.idDocument || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-blue-700 font-semibold">ID Number</span>
-                    <span className="font-medium text-gray-800">{lastTransaction.idNumber || 'N/A'}</span>
-                  </div>
-                </div>
-              )}
               
               {lastTransaction.paymentMethod && (
                 <div className="bg-slate-50 rounded-lg p-3 sm:p-4 mb-5 sm:mb-6 text-sm space-y-2 border border-gray-200">
@@ -1877,7 +1894,7 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* View Transaction Details Modal */}
+      {/* View Transaction Details Modal - Updated with replacement request dates */}
       <AnimatePresence>
         {viewTransactionModalOpen && transactionToView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -1915,11 +1932,19 @@ export default function SalesPage() {
                 </div>
                 <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Customer</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
-                      <User size={12} className="text-blue-600" />
+                  <div className="flex flex-col gap-0.5 mt-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
+                        <User size={12} className="text-blue-600" />
+                      </div>
+                      <p className="font-semibold text-slate-800 text-sm">{transactionToView.patientName || "Walk-in Patient"}</p>
                     </div>
-                    <p className="font-semibold text-slate-800 text-sm">{transactionToView.patientName || "Walk-in Patient"} ({transactionToView?.contactNumber || "N/A"})</p>
+                    {transactionToView.contactNumber && (
+                      <p className="text-[10px] text-slate-500 ml-8">📞 {transactionToView.contactNumber}</p>
+                    )}
+                    {transactionToView.discountType === "pwd" && transactionToView.idType && transactionToView.idNumber && (
+                      <p className="text-[10px] text-slate-500 ml-8">🪪 {transactionToView.idType}: {transactionToView.idNumber}</p>
+                    )}
                   </div>
                 </div>
                 <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-3.5">
@@ -1949,6 +1974,53 @@ export default function SalesPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* Replacement Request Dates Section - Only show if there's a replacement request */}
+                {(() => {
+                  const replacementReq = getReplacementRequestForTransaction(transactionToView.id);
+                  if (replacementReq) {
+                    return (
+                      <>
+                        {/* Requested Date */}
+                        <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-xl p-3.5">
+                          <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide flex items-center gap-1">
+                            <CalendarDays size={12} /> Replacement Requested
+                          </p>
+                          <p className="font-semibold text-amber-700 text-sm mt-1">{formatDateTime(replacementReq.requestedAt)}</p>
+                          <p className="text-[9px] text-amber-500 mt-0.5">by {replacementReq.requestedBy}</p>
+                        </div>
+
+                        {/* Approved Date - Only show if approved */}
+                        {replacementReq.status === "approved" && replacementReq.reviewedAt && (
+                          <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-3.5">
+                            <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide flex items-center gap-1">
+                              <CheckCircle2 size={12} /> Replacement Approved
+                            </p>
+                            <p className="font-semibold text-emerald-700 text-sm mt-1">{formatDateTime(replacementReq.reviewedAt)}</p>
+                            <p className="text-[9px] text-emerald-500 mt-0.5">by {replacementReq.reviewedBy}</p>
+                          </div>
+                        )}
+
+                        {/* Rejected Date & Reason - Only show if rejected */}
+                        {replacementReq.status === "rejected" && replacementReq.reviewedAt && (
+                          <div className="bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl p-3.5">
+                            <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide flex items-center gap-1">
+                              <XCircle size={12} /> Replacement Rejected
+                            </p>
+                            <p className="font-semibold text-red-700 text-sm mt-1">{formatDateTime(replacementReq.reviewedAt)}</p>
+                            <p className="text-[9px] text-red-500 mt-0.5">by {replacementReq.reviewedBy}</p>
+                            {replacementReq.rejectionReason && (
+                              <p className="text-[11px] text-red-600 mt-2 p-2 bg-red-100 rounded-md">
+                                <strong>Reason:</strong> {replacementReq.rejectionReason}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  }
+                  return null;
+                })()}
 
                 {(transactionToView.status === "processing_replacement" || transactionToView.status === "replaced") && (
                   <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-xl p-3.5">
@@ -2020,15 +2092,12 @@ export default function SalesPage() {
                 </div>
                 <div className="divide-y divide-slate-100">
                   {transactionToView.items.map((item, index) => (
-                    <div key={`${item.id}-${index}`} className="px-4 py-3 hover:bg-slate-50 transition-colors">
-                      <div className="flex justify-between items-start mb-1.5">
-                        <span className="text-sm text-slate-700 font-medium">{item.name}@{item.quantity}</span>
-                        <span className="text-sm font-semibold text-slate-700">₱{item.price.toLocaleString()}</span>
+                    <div key={`${item.id}-${index}`} className="px-4 py-2.5 flex justify-between items-center hover:bg-slate-50 transition-colors">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-slate-700 font-medium">{item.name}</span>
+                        <span className="text-[11px] text-slate-400">Quantity: {item.quantity} × ₱{item.price.toLocaleString()}</span>
                       </div>
-                      <div className="flex justify-between items-center pl-4">
-                        <span className="text-[11px] text-slate-500">Total:</span>
-                        <span className="font-bold text-slate-800">₱{(item.price * item.quantity).toLocaleString()}</span>
-                      </div>
+                      <span className="font-bold text-slate-800">₱{(item.price * item.quantity).toLocaleString()}</span>
                     </div>
                   ))}
                 </div>
@@ -2053,18 +2122,6 @@ export default function SalesPage() {
                       <span className="font-bold text-emerald-700">
                         -₱{transactionToView.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
-                    </div>
-                  )}
-                  {transactionToView.discountType === 'pwd' && (
-                    <div className="mt-2 bg-blue-50 rounded-lg p-3 border border-blue-100">
-                      <div className="flex justify-between">
-                        <span className="text-xs text-blue-700 font-semibold">ID Type</span>
-                        <span className="font-medium text-slate-700">{transactionToView.idDocument || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between mt-1">
-                        <span className="text-xs text-blue-700 font-semibold">ID Number</span>
-                        <span className="font-medium text-slate-700">{transactionToView.idNumber || 'N/A'}</span>
-                      </div>
                     </div>
                   )}
                   <div className="border-t border-slate-200 pt-2 mt-2">
@@ -2103,7 +2160,7 @@ export default function SalesPage() {
                 >
                   <Receipt size={16} /> Download Receipt
                 </button>
-                {transactionToView.status === "processing_replacement" && (
+                {transactionToView.status === "processing_replacement" && userRole === "admin" && (
                   <button
                     onClick={() => { setViewTransactionModalOpen(false); setTransactionToView(null); openCompleteReplacementModal(transactionToView); }}
                     className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
@@ -2117,7 +2174,7 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* Process Replacement Modal */}
+      {/* Process Replacement Modal (Admin Approval) */}
       <AnimatePresence>
         {replacementModalOpen && transactionToReplace && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -2206,6 +2263,29 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
+      {/* Replacement Request Modal (Staff Submission) */}
+      <AnimatePresence>
+        {showReplacementRequestModal && transactionForReplacementRequest && (
+          <ReplacementRequestModal
+            transactionId={transactionForReplacementRequest.id}
+            transactionReceiptNumber={transactionForReplacementRequest.id.slice(-8).toUpperCase()}
+            patientName={transactionForReplacementRequest.patientName}
+            originalTotal={transactionForReplacementRequest.total}
+            originalItems={transactionForReplacementRequest.items}
+            onClose={() => {
+              setShowReplacementRequestModal(false);
+              setTransactionForReplacementRequest(null);
+            }}
+            onSuccess={() => {
+              fetchReplacementRequests(true);
+              setShowReplacementRequestModal(false);
+              setTransactionForReplacementRequest(null);
+              showToastOnly("Replacement request submitted successfully", "success");
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* QR Scanner Modal */}
       <AnimatePresence>
         {isQRScannerOpen && (
@@ -2277,47 +2357,6 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* Out of Stock Modal */}
-      <AnimatePresence>
-        {showOutOfStockModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 260, damping: 20 }}
-              className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden"
-            >
-              <div className="flex flex-col items-center text-center p-6">
-                <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
-                  <AlertTriangle className="text-red-600 w-8 h-8" />
-                </div>
-
-                <h2 className="text-xl font-bold text-gray-800 mb-2">
-                  Out of Stock
-                </h2>
-
-                <p className="text-sm text-gray-600 mb-6">
-                  {outOfStockMessage}
-                </p>
-
-                <button
-                  onClick={() => setShowOutOfStockModal(false)}
-                  className="w-full py-2.5 rounded-xl bg-[#0B3C8A] hover:bg-[#082F6E] text-white font-semibold transition-colors"
-                >
-                  OK
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Cash Payment Confirmation Modal */}
       <AnimatePresence>
         {showCashConfirm && (
@@ -2376,3 +2415,23 @@ export default function SalesPage() {
     </div>
   );
 }
+
+// Helper component for XCircle icon used in rejection display
+const XCircle = ({ size, className }: { size: number; className?: string }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+    className={className}
+  >
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+);

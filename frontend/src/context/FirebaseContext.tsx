@@ -42,7 +42,8 @@ import {
   limit,
   onSnapshot,
   writeBatch,
-  where
+  where,
+  and
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
@@ -119,6 +120,29 @@ export interface Transaction {
   updatedAt?: Timestamp;
 }
 
+export interface ReplacementRequest {
+  id: string;
+  transactionId: string;
+  transactionReceiptNumber: string;
+  patientName: string;
+  originalTotal: number;
+  originalItems: any[];
+  reason: string;
+  requestedBy: string;
+  requestedById: string;
+  requestedAt: Date;
+  status: "pending" | "approved" | "rejected" | "completed";
+  reviewedBy?: string;
+  reviewedById?: string;
+  reviewedAt?: Date;
+  rejectionReason?: string;
+  completedAt?: Date;
+  completedBy?: string;
+  completedById?: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
 export interface StaffUser {
   uid: string;
   email: string;
@@ -161,6 +185,20 @@ interface FirebaseContextType {
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
   processReplacement: (id: string, reason: string, processedBy: string) => Promise<void>;
   markReplacementAsCompleted: (id: string, replacedBy: string) => Promise<void>;
+
+  // New Replacement Request methods
+  replacementRequests: ReplacementRequest[];
+  createReplacementRequest: (
+    transactionId: string,
+    reason: string,
+    requestedBy: string,
+    requestedById: string
+  ) => Promise<string>;
+  approveReplacementRequest: (requestId: string, approvedBy: string, approvedById: string) => Promise<void>;
+  rejectReplacementRequest: (requestId: string, rejectedBy: string, rejectedById: string, rejectionReason: string) => Promise<void>;
+  completeReplacementRequest: (requestId: string, completedBy: string, completedById: string) => Promise<void>;
+  fetchReplacementRequests: (forceRefresh?: boolean) => Promise<void>;
+  getPendingReplacementRequests: () => ReplacementRequest[];
 
   staffUsers: StaffUser[];
   fetchStaffUsers: (forceRefresh?: boolean) => Promise<void>;
@@ -474,52 +512,127 @@ const logSaleCompleted = async (transactionId: string, staffName: string, patien
   }
 };
 
-// Helper function to log replacement initiated activity
-const logReplacementInitiated = async (transactionId: string, reason: string, staffName: string, patientName: string, total: number, items: any[]) => {
+// Helper function to log replacement request created
+const logReplacementRequestCreated = async (
+  transactionId: string,
+  requestId: string,
+  reason: string,
+  staffName: string,
+  staffId: string,
+  patientName: string,
+  total: number
+) => {
   try {
-    const productDetails = getProductDetailsForLog(items);
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
     
     await addDoc(activityRef, {
-      type: 'replacement',
-      action: 'replacement_initiated',
-      description: `${staffName} initiated replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()})${reason ? ` Reason: ${reason}` : ''}. Products: ${productDetails}`,
+      type: 'replacement_request',
+      action: 'replacement_request_created',
+      description: `${staffName} submitted a replacement request for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Reason: ${reason}`,
       staffName: staffName,
-      staffId: staffName,
+      staffId: staffId,
       transactionId: transactionId,
+      requestId: requestId,
       patientName: patientName || 'Walk-in Patient',
       total: total,
-      productDetails: productDetails,
-      reason: reason || null,
+      reason: reason,
       timestamp: serverTimestamp()
     });
-    console.log(`✅ Replacement initiated activity logged for transaction ${transactionId}`);
+    console.log(`✅ Replacement request created activity logged for transaction ${transactionId}`);
   } catch (error) {
-    console.error('Error logging replacement initiated activity:', error);
+    console.error('Error logging replacement request creation:', error);
   }
 };
 
-// Helper function to log replacement completed activity
-const logReplacementCompleted = async (transactionId: string, staffName: string, patientName: string, total: number, items: any[]) => {
+// Helper function to log replacement request approval
+const logReplacementRequestApproved = async (
+  requestId: string,
+  transactionId: string,
+  approvedBy: string,
+  approvedById: string,
+  patientName: string,
+  total: number
+) => {
   try {
-    const productDetails = getProductDetailsForLog(items);
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
     
     await addDoc(activityRef, {
-      type: 'replacement',
-      action: 'replacement_completed',
-      description: `${staffName} completed replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Products: ${productDetails}`,
-      staffName: staffName,
-      staffId: staffName,
+      type: 'replacement_request',
+      action: 'replacement_request_approved',
+      description: `${approvedBy} approved replacement request for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()})`,
+      staffName: approvedBy,
+      staffId: approvedById,
       transactionId: transactionId,
+      requestId: requestId,
       patientName: patientName || 'Walk-in Patient',
       total: total,
-      productDetails: productDetails,
       timestamp: serverTimestamp()
     });
-    console.log(`✅ Replacement completed activity logged for transaction ${transactionId}`);
+    console.log(`✅ Replacement request approved activity logged for request ${requestId}`);
   } catch (error) {
-    console.error('Error logging replacement completed activity:', error);
+    console.error('Error logging replacement request approval:', error);
+  }
+};
+
+// Helper function to log replacement request rejection
+const logReplacementRequestRejected = async (
+  requestId: string,
+  transactionId: string,
+  rejectedBy: string,
+  rejectedById: string,
+  rejectionReason: string,
+  patientName: string,
+  total: number
+) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'replacement_request',
+      action: 'replacement_request_rejected',
+      description: `${rejectedBy} rejected replacement request for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Reason: ${rejectionReason}`,
+      staffName: rejectedBy,
+      staffId: rejectedById,
+      transactionId: transactionId,
+      requestId: requestId,
+      patientName: patientName || 'Walk-in Patient',
+      total: total,
+      rejectionReason: rejectionReason,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Replacement request rejected activity logged for request ${requestId}`);
+  } catch (error) {
+    console.error('Error logging replacement request rejection:', error);
+  }
+};
+
+// Helper function to log replacement request completion
+const logReplacementRequestCompleted = async (
+  requestId: string,
+  transactionId: string,
+  completedBy: string,
+  completedById: string,
+  patientName: string,
+  total: number
+) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'replacement_request',
+      action: 'replacement_request_completed',
+      description: `${completedBy} completed replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()})`,
+      staffName: completedBy,
+      staffId: completedById,
+      transactionId: transactionId,
+      requestId: requestId,
+      patientName: patientName || 'Walk-in Patient',
+      total: total,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Replacement request completed activity logged for request ${requestId}`);
+  } catch (error) {
+    console.error('Error logging replacement request completion:', error);
   }
 };
 
@@ -547,6 +660,94 @@ const getChangedFields = (oldData: any, newData: any, ignoredFields: string[] = 
   return changes;
 };
 
+// Helper function to adjust inventory for replacement approval (return items to stock)
+const adjustInventoryForReplacementApproval = async (
+  items: any[],
+  staffName: string,
+  staffId: string
+): Promise<void> => {
+  try {
+    for (const item of items) {
+      // Find the product in Firestore
+      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
+      const productSnap = await getDoc(productRef);
+      
+      if (productSnap.exists()) {
+        const currentProduct = productSnap.data();
+        const oldStock = currentProduct.stock || 0;
+        const newStock = oldStock + item.quantity;
+        
+        // Update stock (return items to inventory)
+        await updateDoc(productRef, {
+          stock: newStock,
+          updatedAt: serverTimestamp()
+        });
+        
+        // Log the stock adjustment
+        await logStockAdjustment(
+          item.id,
+          oldStock,
+          newStock,
+          `Replacement request approved: +${item.quantity} units returned to inventory`,
+          staffId,
+          staffName,
+          currentProduct.name
+        );
+      }
+    }
+  } catch (error) {
+    console.error('Error adjusting inventory for replacement approval:', error);
+    throw error;
+  }
+};
+
+// Helper function to adjust inventory for replacement completion (remove replacement items)
+const adjustInventoryForReplacementCompletion = async (
+  items: any[],
+  staffName: string,
+  staffId: string
+): Promise<void> => {
+  try {
+    for (const item of items) {
+      // Find the product in Firestore
+      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
+      const productSnap = await getDoc(productRef);
+      
+      if (productSnap.exists()) {
+        const currentProduct = productSnap.data();
+        const oldStock = currentProduct.stock || 0;
+        const newStock = Math.max(0, oldStock - item.quantity);
+        
+        // Update stock (remove replacement items)
+        await updateDoc(productRef, {
+          stock: newStock,
+          updatedAt: serverTimestamp()
+        });
+        
+        // Update damage/exchange count
+        const currentDamageExchanged = currentProduct.damageExchanged || 0;
+        await updateDoc(productRef, {
+          damageExchanged: currentDamageExchanged + item.quantity
+        });
+        
+        // Log the stock adjustment
+        await logStockAdjustment(
+          item.id,
+          oldStock,
+          newStock,
+          `Replacement completed: -${item.quantity} units removed as replacement`,
+          staffId,
+          staffName,
+          currentProduct.name
+        );
+      }
+    }
+  } catch (error) {
+    console.error('Error adjusting inventory for replacement completion:', error);
+    throw error;
+  }
+};
+
 // ================= PROVIDER =================
 
 export function FirebaseProvider({ children }: { children: ReactNode }) {
@@ -557,6 +758,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
+  const [replacementRequests, setReplacementRequests] = useState<ReplacementRequest[]>([]);
 
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
@@ -569,14 +771,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const hasFetchedProductsRef = useRef(false);
   const hasFetchedTransactionsRef = useRef(false);
   const hasFetchedUsersRef = useRef(false);
+  const hasFetchedReplacementRequestsRef = useRef(false);
   
   const isFetchingProductsRef = useRef(false);
   const isFetchingTransactionsRef = useRef(false);
   const isFetchingUsersRef = useRef(false);
+  const isFetchingReplacementRequestsRef = useRef(false);
   
   const lastProductsFetchRef = useRef<number>(0);
   const lastTransactionsFetchRef = useRef<number>(0);
   const lastUsersFetchRef = useRef<number>(0);
+  const lastReplacementRequestsFetchRef = useRef<number>(0);
   
   const CACHE_TTL = 10 * 60 * 1000;
 
@@ -584,6 +789,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const pendingUserPasswords = useRef<Map<string, string>>(new Map());
   const listenersSetupRef = useRef(false);
   const initialStaffFetchDoneRef = useRef(false);
+  const replacementRequestsListenerRef = useRef<(() => void) | null>(null);
 
   // ================= AUTH =================
 
@@ -640,12 +846,19 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         setUserId("");
         setUserEmail("");
         setStaffUsers([]);
+        setReplacementRequests([]);
         hasFetchedProductsRef.current = false;
         hasFetchedTransactionsRef.current = false;
         hasFetchedUsersRef.current = false;
+        hasFetchedReplacementRequestsRef.current = false;
         listenersSetupRef.current = false;
         initialStaffFetchDoneRef.current = false;
         sessionStartTimeRef.current = null;
+        
+        if (replacementRequestsListenerRef.current) {
+          replacementRequestsListenerRef.current();
+          replacementRequestsListenerRef.current = null;
+        }
       }
 
       setLoading(false);
@@ -668,6 +881,88 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  // ================= FETCH REPLACEMENT REQUESTS =================
+
+  const fetchReplacementRequests = useCallback(async (forceRefresh = false) => {
+    const now = Date.now();
+    
+    if (!forceRefresh && hasFetchedReplacementRequestsRef.current && (now - lastReplacementRequestsFetchRef.current) < CACHE_TTL) {
+      return;
+    }
+    
+    if (isFetchingReplacementRequestsRef.current) return;
+    
+    isFetchingReplacementRequestsRef.current = true;
+
+    try {
+      const requestsRef = collection(db, `clinics/${CLINIC_ID}/replacementRequests`);
+      const q = query(requestsRef, orderBy("requestedAt", "desc"), limit(200));
+      
+      const snap = await getDocs(q);
+
+      const fetchedRequests = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          requestedAt: data.requestedAt?.toDate() || new Date(),
+          reviewedAt: data.reviewedAt?.toDate() || null,
+          completedAt: data.completedAt?.toDate() || null,
+        };
+      }) as ReplacementRequest[];
+
+      setReplacementRequests(fetchedRequests);
+      hasFetchedReplacementRequestsRef.current = true;
+      lastReplacementRequestsFetchRef.current = now;
+    } catch (error) {
+      console.error("Error fetching replacement requests:", error);
+    } finally {
+      isFetchingReplacementRequestsRef.current = false;
+    }
+  }, []);
+
+  // ================= REPLACEMENT REQUESTS REAL-TIME LISTENER =================
+  
+  useEffect(() => {
+    if (!user) return;
+    
+    if (replacementRequestsListenerRef.current) {
+      replacementRequestsListenerRef.current();
+      replacementRequestsListenerRef.current = null;
+    }
+    
+    const requestsRef = collection(db, `clinics/${CLINIC_ID}/replacementRequests`);
+    const q = query(requestsRef, orderBy("requestedAt", "desc"), limit(200));
+    
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const fetchedRequests = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          requestedAt: data.requestedAt?.toDate() || new Date(),
+          reviewedAt: data.reviewedAt?.toDate() || null,
+          completedAt: data.completedAt?.toDate() || null,
+        };
+      }) as ReplacementRequest[];
+      
+      setReplacementRequests(fetchedRequests);
+      hasFetchedReplacementRequestsRef.current = true;
+      lastReplacementRequestsFetchRef.current = Date.now();
+    }, (error) => {
+      console.error("Error in replacement requests listener:", error);
+    });
+    
+    replacementRequestsListenerRef.current = unsubscribe;
+    
+    return () => {
+      if (replacementRequestsListenerRef.current) {
+        replacementRequestsListenerRef.current();
+        replacementRequestsListenerRef.current = null;
+      }
+    };
+  }, [user]);
 
   // ================= FETCH STAFF USERS =================
 
@@ -918,6 +1213,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   }, [user, fetchTransactions]);
 
   useEffect(() => {
+    if (user && !hasFetchedReplacementRequestsRef.current && !isFetchingReplacementRequestsRef.current) {
+      fetchReplacementRequests(false);
+    }
+  }, [user, fetchReplacementRequests]);
+
+  useEffect(() => {
     if (user && userRole === "admin" && !initialStaffFetchDoneRef.current) {
       initialStaffFetchDoneRef.current = true;
       const timer = setTimeout(() => {
@@ -1008,9 +1309,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
+      hasFetchedReplacementRequestsRef.current = false;
       lastProductsFetchRef.current = 0;
       lastTransactionsFetchRef.current = 0;
       lastUsersFetchRef.current = 0;
+      lastReplacementRequestsFetchRef.current = 0;
       listenersSetupRef.current = false;
       initialStaffFetchDoneRef.current = false;
       
@@ -1062,6 +1365,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setProducts([]);
       setTransactions([]);
       setStaffUsers([]);
+      setReplacementRequests([]);
       setUserRole(null);
       setUserName("");
       setUserId("");
@@ -1072,15 +1376,23 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
+      hasFetchedReplacementRequestsRef.current = false;
       isFetchingProductsRef.current = false;
       isFetchingTransactionsRef.current = false;
       isFetchingUsersRef.current = false;
+      isFetchingReplacementRequestsRef.current = false;
       lastProductsFetchRef.current = 0;
       lastTransactionsFetchRef.current = 0;
       lastUsersFetchRef.current = 0;
+      lastReplacementRequestsFetchRef.current = 0;
       listenersSetupRef.current = false;
       initialStaffFetchDoneRef.current = false;
       sessionStartTimeRef.current = null;
+      
+      if (replacementRequestsListenerRef.current) {
+        replacementRequestsListenerRef.current();
+        replacementRequestsListenerRef.current = null;
+      }
       
       pendingUserPasswords.current.clear();
       
@@ -1121,7 +1433,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       setProducts((prev) => [newProduct, ...prev]);
       
-      // Log product addition
       await logProductAddition(
         docRef.id,
         data.name,
@@ -1141,7 +1452,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
-      // Get the current product state before update
       const currentProduct = products.find(p => p.id === id);
       
       const { beginningInventory, ...safeUpdates } = updates as any;
@@ -1158,7 +1468,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         prev.map((p) => (p.id === id ? { ...p, ...safeUpdates } : p))
       );
       
-      // Log product edits by comparing changes
       if (currentProduct) {
         const updatedProduct = { ...currentProduct, ...safeUpdates };
         const changes = getChangedFields(currentProduct, updatedProduct);
@@ -1381,7 +1690,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error("Only completed or previously replaced transactions can be processed for replacement");
       }
       
-      // Get current timestamp for when the replacement is initiated
       const processedTimestamp = new Date();
       
       await updateDoc(transactionRef, {
@@ -1436,7 +1744,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error("Only transactions in 'Processing Replacement' status can be marked as replaced");
       }
       
-      // Get current timestamp for when the replacement is completed
       const replacedTimestamp = new Date();
       
       await updateDoc(transactionRef, {
@@ -1471,6 +1778,292 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       console.error("Error completing replacement:", error);
       throw error;
     }
+  };
+
+  // ================= REPLACEMENT REQUEST ACTIONS =================
+
+  const createReplacementRequest = async (
+    transactionId: string,
+    reason: string,
+    requestedBy: string,
+    requestedById: string
+  ): Promise<string> => {
+    try {
+      // Find the transaction
+      const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, transactionId);
+      const transactionSnap = await getDoc(transactionRef);
+      
+      if (!transactionSnap.exists()) {
+        throw new Error("Transaction not found");
+      }
+      
+      const transactionData = transactionSnap.data();
+      
+      // Check if there's already a pending request for this transaction
+      const existingRequests = replacementRequests.filter(
+        r => r.transactionId === transactionId && r.status === "pending"
+      );
+      
+      if (existingRequests.length > 0) {
+        throw new Error("A replacement request already exists for this transaction");
+      }
+      
+      const requestId = await addDoc(
+        collection(db, `clinics/${CLINIC_ID}/replacementRequests`),
+        {
+          transactionId: transactionId,
+          transactionReceiptNumber: transactionId.slice(-8).toUpperCase(),
+          patientName: transactionData.patientName || "Walk-in Patient",
+          originalTotal: transactionData.total || 0,
+          originalItems: transactionData.items || [],
+          reason: reason,
+          requestedBy: requestedBy,
+          requestedById: requestedById,
+          requestedAt: serverTimestamp(),
+          status: "pending",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }
+      ).then(docRef => docRef.id);
+      
+      // Update transaction status to indicate replacement request is pending
+      await updateDoc(transactionRef, {
+        status: "processing_replacement",
+        replacementReason: reason,
+        processedAt: serverTimestamp(),
+        processedBy: requestedBy,
+        updatedAt: serverTimestamp()
+      });
+      
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === transactionId
+            ? {
+                ...t,
+                status: "processing_replacement",
+                replacementReason: reason,
+                processedAt: new Date(),
+                processedBy: requestedBy
+              }
+            : t
+        )
+      );
+      
+      await logReplacementRequestCreated(
+        transactionId,
+        requestId,
+        reason,
+        requestedBy,
+        requestedById,
+        transactionData.patientName || "Walk-in Patient",
+        transactionData.total || 0
+      );
+      
+      // Refresh replacement requests
+      await fetchReplacementRequests(true);
+      
+      return requestId;
+    } catch (error) {
+      console.error("Error creating replacement request:", error);
+      throw error;
+    }
+  };
+
+  const approveReplacementRequest = async (
+    requestId: string,
+    approvedBy: string,
+    approvedById: string
+  ): Promise<void> => {
+    try {
+      const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error("Replacement request not found");
+      }
+      
+      const requestData = requestSnap.data() as ReplacementRequest;
+      
+      if (requestData.status !== "pending") {
+        throw new Error(`Cannot approve request with status: ${requestData.status}`);
+      }
+      
+      // Return items to inventory (they are being returned by customer)
+      await adjustInventoryForReplacementApproval(
+        requestData.originalItems,
+        approvedBy,
+        approvedById
+      );
+      
+      await updateDoc(requestRef, {
+        status: "approved",
+        reviewedBy: approvedBy,
+        reviewedById: approvedById,
+        reviewedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      await logReplacementRequestApproved(
+        requestId,
+        requestData.transactionId,
+        approvedBy,
+        approvedById,
+        requestData.patientName,
+        requestData.originalTotal
+      );
+      
+      // Refresh data
+      await fetchReplacementRequests(true);
+      await fetchTransactions(true);
+      
+    } catch (error) {
+      console.error("Error approving replacement request:", error);
+      throw error;
+    }
+  };
+
+  const rejectReplacementRequest = async (
+    requestId: string,
+    rejectedBy: string,
+    rejectedById: string,
+    rejectionReason: string
+  ): Promise<void> => {
+    try {
+      const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error("Replacement request not found");
+      }
+      
+      const requestData = requestSnap.data() as ReplacementRequest;
+      
+      if (requestData.status !== "pending") {
+        throw new Error(`Cannot reject request with status: ${requestData.status}`);
+      }
+      
+      // Update transaction status back to completed
+      const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
+      await updateDoc(transactionRef, {
+        status: "completed",
+        updatedAt: serverTimestamp()
+      });
+      
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === requestData.transactionId
+            ? { ...t, status: "completed" }
+            : t
+        )
+      );
+      
+      await updateDoc(requestRef, {
+        status: "rejected",
+        reviewedBy: rejectedBy,
+        reviewedById: rejectedById,
+        reviewedAt: serverTimestamp(),
+        rejectionReason: rejectionReason,
+        updatedAt: serverTimestamp()
+      });
+      
+      await logReplacementRequestRejected(
+        requestId,
+        requestData.transactionId,
+        rejectedBy,
+        rejectedById,
+        rejectionReason,
+        requestData.patientName,
+        requestData.originalTotal
+      );
+      
+      // Refresh data
+      await fetchReplacementRequests(true);
+      await fetchTransactions(true);
+      
+    } catch (error) {
+      console.error("Error rejecting replacement request:", error);
+      throw error;
+    }
+  };
+
+  const completeReplacementRequest = async (
+    requestId: string,
+    completedBy: string,
+    completedById: string
+  ): Promise<void> => {
+    try {
+      const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
+      const requestSnap = await getDoc(requestRef);
+      
+      if (!requestSnap.exists()) {
+        throw new Error("Replacement request not found");
+      }
+      
+      const requestData = requestSnap.data() as ReplacementRequest;
+      
+      if (requestData.status !== "approved") {
+        throw new Error(`Cannot complete request with status: ${requestData.status}. Request must be approved first.`);
+      }
+      
+      // Remove replacement items from inventory (the replacement product being given to customer)
+      await adjustInventoryForReplacementCompletion(
+        requestData.originalItems,
+        completedBy,
+        completedById
+      );
+      
+      // Update transaction status to replaced
+      const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
+      await updateDoc(transactionRef, {
+        status: "replaced",
+        replacedAt: serverTimestamp(),
+        replacedBy: completedBy,
+        updatedAt: serverTimestamp()
+      });
+      
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === requestData.transactionId
+            ? {
+                ...t,
+                status: "replaced",
+                replacedAt: new Date(),
+                replacedBy: completedBy
+              }
+            : t
+        )
+      );
+      
+      await updateDoc(requestRef, {
+        status: "completed",
+        completedAt: serverTimestamp(),
+        completedBy: completedBy,
+        completedById: completedById,
+        updatedAt: serverTimestamp()
+      });
+      
+      await logReplacementRequestCompleted(
+        requestId,
+        requestData.transactionId,
+        completedBy,
+        completedById,
+        requestData.patientName,
+        requestData.originalTotal
+      );
+      
+      // Refresh data
+      await fetchReplacementRequests(true);
+      await fetchTransactions(true);
+      await fetchProducts(true);
+      
+    } catch (error) {
+      console.error("Error completing replacement request:", error);
+      throw error;
+    }
+  };
+
+  const getPendingReplacementRequests = (): ReplacementRequest[] => {
+    return replacementRequests.filter(r => r.status === "pending");
   };
 
   // ================= STAFF ACTIONS =================
@@ -1636,6 +2229,54 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const getDeadstockProducts = () =>
     products.filter((p) => p.lastMovedDaysAgo >= 30 && p.stock > 0);
 
+  // Helper function for replacement initiated logging (legacy)
+  const logReplacementInitiated = async (transactionId: string, reason: string, staffName: string, patientName: string, total: number, items: any[]) => {
+    try {
+      const productDetails = getProductDetailsForLog(items);
+      const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+      
+      await addDoc(activityRef, {
+        type: 'replacement',
+        action: 'replacement_initiated',
+        description: `${staffName} initiated replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()})${reason ? ` Reason: ${reason}` : ''}. Products: ${productDetails}`,
+        staffName: staffName,
+        staffId: staffName,
+        transactionId: transactionId,
+        patientName: patientName || 'Walk-in Patient',
+        total: total,
+        productDetails: productDetails,
+        reason: reason || null,
+        timestamp: serverTimestamp()
+      });
+      console.log(`✅ Replacement initiated activity logged for transaction ${transactionId}`);
+    } catch (error) {
+      console.error('Error logging replacement initiated activity:', error);
+    }
+  };
+
+  const logReplacementCompleted = async (transactionId: string, staffName: string, patientName: string, total: number, items: any[]) => {
+    try {
+      const productDetails = getProductDetailsForLog(items);
+      const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+      
+      await addDoc(activityRef, {
+        type: 'replacement',
+        action: 'replacement_completed',
+        description: `${staffName} completed replacement for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Products: ${productDetails}`,
+        staffName: staffName,
+        staffId: staffName,
+        transactionId: transactionId,
+        patientName: patientName || 'Walk-in Patient',
+        total: total,
+        productDetails: productDetails,
+        timestamp: serverTimestamp()
+      });
+      console.log(`✅ Replacement completed activity logged for transaction ${transactionId}`);
+    } catch (error) {
+      console.error('Error logging replacement completed activity:', error);
+    }
+  };
+
   // ================= VALUE =================
 
   const value: FirebaseContextType = {
@@ -1656,6 +2297,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     addTransaction,
     processReplacement,
     markReplacementAsCompleted,
+
+    replacementRequests,
+    createReplacementRequest,
+    approveReplacementRequest,
+    rejectReplacementRequest,
+    completeReplacementRequest,
+    fetchReplacementRequests,
+    getPendingReplacementRequests,
 
     staffUsers,
     fetchStaffUsers: async (forceRefresh = false) => {

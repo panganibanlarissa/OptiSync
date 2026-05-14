@@ -201,26 +201,33 @@ export default function AdminDashboard() {
     return products.filter((p: any) => (p as any).archived !== true);
   }, [products]);
 
-  const completedTransactions = useMemo(() => {
-    return transactions.filter((t: any) => t.status === 'completed');
+  // CRITICAL FIX: Count ALL transactions for revenue and sales
+  // Replacements are NOT refunds - the patient paid and the clinic keeps the money
+  // The transaction status (completed, processing_replacement, replaced) should NOT affect revenue
+  // A replacement is just an exchange of product, not a financial reversal
+  const allTransactions = useMemo(() => {
+    // Include ALL transactions regardless of status
+    // This ensures sales revenue is never deducted
+    return transactions;
   }, [transactions]);
 
   const hasEnoughDataForML = useMemo(() => {
-    return completedTransactions.length >= MIN_TRANSACTIONS_FOR_ML;
-  }, [completedTransactions]);
+    return allTransactions.length >= MIN_TRANSACTIONS_FOR_ML;
+  }, [allTransactions]);
 
+  // Today's sales - ALL transactions (replacements don't affect revenue)
   const todaySales = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    return completedTransactions
+    return allTransactions
       .filter((t: any) => {
         const transDate = new Date(t.date);
         transDate.setHours(0, 0, 0, 0);
         return transDate.getTime() === today.getTime();
       })
       .reduce((sum: number, t: any) => sum + t.total, 0);
-  }, [completedTransactions]);
+  }, [allTransactions]);
 
   // Low stock count - only from active (non-archived) products
   const lowStockCount = useMemo(() => {
@@ -241,9 +248,9 @@ export default function AdminDashboard() {
       }));
   }, [activeProducts]);
 
-  // Gross profit - uses ALL products (including archived) to ensure historical accuracy
+  // Gross profit - ALL transactions (replacements don't affect profit)
   const grossProfit = useMemo(() => {
-    return completedTransactions.reduce((sum: number, t: any) => {
+    return allTransactions.reduce((sum: number, t: any) => {
       const profit = t.items.reduce((itemSum: number, item: any) => {
         const product = products.find((p: any) => p.id === item.id);
         if (product) {
@@ -253,24 +260,26 @@ export default function AdminDashboard() {
       }, 0);
       return sum + profit;
     }, 0);
-  }, [completedTransactions, products]);
+  }, [allTransactions, products]);
 
+  // Total revenue - ALL transactions (replacements are NOT refunds)
   const totalRevenue = useMemo(() => {
-    return completedTransactions.reduce((sum: number, t: any) => sum + t.total, 0);
-  }, [completedTransactions]);
+    return allTransactions.reduce((sum: number, t: any) => sum + t.total, 0);
+  }, [allTransactions]);
 
+  // Previous period revenue for trend calculation - ALL transactions
   const previousPeriodRevenue = useMemo(() => {
     const now = new Date();
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
     
-    return completedTransactions
+    return allTransactions
       .filter((t: any) => {
         const transDate = new Date(t.date);
-        return t.status === 'completed' && transDate >= lastMonth && transDate <= lastMonthEnd;
+        return transDate >= lastMonth && transDate <= lastMonthEnd;
       })
       .reduce((sum: number, t: any) => sum + t.total, 0);
-  }, [completedTransactions]);
+  }, [allTransactions]);
 
   const revenueTrend = useMemo(() => {
     if (previousPeriodRevenue === 0) return "+100%";
@@ -284,8 +293,8 @@ export default function AdminDashboard() {
         id: "sales_today",
         label: "Today's Sale",
         value: `₱${todaySales.toLocaleString()}`,
-        trend: "+18%",
-        trendType: "positive",
+        trend: todaySales > 0 ? "+Today" : "No Sales",
+        trendType: todaySales > 0 ? "positive" : "neutral",
       },
       {
         id: "low_stock",
@@ -298,8 +307,8 @@ export default function AdminDashboard() {
         id: "gross_profit",
         label: "Gross Profit",
         value: `₱${grossProfit.toLocaleString()}`,
-        trend: "+15%",
-        trendType: "positive",
+        trend: grossProfit > 0 ? "+Total" : "No Profit",
+        trendType: grossProfit > 0 ? "positive" : "neutral",
       },
       {
         id: "total_revenue",
@@ -398,6 +407,12 @@ export default function AdminDashboard() {
   };
 
   // DEADSTOCK_DATA - only from active (non-archived) products
+  // For deadstock calculation, we only care about completed sales
+  // Replacement transactions do not count as new sales for deadstock purposes
+  const completedTransactionsForDeadstock = useMemo(() => {
+    return transactions.filter((t: any) => t.status === 'completed');
+  }, [transactions]);
+
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -407,7 +422,9 @@ export default function AdminDashboard() {
     for (const p of activeProducts) {
       if (p.stock <= 0) continue;
       
-      const salesForProduct = completedTransactions
+      // Only use COMPLETED transactions for deadstock calculation
+      // Replacement transactions do not count as sales for deadstock purposes
+      const salesForProduct = completedTransactionsForDeadstock
         .filter((t: any) => t.items.some((item: any) => item.id === p.id))
         .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
@@ -463,7 +480,7 @@ export default function AdminDashboard() {
 
     deadstockItems.sort((a, b) => b.lockedCapital - a.lockedCapital);
     return deadstockItems;
-  }, [activeProducts, completedTransactions, usingML, deadstockSuggestions]);
+  }, [activeProducts, completedTransactionsForDeadstock, usingML, deadstockSuggestions]);
 
   // Generate forecast explanation with recommended order and stockout date
   const generateForecastExplanation = (item: ForecastDisplayData): ForecastExplanation => {
@@ -555,6 +572,7 @@ export default function AdminDashboard() {
           </>
         )}
 
+        {/* Stats Cards */}
         <motion.div
           variants={containerVariants}
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
@@ -819,7 +837,7 @@ export default function AdminDashboard() {
                   </p>
                   {!hasEnoughDataForML && mlServiceAvailable && (
                     <p className="text-xs text-gray-400 mt-2">
-                      Need {MIN_TRANSACTIONS_FOR_ML - completedTransactions.length} more sales for accurate predictions
+                      Need {MIN_TRANSACTIONS_FOR_ML - allTransactions.length} more sales for accurate predictions
                     </p>
                   )}
                   {!mlServiceAvailable && (

@@ -99,10 +99,8 @@ export default function InventoryReports({
 
   // Helper function to calculate days since last sale for a product
   const getDaysSinceLastSale = (product: InventoryData, today: Date): number => {
-    // Get completed transactions
     const completedTransactions = (transactions || []).filter(t => t.status === 'completed');
     
-    // Find all sales for this product
     const salesForProduct = completedTransactions
       .filter(t => t.items.some((item: any) => item.id === product.id))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -114,7 +112,6 @@ export default function InventoryReports({
       lastSaleDate.setHours(0, 0, 0, 0);
       return Math.floor((today.getTime() - lastSaleDate.getTime()) / (1000 * 60 * 60 * 24));
     } else {
-      // Never sold - use creation date or fallback
       let createdDate: Date | null = null;
       
       if (product.createdAt) {
@@ -140,39 +137,30 @@ export default function InventoryReports({
     }
   };
 
-  // Check if a product is deadstock (30+ days without sales)
   const isProductDeadstock = (product: InventoryData, today: Date): boolean => {
-    // Archived or deleted products are not considered for deadstock status
     if ((product as any).archived === true) return false;
-    
     const daysSinceSale = getDaysSinceLastSale(product, today);
     return daysSinceSale >= 30;
   };
 
-  // Filter products based on selected filters
   const filteredProducts = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
     return products.filter((product) => {
-      // Exclude archived products from the main report list
       if ((product as any).archived === true) return false;
       
-      // Category filter
       const categoryMatch =
         filters.category === "All Categories" ||
         product.category === filters.category;
 
-      // Search query filter
       const searchMatch =
         product.name.toLowerCase().includes(effectiveSearchQuery.toLowerCase()) ||
         product.sku.toLowerCase().includes(effectiveSearchQuery.toLowerCase()) ||
         product.id.toLowerCase().includes(effectiveSearchQuery.toLowerCase());
 
-      // Check deadstock status
       const isDeadstock = isProductDeadstock(product, today);
       
-      // Stock status filter (updated to include deadstock)
       let stockStatusMatch = true;
       if (filters.stockStatus !== "all") {
         const isLowStock = product.stock <= product.reorderPoint && product.stock > 0 && !isDeadstock;
@@ -189,7 +177,6 @@ export default function InventoryReports({
         }
       }
 
-      // Date range filter
       let dateMatch = true;
       if (filters.dateRange.startDate || filters.dateRange.endDate) {
         let createdDate: string | null = null;
@@ -286,12 +273,10 @@ export default function InventoryReports({
     });
   };
 
-  // Handle permanent product deletion - closes modal after deletion
   const handleDeleteProduct = async (id: string) => {
     try {
       await deleteProduct(id);
       showToastOnly("Product permanently deleted", "success");
-      // Close the edit modal immediately after successful deletion
       setEditingProduct(null);
     } catch (error) {
       console.error("Error deleting product:", error);
@@ -350,19 +335,16 @@ export default function InventoryReports({
     }
   };
 
-  // Helper function to calculate product status (updated to include Deadstock)
   const getProductStatus = (product: InventoryData) => {
     const statuses: string[] = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Check if product is deadstock (30+ days without sales) - PRIORITY 1
     const isDeadstock = isProductDeadstock(product, today);
     if (isDeadstock && product.stock > 0) {
       statuses.push("Deadstock");
     }
     
-    // Check expiry status - if expired/expiring, show expiry status
     if (product.expiryDate) {
       const expiryDate = new Date(product.expiryDate);
       expiryDate.setHours(0, 0, 0, 0);
@@ -380,13 +362,11 @@ export default function InventoryReports({
       }
     }
     
-    // Check if dead (legacy flag)
     const isDead = (product as any).isDead || (product as any).is_dead;
     if (isDead && !statuses.includes("Deadstock")) {
       statuses.push("Dead");
     }
     
-    // Check stock status (only if not deadstock)
     if (!isDeadstock) {
       const isLowStock = product.stock <= product.reorderPoint;
       const isOutOfStock = product.stock === 0;
@@ -427,7 +407,7 @@ export default function InventoryReports({
     return "text-green-600 bg-green-50 border border-green-200";
   };
 
-    // Export to PDF
+  // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF({
       orientation: "landscape",
@@ -601,6 +581,7 @@ export default function InventoryReports({
     const totalStock = filteredProducts.reduce((sum, p) => sum + p.stock, 0);
     doc.text(`Total Units in Stock: ${totalStock}`, 14, finalY + 14);
     
+    // FIXED: Show complete inventory value instead of abbreviated "K"
     const totalValue = filteredProducts.reduce(
       (sum, p) => sum + p.markupPrice * p.stock,
       0
@@ -867,6 +848,7 @@ export default function InventoryReports({
 
         {/* Results Summary and Table */}
         <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
+          {/* FIXED: Inventory Value Summary Cards - Now shows full amount instead of "K" abbreviation */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
@@ -881,19 +863,15 @@ export default function InventoryReports({
                 Total Units
               </p>
               <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
-                {filteredProducts.reduce((sum, p) => sum + p.stock, 0)}
+                {filteredProducts.reduce((sum, p) => sum + p.stock, 0).toLocaleString()}
               </p>
             </div>
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
                 Inventory Value
               </p>
-              <p className="text-lg sm:text-2xl font-bold text-gray-800 mt-1">
-                ₱
-                {(
-                  filteredProducts.reduce((sum, p) => sum + p.markupPrice * p.stock, 0) / 1000
-                ).toFixed(0)}
-                K
+              <p className="text-base sm:text-xl font-bold text-gray-800 mt-1 break-words">
+                ₱{filteredProducts.reduce((sum, p) => sum + p.markupPrice * p.stock, 0).toLocaleString()}
               </p>
             </div>
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
@@ -963,27 +941,27 @@ export default function InventoryReports({
                         >
                           <td className="px-2 sm:px-4 py-2 sm:py-3 font-mono text-gray-600">
                             {product.sku}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-800 max-w-xs truncate">
                             {product.name}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-gray-600">
                             {product.category}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
                             {(product as any).totalSold || 0}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
                             {(product as any).damageExchanged || 0}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
                             {product.stock}
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
                             <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
                               {statusText}
                             </span>
-                          </td>
+                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <button
@@ -1015,12 +993,12 @@ export default function InventoryReports({
                                 <QrCode size={14} />
                               </button>
                             </div>
-                          </td>
+                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                </table>
+                 </table>
               </div>
             ) : (
               <div className="p-8 text-center">

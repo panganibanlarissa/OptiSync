@@ -19,9 +19,8 @@ import {
 import Notifications from "@/components/Notifications";
 import BackupStatus from "@/components/BackupStatus";
 import ExpiryAlert from "@/components/ExpiryAlert";
+import PendingRequestsBadge from "@/components/PendingRequestsBadge";
 import { useFirebase } from "@/context/FirebaseContext";
-
-// NO import of SettingsModal
 
 interface SidebarProps {
   children: React.ReactNode;
@@ -34,8 +33,6 @@ export default function Sidebar({ children }: SidebarProps) {
   const [open, setOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  // NO showSettingsModal state
 
   const linkClass = (path: string) =>
     `flex items-center gap-3 px-4 py-2 rounded-md transition-colors ${
@@ -67,9 +64,10 @@ export default function Sidebar({ children }: SidebarProps) {
             <h1 className="text-lg font-bold text-[#0B3C8A] hidden sm:block">OlasoSync</h1>
           </div>
 
-          {/* RIGHT - No Settings button */}
+          {/* RIGHT - Add PendingRequestsBadge here */}
           <div className="flex items-center gap-3 relative">
             <BackupStatus />
+            <PendingRequestsBadge />
             <Notifications />
             
             <div className="hidden sm:flex flex-col items-end bg-gray-100 rounded-lg px-3 py-1.5">

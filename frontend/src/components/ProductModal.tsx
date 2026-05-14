@@ -66,6 +66,7 @@ export default function ProductModal({
   const [previewUrl, setPreviewUrl] = useState<string | null>(product.image || null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [showArchiveConfirmation, setShowArchiveConfirmation] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showNotification, showToastOnly } = useNotification();
 
@@ -78,7 +79,6 @@ export default function ProductModal({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     
-    // Auto-generate SKU when category changes (Works for both add and edit modes)
     if (name === 'category') {
       const categoryDefaults: Record<string, string> = {
         "Frames": "FRM",
@@ -87,7 +87,6 @@ export default function ProductModal({
         "Vitamins": "VTM"
       };
       const prefix = categoryDefaults[value] || "ITM";
-      // Filter existing products of the same category to determine the count
       const count = products.filter((p: any) => p.category === value).length + 1;
       const generatedSku = `${prefix}-${count.toString().padStart(2, '0')}`;
       
@@ -111,14 +110,12 @@ export default function ProductModal({
     const file = e.target.files?.[0];
     if (!file) return;
     
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       setUploadError('Please select an image file');
       showNotification('Please select an image file', 'error');
       return;
     }
     
-    // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       setUploadError('Image must be less than 5MB');
       showNotification('Image must be less than 5MB', 'error');
@@ -154,7 +151,7 @@ export default function ProductModal({
           setUploadError(uploadErrorMessage);
           showNotification(uploadErrorMessage, 'error');
           setUploading(false);
-          return; // Stop here if image upload fails
+          return;
         }
       }
       
@@ -166,7 +163,6 @@ export default function ProductModal({
       console.log('Saving product with image URL:', imageUrl);
       await onSave(dataToSave);
       
-      // Clean up preview URL
       if (previewUrl && previewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(previewUrl);
       }
@@ -184,6 +180,17 @@ export default function ProductModal({
       URL.revokeObjectURL(previewUrl);
     }
     onClose();
+  };
+
+  const handleDeleteClick = () => {
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (formData.id && onDelete) {
+      await onDelete(formData.id);
+      setShowDeleteConfirmation(false);
+    }
   };
 
   const handleArchiveConfirm = () => {
@@ -207,11 +214,9 @@ export default function ProductModal({
     let reason: string;
     
     if (adjustmentType === "restock") {
-      // Restock: Add quantity to current stock
       newStock = product.stock + adjustmentQuantity;
       reason = `Restock: +${adjustmentQuantity} units added to inventory`;
     } else {
-      // Damaged: Subtract quantity from current stock
       if (adjustmentQuantity > product.stock) {
         showToastOnly(`Cannot mark ${adjustmentQuantity} units as damaged. Only ${product.stock} units in stock.`, "error");
         return;
@@ -220,7 +225,6 @@ export default function ProductModal({
       reason = `Damaged Item: -${adjustmentQuantity} units marked as damaged and removed from inventory`;
     }
     
-    // Call onSave with the new stock value and reason
     const dataToSave = {
       ...product,
       stock: newStock,
@@ -261,7 +265,6 @@ export default function ProductModal({
             )}
             
             <form id="stock-adjustment-form" onSubmit={handleAdjustStockSubmit} className="space-y-4">
-              {/* Adjustment Type Options */}
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -287,7 +290,6 @@ export default function ProductModal({
                 </button>
               </div>
               
-              {/* Quantity Input */}
               <div>
                 <input 
                   required 
@@ -300,7 +302,6 @@ export default function ProductModal({
                 />
               </div>
               
-              {/* Summary Preview */}
               <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 {adjustmentType === "restock" ? (
                   <p className="text-xs sm:text-sm text-gray-900">
@@ -504,16 +505,30 @@ export default function ProductModal({
         
         <div className="p-3 sm:p-4 border-t border-gray-100 bg-slate-50 flex gap-2 sm:gap-3">
           {mode === 'edit' && formData.id && userRole === 'admin' && onDelete && (
-            <button type="button" onClick={() => onDelete(formData.id!)} className="p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
+            <button 
+              type="button" 
+              onClick={handleDeleteClick} 
+              className="p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+              title="Delete Product"
+            >
               <Trash2 size={16}/>
             </button>
           )}
           {mode === 'edit' && formData.id && userRole === 'admin' && onArchive && (
-            <button type="button" onClick={() => setShowArchiveConfirmation(true)} className="p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+            <button 
+              type="button" 
+              onClick={() => setShowArchiveConfirmation(true)} 
+              className="p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+              title="Archive Product"
+            >
               <Archive size={16} />
             </button>
           )}
-          <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors">
+          <button 
+            type="button" 
+            onClick={handleCancel} 
+            className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-[11px] sm:text-sm font-medium hover:bg-gray-100 transition-colors"
+          >
             Cancel
           </button>
           <button 
@@ -531,7 +546,7 @@ export default function ProductModal({
         </div>
       </motion.div>
 
-      {/* Archive Confirmation Modal - Updated button colors */}
+      {/* Archive Confirmation Modal */}
       {showArchiveConfirmation && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
@@ -539,7 +554,7 @@ export default function ProductModal({
               {formData.archived ? "Confirm Unarchive" : "Confirm Archive"}
             </h3>
             <p className="text-sm text-gray-600 mb-6">
-              Are you sure you want to {formData.archived ? "unarchive" : "archive"} &quot;<span className="font-semibold text-gray-800">{formData.name}</span>&quot;?
+              Are you sure you want to {formData.archived ? "unarchive" : "archive"} "<span className="font-semibold text-gray-800">{formData.name}</span>"?
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -553,6 +568,35 @@ export default function ProductModal({
                 className="px-4 py-2 rounded-lg bg-[#0B3C8A] text-white font-medium text-sm hover:bg-[#082F6E] transition-colors shadow-sm"
               >
                 Confirm Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6 text-center">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="text-red-600 w-6 h-6" />
+            </div>
+            <h3 className="font-bold text-xl text-gray-900 mb-2">Delete Product?</h3>
+            <p className="text-sm text-gray-500 mb-6">
+              Are you sure you want to permanently delete "<span className="font-semibold text-gray-800">{formData.name}</span>"? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirmation(false)}
+                className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white font-medium text-sm hover:bg-red-700 transition-colors shadow-sm"
+              >
+                Yes, Delete
               </button>
             </div>
           </div>
