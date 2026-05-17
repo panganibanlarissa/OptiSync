@@ -10,7 +10,7 @@ import jsQR from "jsqr";
 interface QRScannerModalProps {
   onClose: () => void;
   products: Array<{ id: string; sku: string; name?: string; stock?: number }>;
-  onProductFound: (productId: string) => void;
+  onProductFound: (productId: string, batchId?: string, batchSku?: string) => void;
   mode?: 'search' | 'adjust' | 'cart' | 'in' | 'out';
 }
 
@@ -39,14 +39,14 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
       case 'search':
         return 'Point your camera at a product QR code to search for it';
       case 'adjust':
-        return 'Point your camera at a product QR code to add to inventory';
+        return 'Point your camera at a product or batch QR code to adjust stock';
       case 'in':
-        return 'Point your camera at a product QR code to receive stock';
+        return 'Point your camera at a product or batch QR code to receive stock';
       case 'out':
-        return 'Point your camera at a product QR code to dispatch stock';
+        return 'Point your camera at a product or batch QR code to dispatch stock';
       case 'cart':
       default:
-        return 'Point your camera at a product QR code to add to cart';
+        return 'Point your camera at a product or batch QR code to add to cart';
     }
   };
 
@@ -55,7 +55,7 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
       case 'search':
         return '✓ Product found! Searching...';
       case 'adjust':
-        return '✓ Product found! Adding to inventory...';
+        return '✓ Product/Batch found! Adjusting stock...';
       case 'in':
         return '✓ Stock received! Processing...';
       case 'out':
@@ -66,10 +66,10 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
     }
   };
 
-  const handleProductFoundAction = (productId: string) => {
+  const handleProductFoundAction = (productId: string, batchId?: string, batchSku?: string) => {
     const product = products.find(p => p.id === productId);
     if (!product) return;
-    onProductFound(productId);
+    onProductFound(productId, batchId, batchSku);
   };
 
   useEffect(() => {
@@ -130,6 +130,8 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
         if (code && code.data) {
           const url = new URL(code.data, window.location.origin);
           const productId = url.searchParams.get('product');
+          const batchId = url.searchParams.get('batch');
+          const batchSku = url.searchParams.get('batchSku');
 
           if (productId) {
             const product = products.find(p => p.id === productId);
@@ -137,7 +139,7 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
               scanningRef.current = false;
               setFoundProduct(productId);
               setTimeout(() => {
-                handleProductFoundAction(productId);
+                handleProductFoundAction(productId, batchId || undefined, batchSku || undefined);
               }, 500);
               return;
             }
@@ -187,7 +189,7 @@ export default function QRScannerModal({ onClose, products, onProductFound, mode
         className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
       >
         <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-100 bg-slate-50">
-          <h2 className="text-sm sm:text-lg font-bold text-gray-800">Scan Product QR Code</h2>
+          <h2 className="text-sm sm:text-lg font-bold text-gray-800">Scan QR Code</h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors">
             <X size={16} className="text-gray-500 sm:w-5 sm:h-5" />
           </button>

@@ -33,6 +33,10 @@ import {
   History,
   Eye
 } from "lucide-react";
+import { doc, getDoc, updateDoc, serverTimestamp, collection, getDocs, query, orderBy } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+
+const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
 const IMAGE_COLORS = [
   'bg-blue-100',
@@ -113,20 +117,174 @@ const modalVariants: Variants = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  'Frames': '#0B3C8A',      // Deep blue
-  'Lenses': '#10B981',       // Emerald green
-  'Contact Lenses': '#8B5CF6', // Purple
-  'Solutions': '#F59E0B',     // Amber
-  'Accessories': '#EF4444',    // Red
-  'Unknown': '#6B7280'        // Gray
+  'Frames': '#0B3C8A',
+  'Lenses': '#10B981',
+  'Contact Lenses': '#8B5CF6',
+  'Solutions': '#F59E0B',
+  'Accessories': '#EF4444',
+  'Unknown': '#6B7280'
+};
+
+// Helper function to get batches for a product
+const getProductBatches = async (productId: string): Promise<any[]> => {
+  try {
+    const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
+    const q = query(batchesRef, orderBy("expiryDate", "asc"));
+    const snapshot = await getDocs(q);
+    
+    const batches: any[] = [];
+    snapshot.forEach((docSnapshot) => {
+      const data = docSnapshot.data();
+      if (data.isActive !== false) {
+        batches.push({
+          id: docSnapshot.id,
+          batchSku: data.batchSku,
+          expiryDate: data.expiryDate,
+          stock: data.stock,
+          totalSold: data.totalSold || 0,
+          damageExchanged: data.damageExchanged || 0,
+          restockCount: data.restockCount || 0,
+          beginningInventory: data.beginningInventory || data.initialStock || 0,
+          ...data
+        });
+      }
+    });
+    return batches;
+  } catch (error) {
+    console.error("Error fetching batches:", error);
+    return [];
+  }
+};
+
+// Helper function to update batch stock
+const updateBatchStock = async (
+  batchId: string,
+  newStock: number,
+  reason: string,
+  staffName: string,
+  staffId: string
+): Promise<void> => {
+  try {
+    // Find which product this batch belongs to
+    const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
+    const productsSnapshot = await getDocs(productsRef);
+    
+    let productId: string | null = null;
+    let batch: any = null;
+    
+    for (const productDoc of productsSnapshot.docs) {
+      const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productDoc.id}/batches`, batchId);
+      const batchDoc = await getDoc(batchRef);
+      
+      if (batchDoc.exists()) {
+        productId = productDoc.id;
+        batch = { id: batchDoc.id, ...batchDoc.data() };
+        break;
+      }
+    }
+    
+    if (!productId || !batch) {
+      throw new Error(`Batch not found: ${batchId}`);
+    }
+    
+    const oldStock = batch.stock;
+    const stockDifference = newStock - oldStock;
+    const reasonLower = reason.toLowerCase();
+    
+    const batchUpdateData: any = {
+      stock: newStock,
+      updatedAt: serverTimestamp()
+    };
+    
+    // Determine if this is a restock or damaged operation
+    const isRestock = stockDifference > 0 && (
+      reasonLower.includes('restock') ||
+      reasonLower.includes('received') ||
+      reasonLower.includes('scan in')
+    );
+    
+    const isDamaged = stockDifference < 0 && (
+      reasonLower.includes('damaged') ||
+      reasonLower.includes('damage') ||
+      reasonLower.includes('waste') ||
+      reasonLower.includes('scan out')
+    );
+    
+    // Update batch's own counters
+    if (isRestock && stockDifference > 0) {
+      const unitsAdded = stockDifference;
+      batchUpdateData.restockCount = (batch.restockCount || 0) + unitsAdded;
+      console.log(`📦 Batch ${batch.batchSku} restockCount updated: +${unitsAdded}`);
+    }
+    
+    if (isDamaged && stockDifference < 0) {
+      const unitsRemoved = Math.abs(stockDifference);
+      batchUpdateData.damageExchanged = (batch.damageExchanged || 0) + unitsRemoved;
+      console.log(`⚠️ Batch ${batch.batchSku} damageExchanged updated: +${unitsRemoved}`);
+    }
+    
+    // Update the batch
+    const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productId}/batches`, batchId);
+    await updateDoc(batchRef, batchUpdateData);
+    
+    // Update parent product's total stock
+    const updatedBatches = await getProductBatches(productId);
+    const totalStock = updatedBatches.reduce((sum, b) => sum + b.stock, 0);
+    
+    const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
+    await updateDoc(productRef, {
+      stock: totalStock,
+      updatedAt: serverTimestamp()
+    });
+    
+    // Update parent counters if needed
+    const productUpdateData: any = {};
+    if (isRestock && stockDifference > 0) {
+      const productDoc = await getDoc(productRef);
+      const currentRestockCount = productDoc.data()?.restockCount || 0;
+      productUpdateData.restockCount = currentRestockCount + Math.abs(stockDifference);
+    }
+    
+    if (isDamaged && stockDifference < 0) {
+      const productDoc = await getDoc(productRef);
+      const currentDamageCount = productDoc.data()?.damageExchanged || 0;
+      productUpdateData.damageExchanged = currentDamageCount + Math.abs(stockDifference);
+    }
+    
+    if (Object.keys(productUpdateData).length > 0) {
+      await updateDoc(productRef, productUpdateData);
+    }
+    
+    console.log(`✅ Batch ${batch.batchSku} updated: Stock ${oldStock} → ${newStock}`);
+    
+  } catch (error) {
+    console.error("Error updating batch stock:", error);
+    throw error;
+  }
 };
 
 export default function StaffDashboard() {
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [scanMode, setScanMode] = useState<'in' | 'out'>('in');
   const [showLowStockModal, setShowLowStockModal] = useState(false);
-  const [pendingScanInProduct, setPendingScanInProduct] = useState<{ id: string; name: string; sku: string; stock: number } | null>(null);
-  const [pendingScanOutProduct, setPendingScanOutProduct] = useState<{ id: string; name: string; sku: string; stock: number } | null>(null);
+  const [pendingScanInProduct, setPendingScanInProduct] = useState<{ 
+    id: string; 
+    name: string; 
+    sku: string; 
+    stock: number;
+    batchId?: string;
+    batchSku?: string;
+    isBatch?: boolean;
+  } | null>(null);
+  const [pendingScanOutProduct, setPendingScanOutProduct] = useState<{ 
+    id: string; 
+    name: string; 
+    sku: string; 
+    stock: number;
+    batchId?: string;
+    batchSku?: string;
+    isBatch?: boolean;
+  } | null>(null);
   const [scanInQuantity, setScanInQuantity] = useState("1");
   const [scanOutQuantity, setScanOutQuantity] = useState("1");
   const [isApplyingScanIn, setIsApplyingScanIn] = useState(false);
@@ -207,33 +365,74 @@ export default function StaffDashboard() {
       }));
   }, [products]);
 
-  const handleProductFound = async (productId: string) => {
+  const handleProductFound = async (productId: string, batchId?: string, batchSku?: string) => {
     const product = products.find(p => p.id === productId);
     if (product) {
+      const isPerishable = product.category === "Solutions" || product.category === "Vitamins";
+      
       try {
         if (scanMode === 'in') {
+          // For perishable products, we need a batch ID
+          if (isPerishable && !batchId) {
+            showNotification(`Please scan a batch-specific QR code for "${product.name}"`, 'warning', 'Batch Required');
+            return;
+          }
+          
+          let currentStock = product.stock;
+          
+          // If this is a batch, get the batch's current stock
+          if (batchId) {
+            const batches = await getProductBatches(product.id);
+            const batch = batches.find(b => b.id === batchId);
+            if (batch) {
+              currentStock = batch.stock;
+            }
+          }
+          
           setPendingScanInProduct({
             id: product.id,
             name: product.name,
             sku: product.sku,
-            stock: product.stock,
+            stock: currentStock,
+            batchId: batchId,
+            batchSku: batchSku,
+            isBatch: !!batchId
           });
           setScanInQuantity("1");
           setIsQRScannerOpen(false);
           return;
         }
         
+        // Scan Out mode
+        if (isPerishable && !batchId) {
+          showNotification(`Please scan a batch-specific QR code for "${product.name}"`, 'warning', 'Batch Required');
+          return;
+        }
+        
+        let currentStock = product.stock;
+        
+        if (batchId) {
+          const batches = await getProductBatches(product.id);
+          const batch = batches.find(b => b.id === batchId);
+          if (batch) {
+            currentStock = batch.stock;
+          }
+        }
+        
         setPendingScanOutProduct({
           id: product.id,
           name: product.name,
           sku: product.sku,
-          stock: product.stock,
+          stock: currentStock,
+          batchId: batchId,
+          batchSku: batchSku,
+          isBatch: !!batchId
         });
         setScanOutQuantity("1");
         setIsQRScannerOpen(false);
       } catch (error) {
-        console.error("Error adjusting stock:", error);
-        showNotification(`Failed to adjust stock for "${product.name}"`, 'error', 'Error');
+        console.error("Error handling product found:", error);
+        showNotification(`Failed to process "${product.name}"`, 'error', 'Error');
       }
     }
   };
@@ -256,9 +455,32 @@ export default function StaffDashboard() {
 
     setIsApplyingScanIn(true);
     try {
-      const newStock = latestProduct.stock + quantity;
-      await adjustStock(latestProduct.id, newStock, `Received via QR Scan (+${quantity})`, userName || 'Staff', userId || 'system');
-      showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock In ✓');
+      if (pendingScanInProduct.isBatch && pendingScanInProduct.batchId) {
+        // Update batch stock
+        const batches = await getProductBatches(pendingScanInProduct.id);
+        const batch = batches.find(b => b.id === pendingScanInProduct.batchId);
+        
+        if (!batch) {
+          throw new Error("Batch not found");
+        }
+        
+        const newBatchStock = batch.stock + quantity;
+        await updateBatchStock(
+          pendingScanInProduct.batchId,
+          newBatchStock,
+          `Received via QR Scan In (+${quantity})`,
+          userName || 'Staff',
+          userId || 'system'
+        );
+        
+        showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name} (Batch: ${pendingScanInProduct.batchSku})`, 'success', 'Stock In ✓');
+      } else {
+        // Update parent product stock (non-perishable)
+        const newStock = latestProduct.stock + quantity;
+        await adjustStock(latestProduct.id, newStock, `Received via QR Scan (+${quantity})`, userName || 'Staff', userId || 'system');
+        showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock In ✓');
+      }
+      
       setPendingScanInProduct(null);
       setScanInQuantity("1");
     } catch (error) {
@@ -285,22 +507,52 @@ export default function StaffDashboard() {
       return;
     }
 
-    if (quantity > latestProduct.stock) {
-      showNotification(`Cannot scan out ${quantity} units. Only ${latestProduct.stock} unit${latestProduct.stock === 1 ? '' : 's'} in stock.`, 'error', 'Insufficient Stock');
-      return;
-    }
-
     setIsApplyingScanOut(true);
     try {
-      const newStock = latestProduct.stock - quantity;
-      await adjustStock(
-        latestProduct.id,
-        newStock,
-        `Damaged via QR Scan Out (-${quantity})`,
-        userName || 'Staff',
-        userId || 'system'
-      );
-      showNotification(`-${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock Out');
+      if (pendingScanOutProduct.isBatch && pendingScanOutProduct.batchId) {
+        // Update batch stock (damaged)
+        const batches = await getProductBatches(pendingScanOutProduct.id);
+        const batch = batches.find(b => b.id === pendingScanOutProduct.batchId);
+        
+        if (!batch) {
+          throw new Error("Batch not found");
+        }
+        
+        if (quantity > batch.stock) {
+          showNotification(`Cannot scan out ${quantity} units. Only ${batch.stock} unit${batch.stock === 1 ? '' : 's'} in stock.`, 'error', 'Insufficient Stock');
+          setIsApplyingScanOut(false);
+          return;
+        }
+        
+        const newBatchStock = batch.stock - quantity;
+        await updateBatchStock(
+          pendingScanOutProduct.batchId,
+          newBatchStock,
+          `Damaged via QR Scan Out (-${quantity})`,
+          userName || 'Staff',
+          userId || 'system'
+        );
+        
+        showNotification(`-${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name} (Batch: ${pendingScanOutProduct.batchSku})`, 'success', 'Stock Out');
+      } else {
+        // Update parent product stock (non-perishable)
+        if (quantity > latestProduct.stock) {
+          showNotification(`Cannot scan out ${quantity} units. Only ${latestProduct.stock} unit${latestProduct.stock === 1 ? '' : 's'} in stock.`, 'error', 'Insufficient Stock');
+          setIsApplyingScanOut(false);
+          return;
+        }
+        
+        const newStock = latestProduct.stock - quantity;
+        await adjustStock(
+          latestProduct.id,
+          newStock,
+          `Damaged via QR Scan Out (-${quantity})`,
+          userName || 'Staff',
+          userId || 'system'
+        );
+        showNotification(`-${quantity} unit${quantity > 1 ? 's' : ''} - ${latestProduct.name}`, 'success', 'Stock Out');
+      }
+      
       setPendingScanOutProduct(null);
       setScanOutQuantity("1");
     } catch (error) {
@@ -324,12 +576,11 @@ export default function StaffDashboard() {
         variants={containerVariants}
         className="min-h-screen p-4 space-y-4"
       >
-        {/* SCANNER BUTTONS - White background with colored borders */}
+        {/* SCANNER BUTTONS */}
         <motion.div
           variants={itemVariants}
           className="grid grid-cols-2 gap-4"
         >
-          {/* Scan In Button - White bg, green border, green text & icon */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -349,7 +600,6 @@ export default function StaffDashboard() {
             <QrCode className="w-5 h-5 text-blue-400 absolute top-2 right-2 opacity-60" />
           </motion.button>
 
-          {/* Scan Out Button - White bg, red border, red text & icon */}
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -497,7 +747,7 @@ export default function StaffDashboard() {
             <div className="mt-8"></div>
           </motion.div>
 
-          {/* LOW STOCK ALERTS - Show first 3 items - Removed reorder point */}
+          {/* LOW STOCK ALERTS */}
           <motion.div
             variants={itemVariants}
             className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -704,7 +954,7 @@ export default function StaffDashboard() {
         </motion.div>
       </motion.div>
 
-      {/* Low Stock Modal - Removed reorder point */}
+      {/* Low Stock Modal */}
       <AnimatePresence>
         {showLowStockModal && (
           <Modal
@@ -745,11 +995,12 @@ export default function StaffDashboard() {
             onClose={() => setIsQRScannerOpen(false)}
             products={products}
             onProductFound={handleProductFound}
-            mode={scanMode}
+            mode={scanMode === 'in' ? 'in' : 'out'}
           />
         )}
       </AnimatePresence>
 
+      {/* Scan In Confirmation Modal */}
       <AnimatePresence>
         {pendingScanInProduct && (
           <ScanInConfirmationModal
@@ -767,6 +1018,7 @@ export default function StaffDashboard() {
         )}
       </AnimatePresence>
 
+      {/* Scan Out Confirmation Modal */}
       <AnimatePresence>
         {pendingScanOutProduct && (
           <ScanOutConfirmationModal
@@ -867,7 +1119,7 @@ function ScanInConfirmationModal({
   onCancel,
   onConfirm,
 }: {
-  product: { id: string; name: string; sku: string; stock: number };
+  product: { id: string; name: string; sku: string; stock: number; batchId?: string; batchSku?: string; isBatch?: boolean };
   quantity: string;
   setQuantity: (value: string) => void;
   isSubmitting: boolean;
@@ -890,6 +1142,9 @@ function ScanInConfirmationModal({
         <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Scan In</h3>
         <p className="text-sm text-gray-600 mb-4">
           Add stock for <span className="font-semibold text-gray-800">{product.name}</span> ({product.sku}).
+          {product.isBatch && product.batchSku && (
+            <span className="block text-xs text-blue-600 mt-1">Batch: {product.batchSku}</span>
+          )}
         </p>
 
         <div className="space-y-2 mb-4">
@@ -940,7 +1195,7 @@ function ScanOutConfirmationModal({
   onCancel,
   onConfirm,
 }: {
-  product: { id: string; name: string; sku: string; stock: number };
+  product: { id: string; name: string; sku: string; stock: number; batchId?: string; batchSku?: string; isBatch?: boolean };
   quantity: string;
   setQuantity: (value: string) => void;
   isSubmitting: boolean;
@@ -963,6 +1218,9 @@ function ScanOutConfirmationModal({
         <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Scan Out</h3>
         <p className="text-sm text-gray-600 mb-4">
           Remove stock for <span className="font-semibold text-gray-800">{product.name}</span> ({product.sku}).
+          {product.isBatch && product.batchSku && (
+            <span className="block text-xs text-red-600 mt-1">Batch: {product.batchSku}</span>
+          )}
         </p>
 
         <div className="space-y-2 mb-4">

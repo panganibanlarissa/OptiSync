@@ -11,6 +11,7 @@ import { useFirebase } from "@/context/FirebaseContext";
 import Image from "next/image";
 import QRScannerModal from "@/components/QRScannerModal";
 import ReplacementRequestModal from "@/components/ReplacementRequestModal";
+import ReplacementRequestApprovalModal from "@/components/ReplacementRequestApprovalModal";
 import {
   ShoppingCart,
   Trash2,
@@ -40,11 +41,14 @@ import {
   CalendarDays
 } from "lucide-react";
 import { Timestamp } from "firebase/firestore";
+import { collection, doc, getDocs, query, orderBy, updateDoc, writeBatch, serverTimestamp, addDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_HOVER = "hover:bg-[#082F6E]";
 const THEME_TEXT = "text-[#0B3C8A]";
 const DEADSTOCK_DAYS_THRESHOLD = 30;
+const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
 const toValidDate = (value: unknown): Date | null => {
   if (value instanceof Date && !isNaN(value.getTime())) {
@@ -123,7 +127,6 @@ interface Transaction {
   replacedBy?: string;
   processedAt?: Date;
   processedBy?: string;
-  // Replacement request fields
   replacementRequestId?: string;
   replacementRequestedAt?: Date;
   replacementRequestedBy?: string;
@@ -133,6 +136,39 @@ interface Transaction {
   replacementRejectedBy?: string;
   replacementRejectionReason?: string;
 }
+
+// ================= HELPER FUNCTIONS FOR FEFO =================
+
+const getProductBatchesFEFO = async (productId: string): Promise<any[]> => {
+  try {
+    const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
+    const q = query(batchesRef, orderBy("expiryDate", "asc"));
+    const snapshot = await getDocs(q);
+    
+    const batches: any[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.isActive !== false) {
+        batches.push({
+          id: doc.id,
+          batchSku: data.batchSku,
+          expiryDate: data.expiryDate,
+          stock: data.stock,
+          totalSold: data.totalSold || 0,
+          beginningInventory: data.beginningInventory || data.initialStock || 0,
+          damageExchanged: data.damageExchanged || 0,
+          restockCount: data.restockCount || 0,
+          ...data
+        });
+      }
+    });
+    
+    return batches;
+  } catch (error) {
+    console.error("Error fetching batches for FEFO:", error);
+    return [];
+  }
+};
 
 const normalizeDiscountPercentage = (raw?: number): number => {
   if (typeof raw !== "number" || Number.isNaN(raw) || raw <= 0) return 0;
@@ -212,6 +248,25 @@ const formatDateTime = (date?: Date | string | null): string => {
   });
 };
 
+const XCircle = ({ size, className }: { size: number; className?: string }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+    className={className}
+  >
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+);
+
 export default function SalesPage() {
   const { showNotification, showToastOnly } = useNotification();
   const {
@@ -226,7 +281,9 @@ export default function SalesPage() {
     userRole,
     userId,
     replacementRequests,
-    fetchReplacementRequests
+    fetchReplacementRequests,
+    approveReplacementRequest,
+    rejectReplacementRequest
   } = useFirebase();
 
   const [activeTab, setActiveTab] = useState<"pos" | "history">("pos");
@@ -265,6 +322,10 @@ export default function SalesPage() {
   const [discountType, setDiscountType] = useState<"none" | "loyalty" | "pwd">("none");
   const [showReplacementRequestModal, setShowReplacementRequestModal] = useState(false);
   const [transactionForReplacementRequest, setTransactionForReplacementRequest] = useState<Transaction | null>(null);
+  const [selectedRequestForApproval, setSelectedRequestForApproval] = useState<any>(null);
+  const [selectedRequestForRejection, setSelectedRequestForRejection] = useState<any>(null);
+  const [rejectionReason, setRejectionReason] = useState<string>("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const searchParams = useSearchParams();
 
@@ -564,51 +625,80 @@ export default function SalesPage() {
         role: userRole || "staff"
       };
       
-      const productsBecomingOutOfStock: Array<{ name: string; id: string }> = [];
-      
-      const newTransactionData: any = {
-        patientName: patientName || "Walk-in Patient",
-        contactNumber: contactNumber || "",
-        items: cart,
-        subtotal: subtotal,
-        discountType: discountType,
-        discountPercentage: discountPercentage,
-        discountAmount: discountAmount,
-        total: total,
-        date: new Date(),
-        status: "completed" as const,
-        synced: isOnline,
-        staffName: currentUser.name,
-        staffId: currentUser.id,
-        paymentMethod: paymentMethodToUse,
-      };
-      
-      // Only add ID fields if discount type is "pwd" (PWD/Senior)
-      if (discountType === "pwd") {
-        newTransactionData.idType = idType || "";
-        newTransactionData.idNumber = idNumber || "";
-      }
-      
-      if (paymentMethodToUse === "cash" && amountReceivedForCash !== undefined) {
-        newTransactionData.amountReceive = amountReceivedForCash;
-        newTransactionData.change = amountReceivedForCash - total;
-      }
-      
-      if (paymentMethodToUse === "online" && referenceNumber.trim()) {
-        newTransactionData.referenceNumber = referenceNumber;
-      }
-      
-      if (warrantyStartDate && warrantyEndDate) {
-        newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
-        newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
-      }
-      
-      const transactionId = await addTransaction(newTransactionData);
-      if (!transactionId) throw new Error("Failed to create transaction");
+      const productsBecomingOutOfStock: Array<{ name: string; id: string; batchInfo?: string }> = [];
       
       for (const cartItem of cart) {
         const product = activeProducts.find(p => p.id === cartItem.id);
-        if (product) {
+        if (!product) continue;
+        
+        const isPerishable = product.category === "Solutions" || product.category === "Vitamins";
+        
+        if (isPerishable) {
+          console.log(`🔄 Processing perishable product "${product.name}" with FEFO, quantity: ${cartItem.quantity}`);
+          
+          const batches = await getProductBatchesFEFO(product.id);
+          
+          if (batches.length === 0) {
+            throw new Error(`No batches found for product "${product.name}". Please add a batch first.`);
+          }
+          
+          let remainingToDeduct = cartItem.quantity;
+          const batchUpdates: { batch: any; deductAmount: number }[] = [];
+          
+          for (const batch of batches) {
+            if (remainingToDeduct <= 0) break;
+            
+            const deductFromThisBatch = Math.min(batch.stock, remainingToDeduct);
+            if (deductFromThisBatch > 0) {
+              batchUpdates.push({
+                batch,
+                deductAmount: deductFromThisBatch
+              });
+              remainingToDeduct -= deductFromThisBatch;
+            }
+          }
+          
+          if (remainingToDeduct > 0) {
+            throw new Error(`Insufficient stock for "${product.name}". Need ${remainingToDeduct} more units across all batches.`);
+          }
+          
+          for (const { batch, deductAmount } of batchUpdates) {
+            const newBatchStock = batch.stock - deductAmount;
+            const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${product.id}/batches`, batch.id);
+            
+            const batchUpdateData = {
+              stock: newBatchStock,
+              totalSold: (batch.totalSold || 0) + deductAmount,
+              updatedAt: serverTimestamp()
+            };
+            
+            await updateDoc(batchRef, batchUpdateData);
+            
+            console.log(`  ✅ Deducted ${deductAmount} units from batch ${batch.batchSku}`);
+          }
+          
+          const remainingBatches = await getProductBatchesFEFO(product.id);
+          const totalStock = remainingBatches.reduce((sum, b) => sum + b.stock, 0);
+          const productRef = doc(db, `clinics/${CLINIC_ID}/products`, product.id);
+          await updateDoc(productRef, {
+            stock: totalStock,
+            totalSold: (product.totalSold || 0) + cartItem.quantity,
+            lastMovedDaysAgo: 0,
+            updatedAt: serverTimestamp()
+          });
+          
+          if (totalStock <= product.reorderPoint && totalStock > 0) {
+            showNotification(
+              `⚠️ ${product.name} is now low stock (${totalStock} left)`,
+              "warning",
+              "Low Stock Alert",
+              "/inventory",
+              { productId: product.id, productName: product.name, newStock: totalStock, reorderPoint: product.reorderPoint },
+              true, true
+            );
+          }
+          
+        } else {
           const newStock = product.stock - cartItem.quantity;
           const currentTotalSold = (product as any).totalSold || 0;
           const newTotalSold = currentTotalSold + cartItem.quantity;
@@ -636,7 +726,45 @@ export default function SalesPage() {
         }
       }
       
-      const newTransaction: Transaction = { id: transactionId, ...newTransactionData };
+      const newTransactionData: any = {
+        patientName: patientName || "Walk-in Patient",
+        contactNumber: contactNumber || "",
+        items: cart,
+        subtotal: subtotal,
+        discountType: discountType,
+        discountPercentage: discountPercentage,
+        discountAmount: discountAmount,
+        total: total,
+        date: new Date(),
+        status: "completed" as const,
+        synced: isOnline,
+        staffName: currentUser.name,
+        staffId: currentUser.id,
+        paymentMethod: paymentMethodToUse,
+      };
+      
+      if (discountType === "pwd") {
+        newTransactionData.idType = idType || "";
+        newTransactionData.idNumber = idNumber || "";
+      }
+      
+      if (paymentMethodToUse === "cash" && amountReceivedForCash !== undefined) {
+        newTransactionData.amountReceive = amountReceivedForCash;
+        newTransactionData.change = amountReceivedForCash - total;
+      }
+      
+      if (paymentMethodToUse === "online" && referenceNumber.trim()) {
+        newTransactionData.referenceNumber = referenceNumber;
+      }
+      
+      if (warrantyStartDate && warrantyEndDate) {
+        newTransactionData.warrantyStartDate = new Date(warrantyStartDate);
+        newTransactionData.warrantyEndDate = new Date(warrantyEndDate);
+      }
+      
+      const transactionId = await addTransaction(newTransactionData);
+      if (!transactionId) throw new Error("Failed to create transaction");
+      
       const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
       
       showNotification(
@@ -678,20 +806,21 @@ export default function SalesPage() {
       
       for (const outOfStockProduct of productsBecomingOutOfStock) {
         showNotification(
-          `❌ ${outOfStockProduct.name} is now out of stock`,
+          `❌ ${outOfStockProduct.name}${outOfStockProduct.batchInfo || ''} is now out of stock`,
           "error", "Out of Stock Alert", "/inventory",
           { productId: outOfStockProduct.id, productName: outOfStockProduct.name, newStock: 0 },
           true, true
         );
       }
       
+      const newTransaction: Transaction = { id: transactionId, ...newTransactionData };
       setLastTransaction(newTransaction);
       clearCart();
       setShowCheckoutModal(true);
       
     } catch (error) {
       console.error("Checkout error:", error);
-      showToastOnly("Failed to complete transaction. Please try again.", "error");
+      showToastOnly(error instanceof Error ? error.message : "Failed to complete transaction. Please try again.", "error");
     } finally {
       setIsProcessingCheckout(false);
     }
@@ -963,29 +1092,31 @@ export default function SalesPage() {
   };
 
   const handleProcessReplacement = async () => {
-    if (transactionToReplace) {
-      try {
-        await processReplacement(
-          transactionToReplace.id,
-          replacementReason || "Item replacement processed",
-          userName || "Staff"
-        );
-        
-        setReplacementModalOpen(false);
-        setTransactionToReplace(null);
-        setReplacementReason("");
-        
-        showNotification(
-          `Transaction #${transactionToReplace.id.slice(-8).toUpperCase()} is now in "Processing Replacement" status.`,
-          "info",
-          "Replacement Initiated"
-        );
-      } catch (error) {
-        console.error("Replacement processing error:", error);
-        showToastOnly("Failed to process replacement.", "error");
-      }
+  if (transactionToReplace) {
+    try {
+      await processReplacement(
+        transactionToReplace.id,
+        replacementReason || "Item replacement processed",
+        userName || "Staff"
+      );
+      
+      setReplacementModalOpen(false);
+      setTransactionToReplace(null);
+      setReplacementReason("");
+      
+      await fetchReplacementRequests(true);
+      
+      showNotification(
+        `Transaction #${transactionToReplace.id.slice(-8).toUpperCase()} is now in "Processing Replacement" status.`,
+        "info",
+        "Replacement Initiated"
+      );
+    } catch (error) {
+      console.error("Replacement processing error:", error);
+      showToastOnly("Failed to process replacement.", "error");
     }
-  };
+  }
+};
 
   const openCompleteReplacementModal = (transaction: Transaction) => {
     setTransactionToComplete(transaction);
@@ -998,27 +1129,99 @@ export default function SalesPage() {
   };
 
   const handleMarkReplacementAsCompleted = async () => {
-    if (transactionToComplete) {
-      try {
-        await markReplacementAsCompleted(
-          transactionToComplete.id,
-          userName || "Staff"
-        );
-        
-        setCompleteReplacementModalOpen(false);
-        setTransactionToComplete(null);
-        
-        showNotification(
-          `Transaction #${transactionToComplete.id.slice(-8).toUpperCase()} has been marked as Replaced.`,
-          "success",
-          "Replacement Completed"
-        );
-      } catch (error) {
-        console.error("Error completing replacement:", error);
-        showToastOnly("Failed to mark replacement as completed.", "error");
-      }
+  if (transactionToComplete) {
+    try {
+      await markReplacementAsCompleted(
+        transactionToComplete.id,
+        userName || "Staff"
+      );
+      
+      setCompleteReplacementModalOpen(false);
+      setTransactionToComplete(null);
+      
+      // Refresh replacement requests only - transactions update via listener
+      await fetchReplacementRequests(true);
+      
+      showNotification(
+        `Transaction #${transactionToComplete.id.slice(-8).toUpperCase()} has been marked as Replaced.`,
+        "success",
+        "Replacement Completed"
+      );
+    } catch (error) {
+      console.error("Error completing replacement:", error);
+      showToastOnly("Failed to mark replacement as completed.", "error");
     }
-  };
+  }
+};
+
+  const handleApproveRequest = async (request: any) => {
+  try {
+    await approveReplacementRequest(
+      request.id,
+      userName || "Admin",
+      userId || "system"
+    );
+    
+    showNotification(
+      `Replacement request for transaction #${request.transactionReceiptNumber} has been approved.`,
+      "success",
+      "Request Approved",
+      "/sales?tab=history"
+    );
+    
+    await fetchReplacementRequests(true);
+    
+    setSelectedRequestForApproval(null);
+    setViewTransactionModalOpen(false);
+    setTransactionToView(null);
+    
+  } catch (error: any) {
+    console.error("Error approving request:", error);
+    showToastOnly(error.message || "Failed to approve request", "error");
+  }
+};
+
+  const handleRejectRequest = async (request: any, reason: string) => {
+  if (!reason.trim()) {
+    showToastOnly("Please provide a reason for rejection", "error");
+    return;
+  }
+  
+  try {
+    await rejectReplacementRequest(
+      request.id,
+      userName || "Admin",
+      userId || "system",
+      reason.trim()
+    );
+    
+    showNotification(
+      `Replacement request for transaction #${request.transactionReceiptNumber} has been rejected.`,
+      "warning",
+      "Request Rejected",
+      "/sales?tab=history"
+    );
+    
+    await fetchReplacementRequests(true);
+    
+    setSelectedRequestForRejection(null);
+    setRejectionReason("");
+    setViewTransactionModalOpen(false);
+    setTransactionToView(null);
+    
+  } catch (error: any) {
+    console.error("Error rejecting request:", error);
+    showToastOnly(error.message || "Failed to reject request", "error");
+  }
+};
+
+  const refreshData = async () => {
+  setIsRefreshing(true);
+  await fetchReplacementRequests(true);
+  // Transactions will update automatically via the onSnapshot listener
+  // No need for fetchTransactions
+  setIsRefreshing(false);
+};
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -1041,14 +1244,12 @@ export default function SalesPage() {
     }
   };
 
-  // Check if a transaction has a pending replacement request
   const hasPendingReplacementRequest = (transactionId: string): boolean => {
     return replacementRequests.some(
       r => r.transactionId === transactionId && r.status === "pending"
     );
   };
 
-  // Get replacement request details for a transaction
   const getReplacementRequestForTransaction = (transactionId: string) => {
     return replacementRequests.find(r => r.transactionId === transactionId);
   };
@@ -1087,7 +1288,7 @@ export default function SalesPage() {
         </button>
       </div>
 
-      {/* POS Tab */}
+      {/* POS Tab Content */}
       {activeTab === "pos" ? (
         <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:min-h-[calc(99vh-180px)]">
           {/* Product Grid Section */}
@@ -1265,7 +1466,6 @@ export default function SalesPage() {
                 )}
               </div>
               
-              {/* Patient Name */}
               <div className="relative">
                 <User className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
                 <input
@@ -1277,7 +1477,6 @@ export default function SalesPage() {
                 />
               </div>
               
-              {/* Contact Number - directly below patient name */}
               <div className="relative">
                 <Phone className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
                 <input
@@ -1367,7 +1566,6 @@ export default function SalesPage() {
 
             <div className="shrink-0 p-2.5 sm:p-4 border-t border-gray-100 bg-slate-50">
               <div className="space-y-3 sm:space-y-4 mb-4 sm:mb-5">
-                {/* Payment Method */}
                 <div className="space-y-2">
                   <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Payment Method</label>
                   <div className="flex gap-2">
@@ -1390,7 +1588,6 @@ export default function SalesPage() {
                   </div>
                 </div>
 
-                {/* Warranty */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase flex items-center gap-1">
                     <Shield size={12} /> Warranty (Optional)
@@ -1411,7 +1608,6 @@ export default function SalesPage() {
                   </div>
                 </div>
 
-                {/* Reference Number for Online Payment */}
                 {paymentMethod === "online" && (
                   <div className="space-y-1.5">
                     <label htmlFor="referenceNumber" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase flex items-center gap-1">
@@ -1428,7 +1624,6 @@ export default function SalesPage() {
                   </div>
                 )}
 
-                {/* Discount Type */}
                 <div className="space-y-2">
                   <label className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Discount Type</label>
                   <div className="grid grid-cols-3 gap-2">
@@ -1459,7 +1654,6 @@ export default function SalesPage() {
                   </div>
                 </div>
 
-                {/* ID Type and ID Number - Only visible when PWD/Senior discount is selected */}
                 {discountType === "pwd" && (
                   <div className="space-y-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="grid grid-cols-2 gap-2">
@@ -1483,7 +1677,6 @@ export default function SalesPage() {
                   </div>
                 )}
 
-                {/* Amount Receive for Cash */}
                 {paymentMethod === "cash" && (
                   <div className="space-y-1.5">
                     <label htmlFor="amountReceive" className="text-[10px] sm:text-xs font-semibold text-gray-700 uppercase">Amount Receive</label>
@@ -1523,7 +1716,6 @@ export default function SalesPage() {
                 )}
               </div>
 
-              {/* Totals */}
               <div className="space-y-1 sm:space-y-1.5 mb-3 sm:mb-4">
                 <div className="flex justify-between text-xs sm:text-sm font-semibold text-gray-700 pt-1.5 sm:pt-2 border-t border-gray-200">
                   <span>Subtotal</span>
@@ -1541,7 +1733,6 @@ export default function SalesPage() {
                 </div>
               </div>
 
-              {/* Checkout Button */}
               <button
                 onClick={handleCheckout}
                 disabled={cart.length === 0 || isProcessingCheckout}
@@ -1555,7 +1746,7 @@ export default function SalesPage() {
           </div>
         </div>
       ) : (
-        /* Transaction History Tab */
+        // Transaction History Tab
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col lg:min-h-[calc(99vh-180px)]">
           <div className="shrink-0 p-3 sm:p-4 border-b border-gray-200">
             <div className="mb-3 sm:mb-4">
@@ -1715,7 +1906,6 @@ export default function SalesPage() {
                                 <Receipt size={14} />
                               </button>
                               
-                              {/* REQUEST REPLACEMENT BUTTON - STAFF ONLY */}
                               {userRole === "staff" && trx.status === "completed" && isWarrantyValid(trx) && !hasPendingRequest && (
                                 <button
                                   onClick={() => {
@@ -1729,22 +1919,10 @@ export default function SalesPage() {
                                 </button>
                               )}
                               
-                              {/* Show pending indicator for staff */}
                               {userRole === "staff" && trx.status === "completed" && hasPendingRequest && (
                                 <span className="p-1 sm:p-1.5 text-amber-400" title="Replacement request pending approval">
                                   <Repeat size={14} />
                                 </span>
-                              )}
-                              
-                              {/* ADMIN PROCESS REPLACEMENT BUTTON - ADMIN ONLY (Purple/Violet Repeat icon) */}
-                              {userRole === "admin" && canProcessReplacement && hasWarranty && (
-                                <button
-                                  onClick={() => openReplacementModal(trx)}
-                                  className="p-1 sm:p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                  title="Process Replacement (Admin)"
-                                >
-                                  <Repeat size={14} />
-                                </button>
                               )}
                             </div>
                           </td>
@@ -1894,7 +2072,7 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* View Transaction Details Modal - Updated with replacement request dates */}
+      {/* View Transaction Details Modal - UPDATED with Approve/Reject/Mark as Replaced buttons */}
       <AnimatePresence>
         {viewTransactionModalOpen && transactionToView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -1975,13 +2153,12 @@ export default function SalesPage() {
                   </div>
                 </div>
 
-                {/* Replacement Request Dates Section - Only show if there's a replacement request */}
+                {/* Replacement Request Dates Section */}
                 {(() => {
                   const replacementReq = getReplacementRequestForTransaction(transactionToView.id);
                   if (replacementReq) {
                     return (
                       <>
-                        {/* Requested Date */}
                         <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-200 rounded-xl p-3.5">
                           <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide flex items-center gap-1">
                             <CalendarDays size={12} /> Replacement Requested
@@ -1990,7 +2167,6 @@ export default function SalesPage() {
                           <p className="text-[9px] text-amber-500 mt-0.5">by {replacementReq.requestedBy}</p>
                         </div>
 
-                        {/* Approved Date - Only show if approved */}
                         {replacementReq.status === "approved" && replacementReq.reviewedAt && (
                           <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-3.5">
                             <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide flex items-center gap-1">
@@ -2001,7 +2177,6 @@ export default function SalesPage() {
                           </div>
                         )}
 
-                        {/* Rejected Date & Reason - Only show if rejected */}
                         {replacementReq.status === "rejected" && replacementReq.reviewedAt && (
                           <div className="bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl p-3.5">
                             <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide flex items-center gap-1">
@@ -2160,21 +2335,67 @@ export default function SalesPage() {
                 >
                   <Receipt size={16} /> Download Receipt
                 </button>
-                {transactionToView.status === "processing_replacement" && userRole === "admin" && (
-                  <button
-                    onClick={() => { setViewTransactionModalOpen(false); setTransactionToView(null); openCompleteReplacementModal(transactionToView); }}
-                    className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
-                  >
-                    <CheckCheck size={16} /> Mark as Replaced
-                  </button>
-                )}
+                
+                {/* Approval/Rejection/Replacement Button Logic */}
+                {userRole === "admin" && (() => {
+                  const replacementReq = getReplacementRequestForTransaction(transactionToView.id);
+                  const hasPendingRequest = replacementReq && replacementReq.status === "pending";
+                  const hasApprovedRequest = replacementReq && replacementReq.status === "approved";
+                  const isProcessingReplacement = transactionToView.status === "processing_replacement";
+                  
+                  if (hasPendingRequest) {
+                    return (
+                      <div className="flex gap-3 flex-1">
+                        <button
+                          onClick={() => {
+                            setSelectedRequestForRejection(replacementReq);
+                            setRejectionReason("");
+                          }}
+                          className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                        >
+                          <XCircle size={16} /> Reject Request
+                        </button>
+                        <button
+                          onClick={() => handleApproveRequest(replacementReq)}
+                          className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                        >
+                          <CheckCircle2 size={16} /> Approve Request
+                        </button>
+                      </div>
+                    );
+                  }
+                  
+                  if (hasApprovedRequest && isProcessingReplacement && transactionToView.status !== "replaced") {
+                    return (
+                      <button
+                        onClick={() => openCompleteReplacementModal(transactionToView)}
+                        className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                      >
+                        <CheckCheck size={16} /> Mark as Replaced
+                      </button>
+                    );
+                  }
+                  
+                  if (isProcessingReplacement && transactionToView.status !== "replaced" && !hasApprovedRequest) {
+                    return (
+                      <button
+                        onClick={() => openReplacementModal(transactionToView)}
+                        className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
+                      >
+                        <Repeat size={16} /> Process Replacement
+                      </button>
+                    );
+                  }
+                  
+                  return null;
+                })()}
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Process Replacement Modal (Admin Approval) */}
+      {/* Process Replacement Modal (Admin Direct) */}
       <AnimatePresence>
         {replacementModalOpen && transactionToReplace && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -2286,6 +2507,84 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
+      {/* Replacement Request Approval Modal */}
+      <AnimatePresence>
+        {selectedRequestForApproval && (
+          <ReplacementRequestApprovalModal
+            request={selectedRequestForApproval}
+            onClose={() => {
+              setSelectedRequestForApproval(null);
+              refreshData();
+            }}
+            onSuccess={() => {
+              setSelectedRequestForApproval(null);
+              refreshData();
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Replacement Request Rejection Modal (Inline) */}
+      <AnimatePresence>
+        {selectedRequestForRejection && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <XCircle size={18} className="text-red-600" />
+                  <h3 className="text-lg font-bold text-gray-800">Reject Replacement Request</h3>
+                </div>
+                <button
+                  onClick={() => { setSelectedRequestForRejection(null); setRejectionReason(""); }}
+                  className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-5">
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Are you sure you want to reject the replacement request for transaction <span className="font-mono font-bold">{selectedRequestForRejection.transactionReceiptNumber}</span>?
+                  </p>
+                  <label className="block text-xs font-semibold text-gray-700 mb-2">
+                    Rejection Reason <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Please provide a reason for rejecting this replacement request..."
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-700 placeholder-gray-400 resize-none"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1.5">
+                    This reason will be visible to the staff who submitted the request
+                  </p>
+                </div>
+              </div>
+              <div className="p-4 border-t border-gray-100 bg-slate-50 flex gap-3">
+                <button
+                  onClick={() => { setSelectedRequestForRejection(null); setRejectionReason(""); }}
+                  className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleRejectRequest(selectedRequestForRejection, rejectionReason)}
+                  className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors shadow-md"
+                >
+                  Reject Request
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* QR Scanner Modal */}
       <AnimatePresence>
         {isQRScannerOpen && (
@@ -2293,7 +2592,7 @@ export default function SalesPage() {
             mode="cart"
             onClose={() => setIsQRScannerOpen(false)}
             products={activeProducts}
-            onProductFound={(productId) => {
+            onProductFound={(productId, batchId, batchSku) => {
               const product = productsWithAvailableStock.find(p => p.id === productId);
               if (product && !product.archived) {
                 handleAddToCartClick(product);
@@ -2415,23 +2714,3 @@ export default function SalesPage() {
     </div>
   );
 }
-
-// Helper component for XCircle icon used in rejection display
-const XCircle = ({ size, className }: { size: number; className?: string }) => (
-  <svg 
-    xmlns="http://www.w3.org/2000/svg" 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10"/>
-    <line x1="18" y1="6" x2="6" y2="18"/>
-    <line x1="6" y1="6" x2="18" y2="18"/>
-  </svg>
-);

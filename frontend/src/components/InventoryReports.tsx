@@ -1,3 +1,5 @@
+// src/components/InventoryReports.tsx
+
 "use client";
 
 import React, { useState, useMemo } from "react";
@@ -25,7 +27,7 @@ import { useFirebase } from "@/context/FirebaseContext";
 import { useNotification } from "./NotificationProvider";
 
 // Use the Product type from FirebaseContext to ensure consistency
-import type { Product } from "@/context/FirebaseContext";
+import type { Product, ProductBatch } from "@/context/FirebaseContext";
 
 type InventoryData = Product;
 
@@ -49,7 +51,7 @@ export default function InventoryReports({
 }: {
   products: InventoryData[];
   onProductDelete?: (id: string) => void;
-  onProductAdjust?: (id: string, newStock: number, reason: string) => void;
+  onProductAdjust?: (id: string, newStock: number, reason: string, batchId?: string) => void;
   userRole?: string | null;
   onAddProduct?: (data: ProductFormData) => Promise<any>;
   onOpenScanner?: () => void;
@@ -57,7 +59,7 @@ export default function InventoryReports({
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
 }) {
-  const { updateProduct, transactions, deleteProduct } = useFirebase();
+  const { updateProduct, transactions, deleteProduct, getProductBatches, updateBatchStock } = useFirebase();
   const { showNotification, showToastOnly } = useNotification();
 
   const resetFilters = () => {
@@ -89,13 +91,27 @@ export default function InventoryReports({
   const [editingProduct, setEditingProduct] = useState<ProductFormData | null>(null);
   const [adjustingProduct, setAdjustingProduct] = useState<ProductFormData | null>(null);
   const [viewingProduct, setViewingProduct] = useState<InventoryData | null>(null);
-  const [selectedQRProduct, setSelectedQRProduct] = useState<{ id: string; sku: string; name: string; price: number } | null>(null);
+  const [selectedQRProduct, setSelectedQRProduct] = useState<{ id: string; sku: string; name: string; price: number; batchId?: string; batchSku?: string } | null>(null);
   const [addingProduct, setAddingProduct] = useState<ProductFormData | null>(null);
   const [showLocalScanner, setShowLocalScanner] = useState(false);
   const [localScannerMode, setLocalScannerMode] = useState<"search" | "adjust">("search");
   const [pendingArchive, setPendingArchive] = useState<null | { id: string; archived: boolean; name?: string }>(null);
+  const [adjustingBatch, setAdjustingBatch] = useState<{ batchId: string; batchSku: string; productId: string; productName: string; currentStock: number } | null>(null);
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
+  const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
+  const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
   
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
+
+  // Helper function to check if a product is perishable
+  const isProductPerishable = (product: InventoryData): boolean => {
+    return product.category === "Solutions" || product.category === "Vitamins";
+  };
+
+  // Helper function to get display SKU (don't show batch SKU in inventory list)
+  const getDisplaySku = (product: InventoryData): string => {
+    return product.sku;
+  };
 
   // Helper function to calculate days since last sale for a product
   const getDaysSinceLastSale = (product: InventoryData, today: Date): number => {
@@ -273,6 +289,59 @@ export default function InventoryReports({
     });
   };
 
+  const handleAdjustBatchStock = async (batchId: string, productId: string, productName: string, batchSku: string, currentStock: number) => {
+    setAdjustingBatch({ batchId, batchSku, productId, productName, currentStock });
+    setAdjustmentQuantity(1);
+    setAdjustmentType("restock");
+  };
+
+  const confirmBatchAdjustment = async () => {
+    if (!adjustingBatch || isSubmittingAdjustment) return;
+    
+    if (adjustmentQuantity <= 0) {
+      showToastOnly("Quantity must be greater than 0", "error");
+      return;
+    }
+    
+    setIsSubmittingAdjustment(true);
+    try {
+      let newStock: number;
+      let reason: string;
+      
+      if (adjustmentType === "restock") {
+        newStock = adjustingBatch.currentStock + adjustmentQuantity;
+        reason = `Restock: +${adjustmentQuantity} units added to batch ${adjustingBatch.batchSku}`;
+      } else {
+        if (adjustmentQuantity > adjustingBatch.currentStock) {
+          showToastOnly(`Cannot remove ${adjustmentQuantity} units. Only ${adjustingBatch.currentStock} in stock.`, "error");
+          setIsSubmittingAdjustment(false);
+          return;
+        }
+        newStock = adjustingBatch.currentStock - adjustmentQuantity;
+        reason = `Damaged/Waste: -${adjustmentQuantity} units removed from batch ${adjustingBatch.batchSku}`;
+      }
+      
+      await updateBatchStock(adjustingBatch.batchId, newStock, reason);
+      
+      showToastOnly(`Batch ${adjustingBatch.batchSku} updated successfully`, "success");
+      setAdjustingBatch(null);
+      
+      // Refresh products view
+      if (onProductAdjust) {
+        // This will trigger a refresh
+        const product = products.find(p => p.id === adjustingBatch.productId);
+        if (product) {
+          onProductAdjust(product.id, product.stock, reason, adjustingBatch.batchId);
+        }
+      }
+    } catch (error) {
+      console.error("Error updating batch stock:", error);
+      showToastOnly("Failed to update batch stock", "error");
+    } finally {
+      setIsSubmittingAdjustment(false);
+    }
+  };
+
   const handleDeleteProduct = async (id: string) => {
     try {
       await deleteProduct(id);
@@ -286,6 +355,32 @@ export default function InventoryReports({
 
   const handleSaveProduct = async (formData: ProductFormData) => {
     try {
+      // Check if this is a batch adjustment (has batchId)
+      if ((formData as any).batchId && onProductAdjust) {
+        // This is a batch-level adjustment
+        console.log("Batch adjustment detected:", {
+          productId: formData.id,
+          batchId: (formData as any).batchId,
+          batchSku: (formData as any).batchSku,
+          newStock: formData.stock,
+          reason: formData.adjustmentReason,
+          adjustmentType: (formData as any).adjustmentType
+        });
+        
+        // Call onProductAdjust with batchId
+        onProductAdjust(
+          formData.id!, 
+          formData.stock, 
+          formData.adjustmentReason || "Stock adjustment", 
+          (formData as any).batchId
+        );
+        
+        setAdjustingProduct(null);
+        showToastOnly(`Batch stock updated successfully`, "success");
+        return;
+      }
+      
+      // Regular product adjustment (non-batch or non-perishable)
       if (adjustingProduct && onProductAdjust) {
         onProductAdjust(formData.id!, Number(formData.stock), formData.adjustmentReason || "Manual adjustment");
         setAdjustingProduct(null);
@@ -293,6 +388,10 @@ export default function InventoryReports({
         return;
       }
 
+      // Determine if product is perishable (Solutions or Vitamins)
+      const isPerishable = formData.category === "Solutions" || formData.category === "Vitamins";
+
+      // Regular product edit
       if (formData.id) {
         const updates: Partial<Product> = {
           sku: formData.sku,
@@ -328,6 +427,20 @@ export default function InventoryReports({
         
         setEditingProduct(null);
         showToastOnly(`Product "${formData.name}" updated successfully`, "success");
+      } else if (!formData.id && onAddProduct) {
+        // This is a new product being added
+        const newId = await onAddProduct(formData);
+        
+        // ONLY show QR code modal for NON-perishable products
+        // Perishable products (Solutions, Vitamins) should only use batch-level QR codes
+        if (newId && !isPerishable) {
+          setSelectedQRProduct({
+            id: newId,
+            sku: formData.sku,
+            name: formData.name,
+            price: formData.markupPrice,
+          });
+        }
       }
     } catch (error) {
       console.error('Error saving product:', error);
@@ -345,7 +458,8 @@ export default function InventoryReports({
       statuses.push("Deadstock");
     }
     
-    if (product.expiryDate) {
+    // Only show expiry status for non-perishable products in the main list
+    if (!isProductPerishable(product) && product.expiryDate) {
       const expiryDate = new Date(product.expiryDate);
       expiryDate.setHours(0, 0, 0, 0);
       
@@ -434,7 +548,7 @@ export default function InventoryReports({
         product.stock.toString(),
         `₱${product.baseCost.toLocaleString()}`,
         `₱${product.markupPrice.toLocaleString()}`,
-        product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
+        !isProductPerishable(product) && product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
         getProductStatus(product).join(" | "),
       ];
     });
@@ -581,7 +695,6 @@ export default function InventoryReports({
     const totalStock = filteredProducts.reduce((sum, p) => sum + p.stock, 0);
     doc.text(`Total Units in Stock: ${totalStock}`, 14, finalY + 14);
     
-    // FIXED: Show complete inventory value instead of abbreviated "K"
     const totalValue = filteredProducts.reduce(
       (sum, p) => sum + p.markupPrice * p.stock,
       0
@@ -848,7 +961,7 @@ export default function InventoryReports({
 
         {/* Results Summary and Table */}
         <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
-          {/* FIXED: Inventory Value Summary Cards - Now shows full amount instead of "K" abbreviation */}
+          {/* Inventory Value Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
@@ -933,6 +1046,10 @@ export default function InventoryReports({
                       const statusText = statuses.join(" | ");
                       const isArchived = (product as any).archived === true;
                       const isDimmed = isArchived || product.stock === 0;
+                      const isPerishable = isProductPerishable(product);
+                      
+                      // For perishable products, show "—" instead of SKU
+                      const displaySku = isPerishable ? "—" : product.sku;
 
                       return (
                         <tr
@@ -940,28 +1057,28 @@ export default function InventoryReports({
                           className={`transition-colors ${isDimmed ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
                         >
                           <td className="px-2 sm:px-4 py-2 sm:py-3 font-mono text-gray-600">
-                            {product.sku}
-                           </td>
+                            {displaySku}
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-800 max-w-xs truncate">
                             {product.name}
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-gray-600">
                             {product.category}
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
                             {(product as any).totalSold || 0}
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-800">
                             {(product as any).damageExchanged || 0}
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
                             {product.stock}
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
                             <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
                               {statusText}
                             </span>
-                           </td>
+                          </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <button
@@ -985,20 +1102,23 @@ export default function InventoryReports({
                               >
                                 <Edit2 size={14} />
                               </button>
-                              <button
-                                title="QR Code"
-                                onClick={() => setSelectedQRProduct({ id: product.id, sku: product.sku, name: product.name, price: product.markupPrice })}
-                                className="p-1.5 hover:bg-green-100 rounded transition-colors text-green-600"
-                              >
-                                <QrCode size={14} />
-                              </button>
+                              {/* QR Code button only shown for non-perishable products */}
+                              {!isPerishable && (
+                                <button
+                                  title="QR Code"
+                                  onClick={() => setSelectedQRProduct({ id: product.id, sku: product.sku, name: product.name, price: product.markupPrice })}
+                                  className="p-1.5 hover:bg-green-100 rounded transition-colors text-green-600"
+                                >
+                                  <QrCode size={14} />
+                                </button>
+                              )}
                             </div>
-                           </td>
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                 </table>
+                </table>
               </div>
             ) : (
               <div className="p-8 text-center">
@@ -1134,41 +1254,7 @@ export default function InventoryReports({
             product={addingProduct}
             products={products}
             onClose={() => setAddingProduct(null)}
-            onSave={async (data: ProductFormData) => {
-              try {
-                let addedProductId: string | undefined;
-                if (onAddProduct) {
-                  const result = await onAddProduct(data);
-                  if (typeof result === "string") {
-                    addedProductId = result;
-                  }
-                } else {
-                  await fetch('/api/products', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data),
-                  });
-                }
-
-                const fallbackProduct = products.find(
-                  (p) => p.sku === data.sku || (p.name === data.name && p.category === data.category)
-                );
-                const resolvedProductId = addedProductId || fallbackProduct?.id;
-
-                if (resolvedProductId) {
-                  setSelectedQRProduct({
-                    id: resolvedProductId,
-                    sku: data.sku,
-                    name: data.name,
-                    price: data.markupPrice,
-                  });
-                }
-              } catch (err) {
-                console.error('Failed to add product from reports modal', err);
-              } finally {
-                setAddingProduct(null);
-              }
-            }}
+            onSave={handleSaveProduct}
             userRole={userRole}
           />
         )}
@@ -1178,7 +1264,7 @@ export default function InventoryReports({
           <QRScannerModal
             onClose={() => setShowLocalScanner(false)}
             products={products.map(p => ({ id: p.id, sku: p.sku, name: p.name, stock: p.stock }))}
-            onProductFound={(id: string) => {
+            onProductFound={(id: string, batchId?: string, batchSku?: string) => {
               setShowLocalScanner(false);
               const prod = products.find(p => p.id === id);
               if (!prod) return;
@@ -1188,7 +1274,11 @@ export default function InventoryReports({
                 return;
               }
               if (onProductAdjust) {
-                onProductAdjust(prod.id, prod.stock + 1, "Received via QR Scan");
+                if (batchId) {
+                  onProductAdjust(prod.id, prod.stock + 1, "Received via QR Scan", batchId);
+                } else {
+                  onProductAdjust(prod.id, prod.stock + 1, "Received via QR Scan");
+                }
               }
             }}
             mode={localScannerMode}
@@ -1202,6 +1292,8 @@ export default function InventoryReports({
             productSku={selectedQRProduct.sku}
             productName={selectedQRProduct.name}
             productPrice={selectedQRProduct.price}
+            batchId={selectedQRProduct.batchId}
+            batchSku={selectedQRProduct.batchSku}
             onClose={() => setSelectedQRProduct(null)}
           />
         )}
@@ -1212,6 +1304,94 @@ export default function InventoryReports({
             product={viewingProduct}
             onClose={() => setViewingProduct(null)}
           />
+        )}
+
+        {/* Batch Adjustment Modal */}
+        {adjustingBatch && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-slate-50">
+                <h3 className="text-lg font-bold text-gray-800">Adjust Batch Stock</h3>
+                <button onClick={() => setAdjustingBatch(null)} className="p-1 hover:bg-gray-200 rounded-full">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <p className="text-sm font-semibold text-gray-800">{adjustingBatch.batchSku}</p>
+                <p className="text-xs text-gray-500">Product: <span className="font-bold">{adjustingBatch.productName}</span></p>
+                <p className="text-xs text-gray-500">Current Stock: <span className="font-bold">{adjustingBatch.currentStock} units</span></p>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setAdjustmentType('restock')}
+                    className={`flex-1 py-2 px-3 rounded-lg font-semibold text-sm transition-all border-2 ${
+                      adjustmentType === 'restock'
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-gray-300 bg-white text-gray-600'
+                    }`}
+                  >
+                    Restock (+)
+                  </button>
+                  <button
+                    onClick={() => setAdjustmentType('damaged')}
+                    className={`flex-1 py-2 px-3 rounded-lg font-semibold text-sm transition-all border-2 ${
+                      adjustmentType === 'damaged'
+                        ? 'border-red-500 bg-red-50 text-red-700'
+                        : 'border-gray-300 bg-white text-gray-600'
+                    }`}
+                  >
+                    Damaged/Waste (-)
+                  </button>
+                </div>
+                
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    value={adjustmentQuantity}
+                    onChange={(e) => setAdjustmentQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 text-lg font-bold text-center focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none"
+                  />
+                </div>
+                
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  {adjustmentType === 'restock' ? (
+                    <p className="text-sm text-gray-900">
+                      New Stock: <span className="font-bold text-green-600">{adjustingBatch.currentStock + adjustmentQuantity}</span>
+                      <span className="text-gray-500 ml-2">(+{adjustmentQuantity})</span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-900">
+                      New Stock: <span className="font-bold text-red-600">{Math.max(0, adjustingBatch.currentStock - adjustmentQuantity)}</span>
+                      <span className="text-gray-500 ml-2">(-{adjustmentQuantity})</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="p-4 border-t border-gray-100 bg-slate-50 flex gap-3">
+                <button
+                  onClick={() => setAdjustingBatch(null)}
+                  className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmBatchAdjustment}
+                  disabled={isSubmittingAdjustment}
+                  className={`flex-1 px-4 py-2 rounded-lg text-white font-medium disabled:opacity-50 ${
+                    adjustmentType === 'restock' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  {isSubmittingAdjustment ? 'Updating...' : (adjustmentType === 'restock' ? 'Add Stock' : 'Remove Stock')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </motion.div>
     </>

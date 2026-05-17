@@ -1,3 +1,4 @@
+// src/components/QRCodeModal.tsx
 'use client';
 
 import React, { useRef } from 'react';
@@ -19,12 +20,31 @@ interface QRCodeModalProps {
   productName: string;
   onClose: () => void;
   productPrice?: number;
+  batchId?: string;
+  batchSku?: string;
+  batchExpiry?: string;
 }
 
-export default function QRCodeModal({ productId, productSku, productName, onClose, productPrice }: QRCodeModalProps) {
+export default function QRCodeModal({ 
+  productId, 
+  productSku, 
+  productName, 
+  onClose, 
+  productPrice,
+  batchId,
+  batchSku,
+  batchExpiry
+}: QRCodeModalProps) {
   const qrRef = useRef<HTMLDivElement>(null);
 
-  const qrValue = `${window.location.origin}/inventory?product=${productId}&name=${encodeURIComponent(productName)}`;
+  // Build QR value - include batch info if present
+  let qrValue = `${window.location.origin}/inventory?product=${productId}&name=${encodeURIComponent(productName)}`;
+  if (batchId && batchSku) {
+    qrValue += `&batch=${batchId}&batchSku=${encodeURIComponent(batchSku)}`;
+    if (batchExpiry) {
+      qrValue += `&expiry=${batchExpiry}`;
+    }
+  }
 
   const printQRCode = () => {
     const printWindow = window.open('', '_blank');
@@ -32,13 +52,18 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
 
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrValue)}`;
 
+    const isBatch = batchId && batchSku;
+    const displaySku = isBatch ? `${productSku} (Batch: ${batchSku})` : productSku;
+    const displayName = isBatch ? `${productName} (Batch: ${batchSku})` : productName;
+    const additionalInfo = isBatch && batchExpiry ? `<div class="batch-expiry">Expiry: ${new Date(batchExpiry).toLocaleDateString()}</div>` : '';
+
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Product QR Tag - ${productName}</title>
+        <title>Product QR Tag - ${displayName}</title>
         <style>
           * {
             margin: 0;
@@ -131,6 +156,11 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
             font-family: 'Courier New', monospace;
             letter-spacing: 0.5px;
           }
+          .batch-expiry {
+            font-size: 10px;
+            color: #D97706;
+            margin-top: 4px;
+          }
           .price-section {
             background: #FBBF24;
             border-radius: 8px;
@@ -160,14 +190,15 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
           <div class="tag">
             <div class="qr-section">
               <div class="qr-code-container">
-                <img src="${qrImageUrl}" alt="QR Code for ${productName}" />
+                <img src="${qrImageUrl}" alt="QR Code for ${displayName}" />
               </div>
             </div>
             <div class="info-section">
               <div class="product-info">
                 <div class="product-label">Product</div>
-                <div class="product-name">${productName}</div>
-                <div class="product-sku">SKU: ${productSku}</div>
+                <div class="product-name">${displayName}</div>
+                <div class="product-sku">SKU: ${displaySku}</div>
+                ${additionalInfo}
               </div>
               <div class="price-section">
                 <div class="price-label">Retail Price</div>
@@ -191,6 +222,9 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
     };
   };
 
+  const displayName = batchSku ? `${productName} (Batch: ${batchSku})` : productName;
+  const displaySku = batchSku ? `${productSku} (Batch: ${batchSku})` : productSku;
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div
@@ -202,7 +236,7 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
       >
         <div className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-100 bg-slate-50">
           <h2 className="text-sm sm:text-lg font-bold text-gray-800 truncate pr-2">
-            {productName} - QR Code
+            {displayName} - QR Code
           </h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors flex-shrink-0">
             <X size={16} className="text-gray-500 sm:w-5 sm:h-5" />
@@ -213,21 +247,27 @@ export default function QRCodeModal({ productId, productSku, productName, onClos
           <div ref={qrRef} className="bg-gray-50 p-4 rounded-lg border-2 border-gray-200">
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrValue)}`}
-              alt={`QR Code for ${productName}`}
+              alt={`QR Code for ${displayName}`}
               className="w-64 h-64"
             />
           </div>
 
           <p className="text-xs sm:text-sm font-semibold text-gray-700 text-center">
-            {productName}
+            {displayName}
           </p>
 
+          {batchExpiry && (
+            <p className="text-[10px] sm:text-xs text-orange-600 text-center">
+              Expiry: {new Date(batchExpiry).toLocaleDateString()}
+            </p>
+          )}
+
           <p className="text-[10px] sm:text-xs text-gray-500 text-center px-2">
-            Scan this QR code to quickly add stock
+            Scan this QR code to quickly adjust stock for this batch
           </p>
 
           <div className="text-[9px] sm:text-[10px] text-gray-400 bg-gray-50 p-2 sm:p-3 rounded text-center font-mono break-all w-full">
-            ID: {productId}
+            ID: {batchId || productId}
           </div>
         </div>
 

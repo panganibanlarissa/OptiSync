@@ -43,7 +43,6 @@ import {
   onSnapshot,
   writeBatch,
   where,
-  and
 } from "firebase/firestore";
 
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
@@ -65,7 +64,22 @@ const getSecondaryAuth = () => {
   });
 };
 
-// ================= TYPES =================
+// ================= BATCH TYPES =================
+
+export interface ProductBatch {
+  id: string;
+  batchSku: string;
+  expiryDate: string;
+  stock: number;
+  beginningInventory: number;     // Initial stock when batch was created
+  totalSold: number;              // Units sold from this batch
+  damageExchanged: number;        // Units damaged/exchanged from this batch
+  restockCount: number;           // Units restocked to this batch
+  isActive: boolean;
+  parentProductId: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
 
 export interface Product {
   id: string;
@@ -93,6 +107,8 @@ export interface Product {
   archived?: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  isPerishable?: boolean;
+  batches?: ProductBatch[];
 }
 
 export interface Transaction {
@@ -178,15 +194,21 @@ interface FirebaseContextType {
   addProduct: (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
-  adjustStock: (id: string, newStock: number, reason: string, staffName?: string, staffId?: string) => Promise<void>;
+  adjustStock: (id: string, newStock: number, reason: string, staffName?: string, staffId?: string, batchId?: string) => Promise<void>;
   archiveProduct: (id: string, archived: boolean, reason?: string, markDeleted?: boolean) => Promise<void>;
+
+  // Batch Management
+  addProductBatch: (productId: string, batchSku: string, expiryDate: string, initialStock: number, staffName?: string, staffId?: string) => Promise<string>;
+  updateBatchStock: (batchId: string, newStock: number, reason: string, staffName?: string, staffId?: string) => Promise<void>;
+  getProductBatches: (productId: string) => Promise<ProductBatch[]>;
+  deleteBatch: (batchId: string, productId: string) => Promise<void>;
 
   transactions: Transaction[];
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt'>) => Promise<string>;
   processReplacement: (id: string, reason: string, processedBy: string) => Promise<void>;
   markReplacementAsCompleted: (id: string, replacedBy: string) => Promise<void>;
 
-  // New Replacement Request methods
+  // Replacement Request methods
   replacementRequests: ReplacementRequest[];
   createReplacementRequest: (
     transactionId: string,
@@ -295,7 +317,7 @@ const logLogout = async (staffName: string, staffId: string, userEmail: string |
   }
 };
 
-// Helper function to log stock adjustments (for MANUAL adjustments only)
+// Helper function to log stock adjustments
 const logStockAdjustment = async (
   productId: string, 
   oldStock: number, 
@@ -303,7 +325,9 @@ const logStockAdjustment = async (
   reason: string, 
   staffId: string, 
   staffName: string,
-  productName?: string
+  productName?: string,
+  batchId?: string,
+  batchSku?: string
 ) => {
   try {
     const stockAdjustmentsRef = collection(db, `clinics/${CLINIC_ID}/stockAdjustments`);
@@ -315,6 +339,8 @@ const logStockAdjustment = async (
       reason,
       staffId,
       staffName,
+      batchId: batchId || null,
+      batchSku: batchSku || null,
       timestamp: serverTimestamp()
     });
     console.log(`✅ Stock adjustment logged: ${staffName} changed stock from ${oldStock} to ${newStock}. Reason: ${reason}`);
@@ -405,6 +431,30 @@ const logProductAddition = async (productId: string, productName: string, produc
   }
 };
 
+// Helper function to log batch addition
+const logBatchAddition = async (productId: string, productName: string, batchSku: string, expiryDate: string, initialStock: number, staffName: string, staffId: string) => {
+  try {
+    const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
+    
+    await addDoc(activityRef, {
+      type: 'batch_add',
+      action: 'batch_added',
+      description: `${staffName} added new batch "${batchSku}" for product "${productName}" (Expiry: ${expiryDate}, Stock: ${initialStock} units)`,
+      staffName: staffName,
+      staffId: staffId,
+      productId: productId,
+      productName: productName,
+      batchSku: batchSku,
+      expiryDate: expiryDate,
+      initialStock: initialStock,
+      timestamp: serverTimestamp()
+    });
+    console.log(`✅ Batch addition logged for ${batchSku}`);
+  } catch (error) {
+    console.error('Error logging batch addition:', error);
+  }
+};
+
 // Helper function to log product edit with changes
 const logProductEdit = async (
   productId: string, 
@@ -418,7 +468,6 @@ const logProductEdit = async (
     
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
     
-    // Format changes for display
     const changesText = changes.map(change => {
       const fieldName = change.field === 'markupPrice' ? 'price' : 
                         change.field === 'baseCost' ? 'cost' :
@@ -459,15 +508,18 @@ const logScanActivity = async (
   newStock: number,
   scanType: 'in' | 'out',
   staffName: string,
-  staffId: string
+  staffId: string,
+  batchId?: string,
+  batchSku?: string
 ) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
     const changeAmount = Math.abs(newStock - oldStock);
     const actionText = scanType === 'in' ? 'Scanned In' : 'Scanned Out';
+    const batchInfo = batchSku ? ` (Batch: ${batchSku})` : '';
     const description = scanType === 'in'
-      ? `${staffName} scanned in ${changeAmount} unit(s) of "${productName}". Stock updated from ${oldStock} to ${newStock}.`
-      : `${staffName} scanned out ${changeAmount} unit(s) of "${productName}". Stock updated from ${oldStock} to ${newStock}.`;
+      ? `${staffName} scanned in ${changeAmount} unit(s) of "${productName}"${batchInfo}. Stock updated from ${oldStock} to ${newStock}.`
+      : `${staffName} scanned out ${changeAmount} unit(s) of "${productName}"${batchInfo}. Stock updated from ${oldStock} to ${newStock}.`;
     
     await addDoc(activityRef, {
       type: scanType === 'in' ? 'scan_in' : 'scan_out',
@@ -477,12 +529,14 @@ const logScanActivity = async (
       staffId: staffId,
       productId: productId,
       productName: productName,
+      batchId: batchId || null,
+      batchSku: batchSku || null,
       oldStock: oldStock,
       newStock: newStock,
       quantityChanged: changeAmount,
       timestamp: serverTimestamp()
     });
-    console.log(`✅ ${actionText} activity logged for ${productName}`);
+    console.log(`✅ ${actionText} activity logged for ${productName}${batchInfo}`);
   } catch (error) {
     console.error('Error logging scan activity:', error);
   }
@@ -668,7 +722,6 @@ const adjustInventoryForReplacementApproval = async (
 ): Promise<void> => {
   try {
     for (const item of items) {
-      // Find the product in Firestore
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
       const productSnap = await getDoc(productRef);
       
@@ -677,13 +730,11 @@ const adjustInventoryForReplacementApproval = async (
         const oldStock = currentProduct.stock || 0;
         const newStock = oldStock + item.quantity;
         
-        // Update stock (return items to inventory)
         await updateDoc(productRef, {
           stock: newStock,
           updatedAt: serverTimestamp()
         });
         
-        // Log the stock adjustment
         await logStockAdjustment(
           item.id,
           oldStock,
@@ -709,7 +760,6 @@ const adjustInventoryForReplacementCompletion = async (
 ): Promise<void> => {
   try {
     for (const item of items) {
-      // Find the product in Firestore
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, item.id);
       const productSnap = await getDoc(productRef);
       
@@ -718,19 +768,16 @@ const adjustInventoryForReplacementCompletion = async (
         const oldStock = currentProduct.stock || 0;
         const newStock = Math.max(0, oldStock - item.quantity);
         
-        // Update stock (remove replacement items)
         await updateDoc(productRef, {
           stock: newStock,
           updatedAt: serverTimestamp()
         });
         
-        // Update damage/exchange count
         const currentDamageExchanged = currentProduct.damageExchanged || 0;
         await updateDoc(productRef, {
           damageExchanged: currentDamageExchanged + item.quantity
         });
         
-        // Log the stock adjustment
         await logStockAdjustment(
           item.id,
           oldStock,
@@ -1024,6 +1071,348 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [userRole]);
 
+  // ================= BATCH HELPER FUNCTIONS =================
+
+  const getProductBatches = useCallback(async (productId: string): Promise<ProductBatch[]> => {
+  try {
+    const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
+    const q = query(batchesRef, orderBy("expiryDate", "asc")); // FEFO order
+    const snapshot = await getDocs(q);
+    
+    const batches: ProductBatch[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      batches.push({
+        id: doc.id,
+        batchSku: data.batchSku,
+        expiryDate: data.expiryDate,
+        stock: data.stock,
+        beginningInventory: data.beginningInventory || data.initialStock || 0,
+        totalSold: data.totalSold || 0,           // IMPORTANT: Include totalSold
+        damageExchanged: data.damageExchanged || 0, // IMPORTANT: Include damageExchanged
+        restockCount: data.restockCount || 0,      // IMPORTANT: Include restockCount
+        isActive: data.isActive !== false,
+        parentProductId: data.parentProductId,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
+      } as ProductBatch);
+    });
+    
+    console.log("📦 getProductBatches returning:", batches.map(b => ({ batchSku: b.batchSku, totalSold: b.totalSold, stock: b.stock })));
+    return batches;
+  } catch (error) {
+    console.error("Error fetching batches:", error);
+    return [];
+  }
+}, []);
+
+  const updateParentProductStock = useCallback(async (productId: string) => {
+    try {
+      console.log(`📦 Updating parent product stock for: ${productId}`);
+      
+      const batches = await getProductBatches(productId);
+      const totalStock = batches.reduce((sum, batch) => sum + (batch.isActive !== false ? batch.stock : 0), 0);
+      
+      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
+      await updateDoc(productRef, {
+        stock: totalStock,
+        updatedAt: serverTimestamp()
+      });
+      
+      setProducts(prev => prev.map(p => 
+        p.id === productId ? { ...p, stock: totalStock } : p
+      ));
+      
+      console.log(`✅ Parent product stock updated to ${totalStock}`);
+      return totalStock;
+    } catch (error) {
+      console.error("Error updating parent product stock:", error);
+      throw error;
+    }
+  }, [getProductBatches]);
+
+  const addProductBatch = useCallback(async (
+  productId: string,
+  batchSku: string,
+  expiryDate: string,
+  initialStock: number,
+  staffName?: string,
+  staffId?: string
+): Promise<string> => {
+  try {
+    console.log("📦 addProductBatch: Starting for product", productId, "batch", batchSku);
+    
+    const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
+    const productSnap = await getDoc(productRef);
+    
+    if (!productSnap.exists()) {
+      throw new Error(`Product not found: ${productId}`);
+    }
+    
+    const productData = productSnap.data();
+    const productName = productData.name || "Unknown Product";
+    
+    const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
+    
+    const batchData = {
+      batchSku,
+      expiryDate,
+      stock: initialStock,
+      beginningInventory: initialStock,
+      totalSold: 0,
+      damageExchanged: 0,
+      restockCount: 0,
+      isActive: true,
+      parentProductId: productId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    
+    const docRef = await addDoc(batchesRef, batchData);
+    console.log("✅ Batch created with ID:", docRef.id);
+    
+    await updateParentProductStock(productId);
+    
+    await logBatchAddition(
+      productId,
+      productName,
+      batchSku,
+      expiryDate,
+      initialStock,
+      staffName || userName || 'System',
+      staffId || userId || 'system'
+    );
+    
+    // Update local state
+    const updatedProduct = await getDoc(productRef);
+    if (updatedProduct.exists()) {
+      const batches = await getProductBatches(productId);
+      setProducts(prev => prev.map(p => 
+        p.id === productId 
+          ? { 
+              ...p, 
+              ...updatedProduct.data(), 
+              batches,
+              stock: batches.reduce((sum, b) => sum + (b.isActive !== false ? b.stock : 0), 0)
+            }
+          : p
+      ));
+    }
+    
+    return docRef.id;
+  } catch (error) {
+    console.error("❌ Error adding product batch:", error);
+    throw error;
+  }
+}, [userName, userId, updateParentProductStock, getProductBatches]);
+
+const updateBatchStock = useCallback(async (
+  batchId: string,
+  newStock: number,
+  reason: string,
+  staffName?: string,
+  staffId?: string
+): Promise<void> => {
+  try {
+    console.log("📦 updateBatchStock called:", { batchId, newStock, reason });
+    
+    let productId: string | null = null;
+    let batch: ProductBatch | null = null;
+    let batchSku: string = "";
+    let productName: string = "";
+    let currentProductData: any = null;
+    
+    const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
+    const productsSnapshot = await getDocs(productsRef);
+    
+    for (const productDoc of productsSnapshot.docs) {
+      const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productDoc.id}/batches`, batchId);
+      const batchDoc = await getDoc(batchRef);
+      
+      if (batchDoc.exists()) {
+        productId = productDoc.id;
+        batch = { id: batchDoc.id, ...batchDoc.data() } as ProductBatch;
+        batchSku = batch.batchSku;
+        productName = productDoc.data().name;
+        currentProductData = productDoc.data();
+        break;
+      }
+    }
+    
+    if (!productId || !batch) {
+      throw new Error(`Batch not found: ${batchId}`);
+    }
+    
+    console.log(`Found batch for product: ${productName} (${productId}), batch: ${batchSku}`);
+    
+    const oldStock = batch.stock;
+    const stockDifference = newStock - oldStock;
+    
+    const reasonLower = reason?.toLowerCase() || '';
+    const isRestock = stockDifference > 0 && (
+      reasonLower.includes('restock') ||
+      reasonLower.includes('received') ||
+      reasonLower.includes('qr scan')
+    );
+    
+    const isDamage = stockDifference < 0 && (
+      reasonLower.includes('damaged') ||
+      reasonLower.includes('damage') ||
+      reasonLower.includes('waste')
+    );
+    
+    const isSale = stockDifference < 0 && (
+      reasonLower.includes('sale') ||
+      reasonLower.includes('deducted') ||
+      reasonLower.includes('purchase')
+    );
+    
+    // Prepare batch update data - UPDATE BATCH'S OWN COUNTERS
+    const batchUpdateData: any = {
+      stock: newStock,
+      updatedAt: serverTimestamp()
+    };
+    
+    // Update batch's own restockCount if this is a restock operation
+    if (isRestock && stockDifference > 0) {
+      const unitsAdded = stockDifference;
+      const currentBatchRestockCount = batch.restockCount || 0;
+      batchUpdateData.restockCount = currentBatchRestockCount + unitsAdded;
+      console.log(`📦 Batch ${batchSku} restockCount updated: +${unitsAdded} (total: ${batchUpdateData.restockCount})`);
+    }
+    
+    // Update batch's own damageExchanged if this is a damage operation
+    if (isDamage && stockDifference < 0) {
+      const unitsRemoved = Math.abs(stockDifference);
+      const currentBatchDamageCount = batch.damageExchanged || 0;
+      batchUpdateData.damageExchanged = currentBatchDamageCount + unitsRemoved;
+      console.log(`⚠️ Batch ${batchSku} damageExchanged updated: +${unitsRemoved} (total: ${batchUpdateData.damageExchanged})`);
+    }
+    
+    // Update batch's own totalSold if this is a sale operation
+    if (isSale && stockDifference < 0) {
+      const unitsSold = Math.abs(stockDifference);
+      const currentBatchTotalSold = batch.totalSold || 0;
+      batchUpdateData.totalSold = currentBatchTotalSold + unitsSold;
+      console.log(`💰 Batch ${batchSku} totalSold updated: +${unitsSold} (total: ${batchUpdateData.totalSold})`);
+    }
+    
+    // If it's a manual adjustment without specific type, treat as restock if increasing, damage if decreasing
+    if (!isRestock && !isDamage && !isSale) {
+      if (stockDifference > 0) {
+        const unitsAdded = stockDifference;
+        const currentBatchRestockCount = batch.restockCount || 0;
+        batchUpdateData.restockCount = currentBatchRestockCount + unitsAdded;
+        console.log(`📦 Manual restock: +${unitsAdded} to restockCount for batch ${batchSku}`);
+      } else if (stockDifference < 0) {
+        const unitsRemoved = Math.abs(stockDifference);
+        const currentBatchDamageCount = batch.damageExchanged || 0;
+        batchUpdateData.damageExchanged = currentBatchDamageCount + unitsRemoved;
+        console.log(`⚠️ Manual damage: +${unitsRemoved} to damageExchanged for batch ${batchSku}`);
+      }
+    }
+    
+    // Apply batch updates
+    const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productId}/batches`, batchId);
+    await updateDoc(batchRef, batchUpdateData);
+    
+    console.log(`✅ Batch ${batchSku} updated:`);
+    console.log(`   Stock: ${oldStock} → ${newStock}`);
+    console.log(`   Total Sold: ${batch.totalSold || 0} → ${batchUpdateData.totalSold || batch.totalSold || 0}`);
+    console.log(`   Damaged: ${batch.damageExchanged || 0} → ${batchUpdateData.damageExchanged || batch.damageExchanged || 0}`);
+    console.log(`   Restocked: ${batch.restockCount || 0} → ${batchUpdateData.restockCount || batch.restockCount || 0}`);
+    
+    // Prepare updates for parent product
+    const productUpdateData: any = {
+      updatedAt: serverTimestamp()
+    };
+    
+    // Update parent's restockCount if this is a restock operation
+    if (isRestock && currentProductData) {
+      const currentRestockCount = currentProductData.restockCount || 0;
+      const unitsAdded = Math.abs(stockDifference);
+      productUpdateData.restockCount = currentRestockCount + unitsAdded;
+      console.log(`📦 Parent product restockCount updated: +${unitsAdded} (total: ${currentRestockCount + unitsAdded})`);
+    }
+    
+    // Update parent's damageExchanged if this is a damage operation
+    if (isDamage && currentProductData) {
+      const currentDamageExchanged = currentProductData.damageExchanged || 0;
+      const unitsRemoved = Math.abs(stockDifference);
+      productUpdateData.damageExchanged = currentDamageExchanged + unitsRemoved;
+      console.log(`⚠️ Parent product damageExchanged updated: +${unitsRemoved} (total: ${currentDamageExchanged + unitsRemoved})`);
+    }
+    
+    // Update parent's totalSold if this is a sale operation
+    if (isSale && currentProductData) {
+      const currentTotalSold = currentProductData.totalSold || 0;
+      const unitsSold = Math.abs(stockDifference);
+      productUpdateData.totalSold = currentTotalSold + unitsSold;
+      console.log(`💰 Parent product totalSold updated: +${unitsSold} (total: ${currentTotalSold + unitsSold})`);
+    }
+    
+    // Apply parent product updates
+    if (Object.keys(productUpdateData).length > 1) {
+      const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
+      await updateDoc(productRef, productUpdateData);
+    }
+    
+    // Update parent product's total stock
+    await updateParentProductStock(productId);
+    
+    await logStockAdjustment(
+      productId,
+      oldStock,
+      newStock,
+      reason,
+      staffId || userId || 'system',
+      staffName || userName || 'System',
+      productName,
+      batchId,
+      batchSku
+    );
+    
+    // Refresh local state with updated batch data
+    const updatedBatchDoc = await getDoc(batchRef);
+    const updatedProductDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, productId));
+    
+    if (updatedProductDoc.exists()) {
+      const updatedBatches = await getProductBatches(productId);
+      const totalStock = updatedBatches.reduce((sum, b) => sum + (b.isActive !== false ? b.stock : 0), 0);
+      
+      setProducts(prev => prev.map(p => 
+        p.id === productId 
+          ? { 
+              ...p, 
+              ...updatedProductDoc.data(), 
+              batches: updatedBatches,
+              stock: totalStock,
+              restockCount: productUpdateData.restockCount !== undefined ? productUpdateData.restockCount : p.restockCount,
+              damageExchanged: productUpdateData.damageExchanged !== undefined ? productUpdateData.damageExchanged : p.damageExchanged,
+              totalSold: productUpdateData.totalSold !== undefined ? productUpdateData.totalSold : p.totalSold
+            }
+          : p
+      ));
+    }
+    
+  } catch (error) {
+    console.error("❌ Error updating batch stock:", error);
+    throw error;
+  }
+}, [userName, userId, updateParentProductStock, getProductBatches]);
+
+  const deleteBatch = useCallback(async (batchId: string, productId: string): Promise<void> => {
+    try {
+      const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productId}/batches`, batchId);
+      await deleteDoc(batchRef);
+      
+      await updateParentProductStock(productId);
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      throw error;
+    }
+  }, [updateParentProductStock]);
+
   // ================= FETCH PRODUCTS =================
 
   const fetchProducts = useCallback(async (forceRefresh = false) => {
@@ -1043,9 +1432,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       const snap = await getDocs(q);
 
-      const fetchedProducts = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data()
+      const fetchedProducts = await Promise.all(snap.docs.map(async (d) => {
+        const productData = d.data();
+        const isPerishable = productData.category === "Solutions" || productData.category === "Vitamins";
+        
+        let batches: ProductBatch[] = [];
+        if (isPerishable) {
+          batches = await getProductBatches(d.id);
+        }
+        
+        return {
+          id: d.id,
+          ...productData,
+          isPerishable,
+          batches
+        };
       })) as Product[];
 
       setProducts(fetchedProducts);
@@ -1056,7 +1457,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     } finally {
       isFetchingProductsRef.current = false;
     }
-  }, []);
+  }, [getProductBatches]);
 
   // ================= FETCH TRANSACTIONS =================
 
@@ -1111,10 +1512,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
     const productsQuery = query(productsRef, orderBy("createdAt", "desc"), limit(100));
     
-    const unsubProducts = onSnapshot(productsQuery, (snap) => {
-      const fetchedProducts = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data()
+    const unsubProducts = onSnapshot(productsQuery, async (snap) => {
+      const fetchedProducts = await Promise.all(snap.docs.map(async (d) => {
+        const productData = d.data();
+        const isPerishable = productData.category === "Solutions" || productData.category === "Vitamins";
+        
+        let batches: ProductBatch[] = [];
+        if (isPerishable) {
+          batches = await getProductBatches(d.id);
+        }
+        
+        return {
+          id: d.id,
+          ...productData,
+          isPerishable,
+          batches
+        };
       })) as Product[];
 
       setProducts(fetchedProducts);
@@ -1153,7 +1566,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       unsubTransactions();
       listenersSetupRef.current = false;
     };
-  }, [user]);
+  }, [user, getProductBatches]);
 
   // ================= STAFF USERS REAL-TIME LISTENER =================
   useEffect(() => {
@@ -1406,55 +1819,122 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   // ================= PRODUCT ACTIONS =================
 
   const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
-    try {
-      const beginningInventory = data.stock || 0;
-      
-      const docRef = await addDoc(
-        collection(db, `clinics/${CLINIC_ID}/products`),
-        {
-          ...data,
-          beginningInventory: beginningInventory,
-          totalSold: 0,
-          damageExchanged: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }
-      );
-
-      const newProduct: Product = { 
-        ...data, 
-        id: docRef.id,
+  try {
+    console.log("📦 FirebaseContext.addProduct: Starting for", data.name);
+    
+    const beginningInventory = data.stock || 0;
+    const isPerishable = data.category === "Solutions" || data.category === "Vitamins";
+    
+    console.log("📦 Creating product document...");
+    const docRef = await addDoc(
+      collection(db, `clinics/${CLINIC_ID}/products`),
+      {
+        ...data,
         beginningInventory: beginningInventory,
         totalSold: 0,
         damageExchanged: 0,
+        restockCount: 0,
+        isPerishable,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }
+    );
+    
+    const newProductId = docRef.id;
+    console.log("✅ Product document created with ID:", newProductId);
+
+    let createdBatch = null;
+    if (isPerishable && data.batchNumber && data.expiryDate && data.stock > 0) {
+      console.log("📦 Creating first batch for perishable product...");
+      
+      const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${newProductId}/batches`);
+      
+      // Fix: Use the correct ProductBatch fields
+      const batchData = {
+        batchSku: data.batchNumber,
+        expiryDate: data.expiryDate,
+        stock: data.stock,
+        beginningInventory: data.stock,  // Changed from initialStock
+        totalSold: 0,                     // Added
+        damageExchanged: 0,               // Added
+        restockCount: 0,                  // Added
+        isActive: true,
+        parentProductId: newProductId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      
+      const batchDocRef = await addDoc(batchesRef, batchData);
+      console.log("✅ Batch created with ID:", batchDocRef.id);
+      
+      createdBatch = {
+        id: batchDocRef.id,
+        ...batchData,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       };
       
-      setProducts((prev) => [newProduct, ...prev]);
-      
-      await logProductAddition(
-        docRef.id,
-        data.name,
-        data.sku,
-        data.category,
-        data.markupPrice,
-        userName || 'System',
-        userId || 'system'
-      );
-      
-      return docRef.id;
-    } catch (error) {
-      console.error("Error adding product:", error);
-      throw error;
+      try {
+        await logBatchAddition(
+          newProductId,
+          data.name,
+          data.batchNumber,
+          data.expiryDate as string,
+          data.stock,
+          userName || 'System',
+          userId || 'system'
+        );
+      } catch (logError) {
+        console.error("Error logging batch addition:", logError);
+      }
     }
-  };
+    
+    const newProduct: Product = { 
+      ...data, 
+      id: newProductId,
+      beginningInventory: beginningInventory,
+      totalSold: 0,
+      damageExchanged: 0,
+      restockCount: 0,
+      isPerishable,
+      batches: createdBatch ? [createdBatch as ProductBatch] : [],
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
+    };
+    
+    setProducts((prev) => [newProduct, ...prev]);
+    console.log("✅ Product added to local state with", createdBatch ? "batch" : "no batch");
+    
+    await logProductAddition(
+      newProductId,
+      data.name,
+      data.sku,
+      data.category,
+      data.markupPrice,
+      userName || 'System',
+      userId || 'system'
+    );
+    
+    console.log("✅ addProduct completed successfully, returning ID:", newProductId);
+    return newProductId;
+  } catch (error) {
+    console.error("❌ Error adding product:", error);
+    throw error;
+  }
+};
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
       const currentProduct = products.find(p => p.id === id);
       
-      const { beginningInventory, ...safeUpdates } = updates as any;
+      const { beginningInventory, batches, ...safeUpdates } = updates as any;
+      
+      const newIsPerishable = safeUpdates.category === "Solutions" || safeUpdates.category === "Vitamins";
+      const wasPerishable = currentProduct?.category === "Solutions" || currentProduct?.category === "Vitamins";
+      
+      if (!wasPerishable && newIsPerishable) {
+        safeUpdates.isPerishable = true;
+      }
       
       await updateDoc(
         doc(db, `clinics/${CLINIC_ID}/products`, id),
@@ -1528,6 +2008,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       const productName = productDoc.exists() ? productDoc.data().name : 'Unknown Product';
       
+      const batches = await getProductBatches(id);
+      for (const batch of batches) {
+        await deleteBatch(batch.id, id);
+      }
+      
       await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       setProducts((prev) => prev.filter((p) => p.id !== id));
       
@@ -1539,107 +2024,136 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const adjustStock = async (id: string, newStock: number, reason: string, staffName?: string, staffId?: string) => {
-    try {
-      const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
-      if (!productDoc.exists()) {
-        throw new Error("Product not found");
-      }
-
-      const currentProduct = productDoc.data() as any;
-      const oldStock = currentProduct.stock || 0;
-      const stockDifference = newStock - oldStock;
-
-      const actingStaffName = staffName || userName || "System";
-      const actingStaffId = staffId || userId || "system";
-      
-      const reasonLower = reason?.toLowerCase() || '';
-      const isScanIn = reasonLower.includes('received via qr scan') || 
-                       reasonLower.includes('scanned in') ||
-                       (reasonLower.includes('qr scan') && newStock > oldStock);
-      const isScanOut = reasonLower.includes('dispatched via qr scan') || 
-                        reasonLower.includes('scanned out') ||
-                        (reasonLower.includes('qr scan') && newStock < oldStock);
-
-      let appliedUpdateData: any = null;
-
-      if (oldStock !== newStock) {
-        const updateData: any = {
-          stock: newStock,
-          updatedAt: serverTimestamp()
-        };
-
-        const isDamageOrExchange = reasonLower.includes('damage') || 
-                                    reasonLower.includes('damaged') ||
-                                    reasonLower.includes('exchange') ||
-                                    reasonLower.includes('return') ||
-                                    isScanOut;
-
-        const isRestock = !isDamageOrExchange && stockDifference > 0 && 
-                         (reasonLower.includes('restock') ||
-                          reasonLower.includes('received'));
-
-        if (isDamageOrExchange && stockDifference < 0) {
-          const itemsRemoved = Math.abs(stockDifference);
-          const currentDamageExchanged = currentProduct.damageExchanged || 0;
-          updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
-          console.log(`📝 Damage/Exchange recorded: +${itemsRemoved} units (total: ${currentDamageExchanged + itemsRemoved})`);
-        }
-
-        if (isRestock) {
-          const unitsAdded = stockDifference;
-          const currentRestockCount = currentProduct.restockCount || 0;
-          updateData.restockCount = currentRestockCount + unitsAdded;
-          console.log(`📦 Restock recorded: +${unitsAdded} units added (total: ${currentRestockCount + unitsAdded})`);
-        }
-
-        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
-        appliedUpdateData = updateData;
-
-        if (isScanIn || isScanOut) {
-          const productName = currentProduct.name || 'Unknown Product';
-          await logScanActivity(
-            id,
-            productName,
-            oldStock,
-            newStock,
-            isScanIn ? 'in' : 'out',
-            actingStaffName,
-            actingStaffId
-          );
-          console.log(`📷 ${isScanIn ? 'Scan In' : 'Scan Out'} logged to activityLogs for ${productName}`);
-        } else {
-          try {
-            const productName = currentProduct.name || null;
-            await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
-            console.log(`📝 Manual adjustment logged to stockAdjustments: ${currentProduct.name || id}`);
-          } catch (logErr) {
-            console.error("Failed to log stock adjustment:", logErr);
-          }
-        }
-
-        console.log(`📊 Stock adjusted by ${actingStaffName}: ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
-      } else {
-        console.log(`📊 Stock adjustment skipped - no change for ${currentProduct.name || id} (${oldStock} → ${newStock})`);
-      }
-
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                stock: newStock,
-                damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged) ?? p.damageExchanged,
-                restockCount: (appliedUpdateData && appliedUpdateData.restockCount) ?? p.restockCount,
-              }
-            : p
-        )
-      );
-    } catch (error) {
-      console.error("Error adjusting stock:", error);
-      throw error;
+  const adjustStock = async (id: string, newStock: number, reason: string, staffName?: string, staffId?: string, batchId?: string) => {
+  try {
+    const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+    if (!productDoc.exists()) {
+      throw new Error("Product not found");
     }
-  };
+
+    const currentProduct = productDoc.data() as any;
+    const isPerishable = currentProduct.category === "Solutions" || currentProduct.category === "Vitamins";
+    
+    // For perishable products with batchId, update the batch stock
+    if (isPerishable && batchId) {
+      await updateBatchStock(batchId, newStock, reason, staffName, staffId);
+      return;
+    }
+    
+    const oldStock = currentProduct.stock || 0;
+    const stockDifference = newStock - oldStock;
+
+    const actingStaffName = staffName || userName || "System";
+    const actingStaffId = staffId || userId || "system";
+    
+    const reasonLower = reason?.toLowerCase() || '';
+    const isScanIn = reasonLower.includes('received via qr scan') || 
+                     reasonLower.includes('scanned in') ||
+                     (reasonLower.includes('qr scan') && newStock > oldStock);
+    const isScanOut = reasonLower.includes('dispatched via qr scan') || 
+                      reasonLower.includes('scanned out') ||
+                      (reasonLower.includes('qr scan') && newStock < oldStock);
+    
+    // Check if this is a damaged item adjustment - removed adjustmentType reference
+    const isDamageAdjustment = reasonLower.includes('damaged') || 
+                               reasonLower.includes('damage') ||
+                               reasonLower.includes('waste');
+
+    let appliedUpdateData: any = null;
+
+    if (oldStock !== newStock) {
+      const updateData: any = {
+        stock: newStock,
+        updatedAt: serverTimestamp()
+      };
+
+      const isDamageOrExchange = isDamageAdjustment || 
+                                  reasonLower.includes('damage') || 
+                                  reasonLower.includes('damaged') ||
+                                  reasonLower.includes('exchange') ||
+                                  reasonLower.includes('return') ||
+                                  isScanOut;
+
+      const isRestock = !isDamageOrExchange && stockDifference > 0 && 
+                       (reasonLower.includes('restock') ||
+                        reasonLower.includes('received'));
+
+      // Track damaged/exchanged items
+      if (isDamageOrExchange && stockDifference < 0) {
+        const itemsRemoved = Math.abs(stockDifference);
+        const currentDamageExchanged = currentProduct.damageExchanged || 0;
+        updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
+        console.log(`📝 Damage/Exchange recorded: +${itemsRemoved} units (total: ${currentDamageExchanged + itemsRemoved})`);
+      }
+
+      // Track restock count - increment when stock increases due to restock
+      if (isRestock && stockDifference > 0) {
+        const unitsAdded = stockDifference;
+        const currentRestockCount = currentProduct.restockCount || 0;
+        updateData.restockCount = currentRestockCount + unitsAdded;
+        console.log(`📦 Restock recorded: +${unitsAdded} units added (total: ${currentRestockCount + unitsAdded})`);
+      } else if (stockDifference > 0 && (reasonLower.includes('qr scan') || reasonLower.includes('scanned in'))) {
+        // Also count QR scan ins as restock
+        const unitsAdded = stockDifference;
+        const currentRestockCount = currentProduct.restockCount || 0;
+        updateData.restockCount = currentRestockCount + unitsAdded;
+        console.log(`📦 QR Scan In recorded as restock: +${unitsAdded} units added (total: ${currentRestockCount + unitsAdded})`);
+      }
+
+      await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
+      appliedUpdateData = updateData;
+
+      // Log the activity
+      if (isScanIn || isScanOut) {
+        const productName = currentProduct.name || 'Unknown Product';
+        await logScanActivity(
+          id,
+          productName,
+          oldStock,
+          newStock,
+          isScanIn ? 'in' : 'out',
+          actingStaffName,
+          actingStaffId
+        );
+        console.log(`📷 ${isScanIn ? 'Scan In' : 'Scan Out'} logged to activityLogs for ${productName}`);
+      } else {
+        try {
+          const productName = currentProduct.name || null;
+          await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
+          console.log(`📝 Manual adjustment logged to stockAdjustments: ${currentProduct.name || id}`);
+        } catch (logErr) {
+          console.error("Failed to log stock adjustment:", logErr);
+        }
+      }
+
+      console.log(`📊 Stock adjusted by ${actingStaffName}: ${currentProduct.name || id} from ${oldStock} to ${newStock}. Reason: ${reason}`);
+    } else {
+      console.log(`📊 Stock adjustment skipped - no change for ${currentProduct.name || id} (${oldStock} → ${newStock})`);
+    }
+
+    // Update local state with all tracked fields
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              stock: newStock,
+              damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged !== undefined) 
+                ? appliedUpdateData.damageExchanged 
+                : p.damageExchanged,
+              restockCount: (appliedUpdateData && appliedUpdateData.restockCount !== undefined) 
+                ? appliedUpdateData.restockCount 
+                : p.restockCount,
+            }
+          : p
+      )
+    );
+  } catch (error) {
+    console.error("Error adjusting stock:", error);
+    throw error;
+  }
+};
+
 
   // ================= TRANSACTION ACTIONS =================
 
@@ -1789,7 +2303,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     requestedById: string
   ): Promise<string> => {
     try {
-      // Find the transaction
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, transactionId);
       const transactionSnap = await getDoc(transactionRef);
       
@@ -1799,7 +2312,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       
       const transactionData = transactionSnap.data();
       
-      // Check if there's already a pending request for this transaction
       const existingRequests = replacementRequests.filter(
         r => r.transactionId === transactionId && r.status === "pending"
       );
@@ -1826,7 +2338,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       ).then(docRef => docRef.id);
       
-      // Update transaction status to indicate replacement request is pending
       await updateDoc(transactionRef, {
         status: "processing_replacement",
         replacementReason: reason,
@@ -1859,7 +2370,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         transactionData.total || 0
       );
       
-      // Refresh replacement requests
       await fetchReplacementRequests(true);
       
       return requestId;
@@ -1888,7 +2398,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error(`Cannot approve request with status: ${requestData.status}`);
       }
       
-      // Return items to inventory (they are being returned by customer)
       await adjustInventoryForReplacementApproval(
         requestData.originalItems,
         approvedBy,
@@ -1912,7 +2421,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.originalTotal
       );
       
-      // Refresh data
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
       
@@ -1942,7 +2450,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error(`Cannot reject request with status: ${requestData.status}`);
       }
       
-      // Update transaction status back to completed
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
       await updateDoc(transactionRef, {
         status: "completed",
@@ -1976,7 +2483,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.originalTotal
       );
       
-      // Refresh data
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
       
@@ -2005,14 +2511,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         throw new Error(`Cannot complete request with status: ${requestData.status}. Request must be approved first.`);
       }
       
-      // Remove replacement items from inventory (the replacement product being given to customer)
       await adjustInventoryForReplacementCompletion(
         requestData.originalItems,
         completedBy,
         completedById
       );
       
-      // Update transaction status to replaced
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
       await updateDoc(transactionRef, {
         status: "replaced",
@@ -2051,7 +2555,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.originalTotal
       );
       
-      // Refresh data
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
       await fetchProducts(true);
@@ -2224,10 +2727,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   // ================= ANALYTICS =================
 
   const getLowStockProducts = () =>
-    products.filter((p) => p.stock <= p.reorderPoint && p.stock > 0);
+    products.filter((p) => p.stock <= p.reorderPoint && p.stock > 0 && !p.archived);
 
   const getDeadstockProducts = () =>
-    products.filter((p) => p.lastMovedDaysAgo >= 30 && p.stock > 0);
+    products.filter((p) => (p.lastMovedDaysAgo || 0) >= 30 && p.stock > 0 && !p.archived);
 
   // Helper function for replacement initiated logging (legacy)
   const logReplacementInitiated = async (transactionId: string, reason: string, staffName: string, patientName: string, total: number, items: any[]) => {
@@ -2292,6 +2795,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     deleteProduct,
     archiveProduct,
     adjustStock,
+
+    addProductBatch,
+    updateBatchStock,
+    getProductBatches,
+    deleteBatch,
 
     transactions,
     addTransaction,

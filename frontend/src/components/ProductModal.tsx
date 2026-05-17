@@ -1,12 +1,13 @@
-"use client";
+// src/components/ProductModal.tsx - Updated adjust mode section
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, Variants } from "framer-motion";
-import { X, UploadCloud, Save, Trash2, Calendar, Package as PackageIcon } from "lucide-react";
+import { X, UploadCloud, Save, Trash2, Calendar, Package as PackageIcon, ChevronDown } from "lucide-react";
 import { Archive } from "lucide-react";
 import Image from "next/image";
 import { uploadImage } from "@/services/cloudinary";
 import { useNotification } from "@/components/NotificationProvider";
+import { useFirebase, ProductBatch } from "@/context/FirebaseContext";
 
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_HOVER = "hover:bg-[#082F6E]";
@@ -60,6 +61,7 @@ export default function ProductModal({
   onArchive,
   userRole 
 }: ProductModalProps) {
+  const { getProductBatches, updateBatchStock } = useFirebase();
   const [formData, setFormData] = useState<ProductFormData>(product);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -73,8 +75,47 @@ export default function ProductModal({
   // Stock adjustment specific state
   const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
   const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
+  
+  // NEW: Batch selection state for perishable products
+  const [batches, setBatches] = useState<ProductBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [selectedBatchStock, setSelectedBatchStock] = useState<number>(0);
 
   const isPerishable = formData.category === "Solutions" || formData.category === "Vitamins";
+  
+  // Load batches when in adjust mode and product is perishable
+  useEffect(() => {
+    if (mode === 'adjust' && isPerishable && product.id) {
+      loadBatches();
+    }
+  }, [mode, isPerishable, product.id]);
+  
+  const loadBatches = async () => {
+    if (!product.id) return;
+    setLoadingBatches(true);
+    try {
+      const fetchedBatches = await getProductBatches(product.id);
+      const activeBatches = fetchedBatches.filter(b => b.isActive !== false);
+      setBatches(activeBatches);
+      if (activeBatches.length > 0 && !selectedBatchId) {
+        setSelectedBatchId(activeBatches[0].id);
+        setSelectedBatchStock(activeBatches[0].stock);
+      }
+    } catch (error) {
+      console.error("Error loading batches:", error);
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+  
+  const handleBatchChange = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    const batch = batches.find(b => b.id === batchId);
+    if (batch) {
+      setSelectedBatchStock(batch.stock);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -202,14 +243,55 @@ export default function ProductModal({
     onClose();
   };
 
-  const handleAdjustStockSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (adjustmentQuantity <= 0) {
-      showToastOnly("Quantity must be greater than 0", "error");
+  const handleAdjustStockSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (adjustmentQuantity <= 0) {
+    showToastOnly("Quantity must be greater than 0", "error");
+    return;
+  }
+  
+  // For perishable products, we need to update the specific batch
+  if (isPerishable) {
+    if (!selectedBatchId) {
+      showToastOnly("Please select a batch", "error");
       return;
     }
     
+    const selectedBatch = batches.find(b => b.id === selectedBatchId);
+    if (!selectedBatch) {
+      showToastOnly("Selected batch not found", "error");
+      return;
+    }
+    
+    let newStock: number;
+    let reason: string;
+    
+    if (adjustmentType === "restock") {
+      newStock = selectedBatch.stock + adjustmentQuantity;
+      reason = `Restock: +${adjustmentQuantity} units added to batch ${selectedBatch.batchSku}`;
+    } else {
+      if (adjustmentQuantity > selectedBatch.stock) {
+        showToastOnly(`Cannot remove ${adjustmentQuantity} units. Only ${selectedBatch.stock} in stock.`, "error");
+        return;
+      }
+      newStock = selectedBatch.stock - adjustmentQuantity;
+      reason = `Damaged Item: -${adjustmentQuantity} units marked as damaged and removed from batch ${selectedBatch.batchSku}`;
+    }
+    
+    // Call the parent with batch info
+    const dataToSave = {
+      ...product,
+      stock: newStock,
+      adjustmentReason: reason,
+      batchId: selectedBatchId,
+      batchSku: selectedBatch.batchSku,
+      adjustmentType: adjustmentType // Pass the adjustment type to help identify damage vs restock
+    };
+    
+    onSave(dataToSave);
+  } else {
+    // Non-perishable: update parent product stock directly
     let newStock: number;
     let reason: string;
     
@@ -228,13 +310,33 @@ export default function ProductModal({
     const dataToSave = {
       ...product,
       stock: newStock,
-      adjustmentReason: reason
+      adjustmentReason: reason,
+      adjustmentType: adjustmentType // Pass the adjustment type
     };
     
     onSave(dataToSave);
-  };
+  }
+};
 
   if (mode === 'adjust') {
+    // Calculate projected stock for display
+    const getProjectedStock = () => {
+      if (isPerishable) {
+        if (!selectedBatchId) return selectedBatchStock;
+        return adjustmentType === "restock" 
+          ? selectedBatchStock + adjustmentQuantity 
+          : Math.max(0, selectedBatchStock - adjustmentQuantity);
+      } else {
+        return adjustmentType === "restock" 
+          ? product.stock + adjustmentQuantity 
+          : Math.max(0, product.stock - adjustmentQuantity);
+      }
+    };
+    
+    const currentDisplayStock = isPerishable ? selectedBatchStock : product.stock;
+    const projectedStock = getProjectedStock();
+    const changeAmount = adjustmentQuantity;
+    
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
         <motion.div 
@@ -242,7 +344,7 @@ export default function ProductModal({
           initial="hidden" 
           animate="visible" 
           exit="exit" 
-          className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col"
+          className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"
         >
           <div className="flex justify-between items-center p-3 sm:p-4 border-b border-gray-100 bg-slate-50">
             <h2 className="text-sm sm:text-lg font-bold text-gray-800">Stock Adjustment</h2>
@@ -254,11 +356,68 @@ export default function ProductModal({
           <div className="p-4 sm:p-5">
             <p className="text-xs sm:text-sm font-semibold text-gray-800 mb-0.5 sm:mb-1">{product.name}</p>
             <p className="text-[10px] sm:text-xs text-gray-500 mb-2 sm:mb-3 font-mono">SKU: {product.sku}</p>
-            <p className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-4">
-              Current Stock: <span className="font-bold text-gray-800">{product.stock} units</span>
-            </p>
             
-            {product.batchNumber && (
+            {/* Batch Selection Dropdown - Only for perishable products */}
+            {isPerishable && (
+              <div className="mb-4">
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">
+                  Select Batch
+                </label>
+                {loadingBatches ? (
+                  <div className="flex items-center justify-center py-2">
+                    <div className="w-4 h-4 border-2 border-[#0B3C8A] border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs text-gray-500 ml-2">Loading batches...</span>
+                  </div>
+                ) : batches.length === 0 ? (
+                  <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200 text-center">
+                    <p className="text-xs text-yellow-700">No batches found for this product.</p>
+                    <p className="text-[10px] text-yellow-600 mt-1">Please add a batch first.</p>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      value={selectedBatchId}
+                      onChange={(e) => handleBatchChange(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B3C8A] text-gray-700 appearance-none bg-white"
+                    >
+                      {batches.map((batch) => (
+                        <option key={batch.id} value={batch.id}>
+                          {batch.batchSku} | Exp: {new Date(batch.expiryDate).toLocaleDateString()} | Stock: {batch.stock}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                      <ChevronDown size={16} className="text-gray-400" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {!isPerishable && (
+              <p className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-4">
+                Current Stock: <span className="font-bold text-gray-800">{product.stock} units</span>
+              </p>
+            )}
+            
+            {isPerishable && selectedBatchId && (
+              <div className="mb-3 p-2 bg-gray-50 rounded-lg">
+                <p className="text-[10px] sm:text-xs text-gray-600">
+                  Selected Batch: <span className="font-bold text-gray-800">
+                    {batches.find(b => b.id === selectedBatchId)?.batchSku}
+                  </span>
+                </p>
+                <p className="text-[10px] sm:text-xs text-gray-600">
+                  Current Stock: <span className="font-bold text-gray-800">{selectedBatchStock} units</span>
+                </p>
+                <p className="text-[10px] sm:text-xs text-gray-500">
+                  Expiry: {batches.find(b => b.id === selectedBatchId)?.expiryDate && 
+                    new Date(batches.find(b => b.id === selectedBatchId)!.expiryDate).toLocaleDateString()}
+                </p>
+              </div>
+            )}
+            
+            {product.batchNumber && !isPerishable && (
               <p className="text-[10px] sm:text-xs text-gray-500 mb-3 sm:mb-4 flex items-center gap-1">
                 <PackageIcon size={10} /> Batch: {product.batchNumber}
               </p>
@@ -275,7 +434,7 @@ export default function ProductModal({
                       : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
                   }`}
                 >
-                  Restock
+                  Restock (+)
                 </button>
                 <button
                   type="button"
@@ -286,7 +445,7 @@ export default function ProductModal({
                       : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
                   }`}
                 >
-                  Damaged Item
+                  Damaged Item (-)
                 </button>
               </div>
               
@@ -298,24 +457,20 @@ export default function ProductModal({
                   value={adjustmentQuantity}
                   onChange={(e) => setAdjustmentQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                   className="w-full px-3 py-2 rounded-md sm:rounded-lg border border-gray-300 text-sm sm:text-lg font-bold focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-700"
-                  placeholder={adjustmentType === "restock" ? "Quantity to add" : "Quantity to remove"}
+                  placeholder="Quantity"
                 />
               </div>
               
               <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                {adjustmentType === "restock" ? (
-                  <p className="text-xs sm:text-sm text-gray-900">
-                    Current: <span className="font-bold text-gray-900">{product.stock}</span> → 
-                    New Stock: <span className="font-bold text-green-600">{product.stock + adjustmentQuantity}</span>
-                    <span className="text-gray-500 ml-2">(+{adjustmentQuantity})</span>
-                  </p>
-                ) : (
-                  <p className="text-xs sm:text-sm text-gray-900">
-                    Current: <span className="font-bold text-gray-900">{product.stock}</span> → 
-                    New Stock: <span className="font-bold text-red-600">{Math.max(0, product.stock - adjustmentQuantity)}</span>
-                    <span className="text-gray-500 ml-2">(-{adjustmentQuantity})</span>
-                  </p>
-                )}
+                <p className="text-xs sm:text-sm text-gray-900">
+                  Current: <span className="font-bold text-gray-900">{currentDisplayStock}</span> → 
+                  New Stock: <span className={`font-bold ${adjustmentType === "restock" ? "text-green-600" : "text-red-600"}`}>
+                    {projectedStock}
+                  </span>
+                  <span className="text-gray-500 ml-2">
+                    ({adjustmentType === "restock" ? "+" : "-"}{changeAmount})
+                  </span>
+                </p>
               </div>
             </form>
           </div>
@@ -345,6 +500,7 @@ export default function ProductModal({
     );
   }
 
+  // Rest of the component (add/edit mode) remains the same
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <motion.div 
@@ -465,29 +621,32 @@ export default function ProductModal({
               </div>
             </div>
 
-            {/* Batch Number Field */}
-            <div>
-              <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
-                <PackageIcon size={12} className="inline mr-1" /> Batch Number
-              </label>
-              <input 
-                name="batchNumber" 
-                value={formData.batchNumber || ''} 
-                onChange={handleChange} 
-                type="text" 
-                placeholder="e.g., BATCH-2024-001"
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-900 placeholder-gray-400 bg-white"
-              />
-            </div>
+            {/* Batch Number Field - Only for perishable products in add mode */}
+            {isPerishable && mode === 'add' && (
+              <div>
+                <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
+                  <PackageIcon size={12} className="inline mr-1" /> Batch Number <span className="text-red-500">*</span>
+                </label>
+                <input 
+                  name="batchNumber" 
+                  value={formData.batchNumber || ''} 
+                  onChange={handleChange} 
+                  type="text" 
+                  required
+                  placeholder="e.g., BATCH-2024-001"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-[#0B3C8A] focus:outline-none text-gray-900 placeholder-gray-400 bg-white"
+                />
+              </div>
+            )}
 
-            {/* Expiry Date - Only for perishable items */}
+            {/* Expiry Date - Only for perishable products */}
             {isPerishable && (
               <div>
                 <label className="block text-[10px] sm:text-xs font-semibold text-gray-600 mb-1">
                   <Calendar size={12} className="inline mr-1" /> Expiry Date <span className="text-red-500">*</span>
                 </label>
                 <input 
-                  required 
+                  required={mode === 'add'} 
                   name="expiryDate" 
                   value={formData.expiryDate || ""} 
                   onChange={handleChange} 
