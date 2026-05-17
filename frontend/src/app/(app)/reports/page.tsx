@@ -191,6 +191,10 @@ export default function ReportsPage() {
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   
+  // Pagination State
+  const [reportCurrentPage, setReportCurrentPage] = useState<number>(1);
+  const [reportsPerPage] = useState<number>(15);
+  
   const { showNotification } = useNotification();
   const { 
     transactions: firebaseTransactions,
@@ -331,6 +335,24 @@ export default function ReportsPage() {
     };
   }, [filteredTransactions]);
 
+  const reportPaginationData = useMemo(() => {
+    const totalTransactions = filteredTransactions.length;
+    const totalPages = Math.ceil(totalTransactions / reportsPerPage);
+    const startIndex = (reportCurrentPage - 1) * reportsPerPage;
+    const endIndex = startIndex + reportsPerPage;
+    const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+    
+    return {
+      totalTransactions,
+      totalPages,
+      currentPage: reportCurrentPage,
+      paginatedTransactions,
+      startIndex,
+      endIndex,
+      itemsPerPage: reportsPerPage
+    };
+  }, [filteredTransactions, reportCurrentPage, reportsPerPage]);
+
   const getFilteredTransactionsForRange = (): TransactionType[] => {
     let filtered = transactions;
     
@@ -398,7 +420,7 @@ export default function ReportsPage() {
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(10);
     doc.setTextColor(0, 0, 0);
-    doc.text(`Period: ${periodText}`, margin, 45);
+    doc.text(`Date Range: ${periodText}`, margin, 45);
     
     let currentPage = 1;
     
@@ -477,7 +499,7 @@ export default function ReportsPage() {
           doc.setFont("NotoSans-Regular", "normal");
           doc.setFontSize(10);
           doc.setTextColor(0, 0, 0);
-          doc.text(`Period: ${periodText}`, margin, 45);
+          doc.text(`Date Range: ${periodText}`, margin, 45);
         }
       }
     });
@@ -669,7 +691,7 @@ export default function ReportsPage() {
       doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      doc.text(`Period: ${periodText}`, 14, 42);
+      doc.text(`Date Range: ${periodText}`, 14, 42);
     };
 
     addHeader(1);
@@ -912,7 +934,7 @@ export default function ReportsPage() {
       doc.setFont("NotoSans-Regular", "normal");
       doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      doc.text(`Period: ${periodText}`, 14, 42);
+      doc.text(`Date Range: ${periodText}`, 14, 42);
     };
 
     addAgingHeader(1);
@@ -1012,6 +1034,7 @@ export default function ReportsPage() {
     setStatusFilter("all");
     setFromDate("");
     setToDate("");
+    setReportCurrentPage(1);
   };
 
   const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear() || selectedDay !== 'all' || fromDate || toDate;
@@ -1064,14 +1087,20 @@ export default function ReportsPage() {
                 type="text" 
                 placeholder="Search..." 
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setReportCurrentPage(1);
+                }}
                 className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 placeholder-gray-400"
               />
             </div>
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "all" | "completed" | "replaced")}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as "all" | "completed" | "replaced");
+                setReportCurrentPage(1);
+              }}
               className="px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700"
             >
               <option value="all">All Status</option>
@@ -1086,6 +1115,7 @@ export default function ReportsPage() {
                 setSelectedYear(yearValue);
                 setSelectedMonth("all");
                 setSelectedDay("all");
+                setReportCurrentPage(1);
                 if (yearValue !== 0) {
                   setFromDate("");
                   setToDate("");
@@ -1104,6 +1134,7 @@ export default function ReportsPage() {
               onChange={(e) => {
                 setSelectedMonth(e.target.value);
                 setSelectedDay("all");
+                setReportCurrentPage(1);
                 if (e.target.value !== "all") {
                   setFromDate("");
                   setToDate("");
@@ -1128,6 +1159,7 @@ export default function ReportsPage() {
               value={selectedDay}
               onChange={(e) => {
                 setSelectedDay(e.target.value);
+                setReportCurrentPage(1);
                 if (e.target.value !== "all") {
                   setFromDate("");
                   setToDate("");
@@ -1149,6 +1181,7 @@ export default function ReportsPage() {
                 value={fromDate}
                 onChange={(e) => {
                   setFromDate(e.target.value);
+                  setReportCurrentPage(1);
                   if (e.target.value) {
                     setSelectedYear(0);
                     setSelectedMonth("all");
@@ -1167,6 +1200,7 @@ export default function ReportsPage() {
                 value={toDate}
                 onChange={(e) => {
                   setToDate(e.target.value);
+                  setReportCurrentPage(1);
                   if (e.target.value) {
                     setSelectedYear(0);
                     setSelectedMonth("all");
@@ -1255,7 +1289,7 @@ export default function ReportsPage() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredTransactions.length > 0 ? (
-                filteredTransactions.map((trx, idx) => {
+                reportPaginationData.paginatedTransactions.map((trx, idx) => {
                   const dateObj = new Date(trx.date);
                   const formattedDate = dateObj.toLocaleDateString('en-US', { 
                     month: 'short', 
@@ -1323,6 +1357,85 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
+
+        {reportPaginationData.totalTransactions > 0 && (
+          <div className="p-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs sm:text-sm text-gray-600">
+              Showing <span className="font-semibold text-gray-800">{reportPaginationData.startIndex + 1}</span> to <span className="font-semibold text-gray-800">{Math.min(reportPaginationData.endIndex, reportPaginationData.totalTransactions)}</span> of <span className="font-semibold text-gray-800">{reportPaginationData.totalTransactions}</span> transactions
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setReportCurrentPage(1)}
+                disabled={reportPaginationData.currentPage === 1}
+                className="px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                title="First Page"
+              >
+                «
+              </button>
+              <button
+                onClick={() => setReportCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={reportPaginationData.currentPage === 1}
+                className="px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                title="Previous Page"
+              >
+                ‹
+              </button>
+              <div className="flex items-center gap-1">
+                {(() => {
+                  const pages: (number | string)[] = [];
+                  const totalPages = reportPaginationData.totalPages;
+                  const currentPage = reportPaginationData.currentPage;
+                  const pageRange = 2;
+                  
+                  if (totalPages > 0) pages.push(1);
+                  const start = Math.max(2, currentPage - pageRange);
+                  const end = Math.min(totalPages - 1, currentPage + pageRange);
+                  if (start > 2) pages.push('...');
+                  for (let i = start; i <= end; i++) {
+                    if (!pages.includes(i)) pages.push(i);
+                  }
+                  if (end < totalPages - 1) pages.push('...');
+                  if (totalPages > 1 && !pages.includes(totalPages)) pages.push(totalPages);
+                  
+                  return pages.map((pageNum, idx) => (
+                    typeof pageNum === 'number' ? (
+                      <button
+                        key={pageNum}
+                        onClick={() => setReportCurrentPage(pageNum)}
+                        className={`px-2 py-1 text-xs rounded transition-colors ${
+                          currentPage === pageNum
+                            ? 'bg-[#0B3C8A] text-white font-semibold'
+                            : 'border border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        title={`Page ${pageNum}`}
+                      >
+                        {pageNum}
+                      </button>
+                    ) : (
+                      <span key={`ellipsis-${idx}`} className="text-gray-400 px-1">...</span>
+                    )
+                  ));
+                })()}
+              </div>
+              <button
+                onClick={() => setReportCurrentPage(prev => Math.min(reportPaginationData.totalPages, prev + 1))}
+                disabled={reportPaginationData.currentPage === reportPaginationData.totalPages}
+                className="px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                title="Next Page"
+              >
+                ›
+              </button>
+              <button
+                onClick={() => setReportCurrentPage(reportPaginationData.totalPages)}
+                disabled={reportPaginationData.currentPage === reportPaginationData.totalPages}
+                className="px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                title="Last Page"
+              >
+                »
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

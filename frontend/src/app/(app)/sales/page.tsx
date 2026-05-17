@@ -326,6 +326,11 @@ export default function SalesPage() {
   const [selectedRequestForRejection, setSelectedRequestForRejection] = useState<any>(null);
   const [rejectionReason, setRejectionReason] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
+  const [outOfStockProductInfo, setOutOfStockProductInfo] = useState<{ name: string; availableStock: number } | null>(null);
+  const [transactionSearchQuery, setTransactionSearchQuery] = useState<string>("");
+  const [transactionCurrentPage, setTransactionCurrentPage] = useState<number>(1);
+  const [transactionsPerPage] = useState<number>(10);
 
   const searchParams = useSearchParams();
 
@@ -393,6 +398,18 @@ export default function SalesPage() {
         return false;
       }
       
+      // Search filter
+      if (transactionSearchQuery.trim()) {
+        const searchLower = transactionSearchQuery.toLowerCase().trim();
+        const matchesSearch = 
+          (transaction.patientName?.toLowerCase().includes(searchLower)) ||
+          (transaction.staffName?.toLowerCase().includes(searchLower)) ||
+          (transaction.items?.some(i => i.name?.toLowerCase().includes(searchLower)));
+        if (!matchesSearch) {
+          return false;
+        }
+      }
+      
       let transactionDate: Date;
       if (transaction.date instanceof Date) {
         transactionDate = transaction.date;
@@ -418,7 +435,25 @@ export default function SalesPage() {
         return transactionDateStr === filterDate;
       }
     });
-  }, [firebaseTransactions, filterDate, viewByMonth, transactionStatusFilter, selectedMonth]);
+  }, [firebaseTransactions, filterDate, viewByMonth, transactionStatusFilter, selectedMonth, transactionSearchQuery]);
+
+  const transactionPaginationData = useMemo(() => {
+    const totalTransactions = filteredTransactions.length;
+    const totalPages = Math.ceil(totalTransactions / transactionsPerPage);
+    const startIndex = (transactionCurrentPage - 1) * transactionsPerPage;
+    const endIndex = startIndex + transactionsPerPage;
+    const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
+    
+    return {
+      totalTransactions,
+      totalPages,
+      currentPage: transactionCurrentPage,
+      paginatedTransactions,
+      startIndex,
+      endIndex,
+      itemsPerPage: transactionsPerPage
+    };
+  }, [filteredTransactions, transactionCurrentPage, transactionsPerPage]);
 
   const productsWithAvailableStock = useMemo(() => {
     return activeProducts.map(product => ({
@@ -498,7 +533,11 @@ export default function SalesPage() {
     const actualStock = product.stock;
     const availableForThis = actualStock - currentReserved;
     if (availableForThis <= 0) {
-      showToastOnly(`❌ ${product.name} is out of stock`, "error");
+      setOutOfStockProductInfo({
+        name: product.name,
+        availableStock: availableForThis
+      });
+      setShowOutOfStockModal(true);
       return;
     }
     setPendingProduct(product);
@@ -519,7 +558,11 @@ export default function SalesPage() {
       const availableForThis = actualStock - currentReserved;
       
       if (availableForThis <= 0) {
-        showToastOnly(`❌ ${pendingProduct.name} is out of stock`, "error");
+        setOutOfStockProductInfo({
+          name: pendingProduct.name,
+          availableStock: availableForThis
+        });
+        setShowOutOfStockModal(true);
         setShowAddToCartModal(false);
         setPendingProduct(null);
         return;
@@ -555,38 +598,41 @@ export default function SalesPage() {
   };
 
   const updateQuantity = (id: string, delta: number) => {
-    setCart(prevCart => {
-      const item = prevCart.find(i => i.id === id);
-      if (!item) return prevCart;
-      
-      const newQty = item.quantity + delta;
-      if (newQty < 1) return prevCart;
-      
-      const product = activeProducts.find(p => p.id === id);
-      if (!product) return prevCart;
-      
-      const currentReservedForOthers = prevCart
-        .filter(i => i.id !== id)
-        .reduce((sum, i) => sum + i.quantity, 0);
-      
-      if (delta > 0 && (currentReservedForOthers + newQty) > product.stock) {
-        showToastOnly(`Cannot exceed available stock! Only ${product.stock - currentReservedForOthers} left`, "error");
-        return prevCart;
-      }
-      
-      setTempReservedStock(prevMap => {
-        const newMap = new Map(prevMap);
-        if (newQty === 0) {
-          newMap.delete(id);
-        } else {
-          newMap.set(id, newQty);
-        }
-        return newMap;
+    const item = cart.find(i => i.id === id);
+    if (!item) return;
+    
+    const newQty = item.quantity + delta;
+    if (newQty < 1) return;
+    
+    const product = activeProducts.find(p => p.id === id);
+    if (!product) return;
+    
+    // Check if new quantity exceeds this item's stock
+    if (delta > 0 && newQty > product.stock) {
+      setOutOfStockProductInfo({
+        name: item.name,
+        availableStock: product.stock
       });
-      
-      return prevCart.map(cartItem =>
+      setShowOutOfStockModal(true);
+      return;
+    }
+    
+    // Update cart
+    setCart(prevCart =>
+      prevCart.map(cartItem =>
         cartItem.id === id ? { ...cartItem, quantity: newQty } : cartItem
-      );
+      )
+    );
+    
+    // Update reserved stock
+    setTempReservedStock(prevMap => {
+      const newMap = new Map(prevMap);
+      if (newQty === 0) {
+        newMap.delete(id);
+      } else {
+        newMap.set(id, newQty);
+      }
+      return newMap;
     });
   };
 
@@ -1358,13 +1404,7 @@ export default function SalesPage() {
                           exit={{ opacity: 0, scale: 0.8 }}
                           transition={{ duration: 0.2 }}
                           onClick={() => {
-                            if ((product.availableStock ?? 0) > 0 && !product.archived) {
-                              handleAddToCartClick(product);
-                            } else if (product.archived) {
-                              showToastOnly(`❌ ${product.name} is archived and cannot be sold`, "error");
-                            } else {
-                              showToastOnly(`❌ ${product.name} is out of stock`, "error");
-                            }
+                            handleAddToCartClick(product);
                           }}
                           className={`bg-white p-2 sm:p-3 rounded-xl border border-gray-200 shadow-sm cursor-pointer transition-all flex flex-col ${
                             product.archived ? 'opacity-50 bg-gray-100 cursor-not-allowed hover:shadow-none hover:border-gray-200' :
@@ -1545,7 +1585,6 @@ export default function SalesPage() {
                             <button
                               onClick={() => updateQuantity(item.id, 1)}
                               className="p-0.5 sm:p-1 hover:bg-gray-100 text-gray-600"
-                              disabled={item.quantity >= maxPossible}
                             >
                               <Plus size={12} />
                             </button>
@@ -1684,7 +1723,7 @@ export default function SalesPage() {
                       <span className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm sm:text-base">₱</span>
                       <input
                         id="amountReceive"
-                        type="number"
+                        type="text"
                         inputMode="decimal"
                         placeholder={`${total.toLocaleString()}`}
                         value={amountReceive}
@@ -1758,7 +1797,7 @@ export default function SalesPage() {
             <div className="flex flex-col gap-3">
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setViewByMonth(false); setSelectedMonth(""); }}
+                  onClick={() => { setViewByMonth(false); setSelectedMonth(""); setTransactionCurrentPage(1); }}
                   className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-semibold transition-all ${
                     !viewByMonth ? "bg-[#0B3C8A] text-white shadow-md" : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
                   }`}
@@ -1766,7 +1805,7 @@ export default function SalesPage() {
                   By Day
                 </button>
                 <button
-                  onClick={() => { setViewByMonth(true); if (availableMonths.length > 0 && !selectedMonth) { setSelectedMonth(availableMonths[0].key); } }}
+                  onClick={() => { setViewByMonth(true); if (availableMonths.length > 0 && !selectedMonth) { setSelectedMonth(availableMonths[0].key); } setTransactionCurrentPage(1); }}
                   className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-semibold transition-all ${
                     viewByMonth ? "bg-[#0B3C8A] text-white shadow-md" : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
                   }`}
@@ -1774,16 +1813,36 @@ export default function SalesPage() {
                   By Month
                 </button>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-                <div className="flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+                <div className="flex flex-col">
+                  <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Search</label>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Patient name, staff, or item..."
+                      value={transactionSearchQuery}
+                      onChange={(e) => {
+                        setTransactionSearchQuery(e.target.value);
+                        setTransactionCurrentPage(1);
+                      }}
+                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white h-9 sm:h-10"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex flex-col">
                   <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">
                     {viewByMonth ? "Select Month" : "Filter by Date"}
                   </label>
                   {viewByMonth ? (
                     <select
                       value={selectedMonth}
-                      onChange={(e) => setSelectedMonth(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white"
+                      onChange={(e) => {
+                        setSelectedMonth(e.target.value);
+                        setTransactionCurrentPage(1);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white h-9 sm:h-10"
                     >
                       {availableMonths.length === 0 ? (
                         <option value="">No transactions available</option>
@@ -1797,17 +1856,24 @@ export default function SalesPage() {
                     <input
                       type="date"
                       value={filterDate}
-                      onChange={(e) => setFilterDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                      onChange={(e) => {
+                        setFilterDate(e.target.value);
+                        setTransactionCurrentPage(1);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 h-9 sm:h-10"
                     />
                   )}
                 </div>
-                <div className="flex-1">
+                
+                <div className="flex flex-col">
                   <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Status</label>
                   <select
                     value={transactionStatusFilter}
-                    onChange={(e) => setTransactionStatusFilter(e.target.value as "all" | "completed" | "processing_replacement" | "replaced")}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white"
+                    onChange={(e) => {
+                      setTransactionStatusFilter(e.target.value as "all" | "completed" | "processing_replacement" | "replaced");
+                      setTransactionCurrentPage(1);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700 bg-white h-9 sm:h-10"
                   >
                     <option value="all">All Status</option>
                     <option value="completed">Completed</option>
@@ -1815,11 +1881,28 @@ export default function SalesPage() {
                     <option value="replaced">Replaced</option>
                   </select>
                 </div>
-                <div className="flex-1">
-                  <div className="text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Total Transactions</div>
-                  <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700">
-                    {filteredTransactions.length}
+                
+                <div className="flex flex-col">
+                  <label className="block text-[10px] sm:text-xs font-semibold text-gray-700 mb-1.5">Results</label>
+                  <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg font-bold text-sm sm:text-base text-blue-700 h-9 sm:h-10 flex items-center">
+                    {transactionPaginationData.totalTransactions} transactions
                   </div>
+                </div>
+                
+                <div className="flex flex-col justify-end">
+                  <button
+                    onClick={() => {
+                      setTransactionSearchQuery("");
+                      setFilterDate(new Date().toISOString().slice(0, 10));
+                      setViewByMonth(false);
+                      setSelectedMonth("");
+                      setTransactionStatusFilter("all");
+                      setTransactionCurrentPage(1);
+                    }}
+                    className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 h-9 sm:h-10 whitespace-nowrap"
+                  >
+                    <X size={14} /> Clear Filter
+                  </button>
                 </div>
               </div>
             </div>
@@ -1847,7 +1930,7 @@ export default function SalesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filteredTransactions.map((trx) => {
+                    {transactionPaginationData.paginatedTransactions.map((trx) => {
                       const warrantyStatus = getWarrantyStatus(trx);
                       const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
                       const canProcessReplacement = trx.status === "completed" && warrantyStatus.active;
@@ -1934,6 +2017,96 @@ export default function SalesPage() {
               </div>
             )}
           </div>
+
+          {transactionPaginationData.totalTransactions > 0 && (
+            <div className="shrink-0 p-3 sm:p-4 border-t border-gray-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-[10px] sm:text-xs text-gray-600">
+                Showing <span className="font-semibold text-gray-800">{transactionPaginationData.startIndex + 1}</span> to <span className="font-semibold text-gray-800">{Math.min(transactionPaginationData.endIndex, transactionPaginationData.totalTransactions)}</span> of <span className="font-semibold text-gray-800">{transactionPaginationData.totalTransactions}</span> transactions
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setTransactionCurrentPage(1)}
+                  disabled={transactionPaginationData.currentPage === 1}
+                  className="px-2 py-1 text-[10px] sm:text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                  title="First Page"
+                >
+                  «
+                </button>
+                <button
+                  onClick={() => setTransactionCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={transactionPaginationData.currentPage === 1}
+                  className="px-2 py-1 text-[10px] sm:text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                  title="Previous Page"
+                >
+                  ‹
+                </button>
+                <div className="flex items-center gap-1">
+                  {(() => {
+                    const pages: (number | string)[] = [];
+                    const totalPages = transactionPaginationData.totalPages;
+                    const currentPage = transactionPaginationData.currentPage;
+                    const pageRange = 2; // Pages to show on each side of current page
+                    
+                    // Always show first page
+                    if (totalPages > 0) pages.push(1);
+                    
+                    // Show pages around current page
+                    const start = Math.max(2, currentPage - pageRange);
+                    const end = Math.min(totalPages - 1, currentPage + pageRange);
+                    
+                    // Add ellipsis if needed
+                    if (start > 2) pages.push('...');
+                    
+                    // Add range of pages
+                    for (let i = start; i <= end; i++) {
+                      if (!pages.includes(i)) pages.push(i);
+                    }
+                    
+                    // Add ellipsis if needed
+                    if (end < totalPages - 1) pages.push('...');
+                    
+                    // Always show last page
+                    if (totalPages > 1 && !pages.includes(totalPages)) pages.push(totalPages);
+                    
+                    return pages.map((pageNum, idx) => (
+                      typeof pageNum === 'number' ? (
+                        <button
+                          key={pageNum}
+                          onClick={() => setTransactionCurrentPage(pageNum)}
+                          className={`px-2 py-1 text-[10px] sm:text-xs rounded transition-colors ${
+                            currentPage === pageNum
+                              ? 'bg-[#0B3C8A] text-white font-semibold'
+                              : 'border border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                          title={`Page ${pageNum}`}
+                        >
+                          {pageNum}
+                        </button>
+                      ) : (
+                        <span key={`ellipsis-${idx}`} className="text-gray-400 px-1">...</span>
+                      )
+                    ));
+                  })()}
+                </div>
+                <button
+                  onClick={() => setTransactionCurrentPage(prev => Math.min(transactionPaginationData.totalPages, prev + 1))}
+                  disabled={transactionPaginationData.currentPage === transactionPaginationData.totalPages}
+                  className="px-2 py-1 text-[10px] sm:text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                  title="Next Page"
+                >
+                  ›
+                </button>
+                <button
+                  onClick={() => setTransactionCurrentPage(transactionPaginationData.totalPages)}
+                  disabled={transactionPaginationData.currentPage === transactionPaginationData.totalPages}
+                  className="px-2 py-1 text-[10px] sm:text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                  title="Last Page"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -1980,6 +2153,37 @@ export default function SalesPage() {
                   Add to Cart
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Out of Stock Modal */}
+      <AnimatePresence>
+        {showOutOfStockModal && outOfStockProductInfo && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 w-full max-w-sm text-center"
+            >
+              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4 text-red-600">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2">Out of Stock</h3>
+              <p className="text-xs sm:text-sm text-gray-600 mb-4">
+                <span className="font-bold text-red-600">{outOfStockProductInfo.name}</span> is currently out of stock. You cannot add more items to your cart.
+              </p>
+              <button
+                onClick={() => {
+                  setShowOutOfStockModal(false);
+                  setOutOfStockProductInfo(null);
+                }}
+                className={`w-full px-3 sm:px-4 py-1.5 sm:py-2 ${THEME_BG} text-white rounded-lg text-xs sm:text-sm font-medium ${THEME_HOVER} transition-colors shadow-md`}
+              >
+                Got It
+              </button>
             </motion.div>
           </div>
         )}
@@ -2634,6 +2838,20 @@ export default function SalesPage() {
                     <span className="font-mono font-semibold text-gray-900">{referenceNumber}</span>
                   </div>
                 )}
+                <div className="border-t border-gray-200 my-2.5 pt-2.5">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Items:</p>
+                  <div className="space-y-1.5 rounded p-2">
+                    {cart.map((item, idx) => {
+                      const itemTotal = item.price * item.quantity;
+                      return (
+                        <div key={idx} className="flex justify-between text-xs">
+                          <span className="text-gray-700">{item.name} @ ₱{item.price.toLocaleString()}</span>
+                          <span className="text-gray-600">x{item.quantity} = ₱{itemTotal.toLocaleString()}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
                 {discountAmount > 0 && (
                   <div className="flex justify-between text-sm bg-emerald-50 p-2 rounded border border-emerald-200">
                     <span className="text-emerald-700 font-medium">Discount ({discountType === "loyalty" ? "Loyalty 30%" : "PWD/Senior 20%"}):</span>
@@ -2682,7 +2900,21 @@ export default function SalesPage() {
                   <span className="text-gray-600">Payment Method:</span>
                   <span className="font-semibold text-gray-900 uppercase">Cash</span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="border-t border-gray-200 my-2.5 pt-2.5">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Items:</p>
+                  <div className="space-y-1.5 rounded p-2">
+                    {cart.map((item, idx) => {
+                      const itemTotal = item.price * item.quantity;
+                      return (
+                        <div key={idx} className="flex justify-between text-xs">
+                          <span className="text-gray-700">{item.name} @ ₱{item.price.toLocaleString()}</span>
+                          <span className="text-gray-600">x{item.quantity} = ₱{itemTotal.toLocaleString()}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex justify-between text-sm border-t border-gray-200 pt-2.5">
                   <span className="text-gray-600">Subtotal:</span>
                   <span className="font-semibold text-gray-900">₱{cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
