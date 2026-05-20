@@ -27,9 +27,25 @@ import { useFirebase } from "@/context/FirebaseContext";
 import { useNotification } from "./NotificationProvider";
 
 // Use the Product type from FirebaseContext to ensure consistency
+import { calculateSmartReorderPoint } from "@/utils/reorderCalculations";
+import { useMLForecasting } from "@/hooks/useMLForecasting";
+
 import type { Product, ProductBatch } from "@/context/FirebaseContext";
 
 type InventoryData = Product;
+
+// Helper function to get default lead time based on category
+const getDefaultLeadTime = (category: string): number => {
+  const leadTimes: Record<string, number> = {
+    'Contact Lenses': 5,
+    'Solutions': 5,
+    'Frames': 7,
+    'Lenses': 7,
+    'Accessories': 5,
+    'Vitamins': 3,
+  };
+  return leadTimes[category] || 5; // Default 5 days
+};
 
 interface ReportFilters {
   category: string;
@@ -61,6 +77,7 @@ export default function InventoryReports({
 }) {
   const { updateProduct, transactions, deleteProduct, getProductBatches, updateBatchStock } = useFirebase();
   const { showNotification, showToastOnly } = useNotification();
+  const { recommendations } = useMLForecasting();
 
   const resetFilters = () => {
     setFilters({
@@ -993,7 +1010,24 @@ export default function InventoryReports({
               </p>
               <p className="text-lg sm:text-2xl font-bold text-orange-600 mt-1">
                 {filteredProducts.filter(
-                  (p) => p.stock <= p.reorderPoint && p.stock > 0 && !isProductDeadstock(p, new Date())
+                  (p) => {
+                    const leadTime = (p as any).leadTime || getDefaultLeadTime(p.category);
+                    const recommendation = recommendations?.find(r => r.productName === p.name || r.productId === p.id);
+                    const predictedDemand30d = recommendation?.predictedDemand30d || 0;
+                    const daysUntilStockout = recommendation?.daysUntilOut || 999;
+                    const trend = recommendation?.trend || 'stable';
+                    
+                    const { smartPoint } = calculateSmartReorderPoint(
+                      p.reorderPoint,
+                      p.stock,
+                      predictedDemand30d,
+                      daysUntilStockout,
+                      leadTime,
+                      trend
+                    );
+                    
+                    return p.stock <= smartPoint && p.stock > 0;
+                  }
                 ).length}
               </p>
             </div>
@@ -1303,6 +1337,7 @@ export default function InventoryReports({
           <ProductDetailsModal
             product={viewingProduct}
             onClose={() => setViewingProduct(null)}
+            recommendations={recommendations}
           />
         )}
 

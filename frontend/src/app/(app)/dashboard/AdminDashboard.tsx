@@ -36,6 +36,7 @@ import {
   Zap,
   History
 } from "lucide-react";
+import { calculateSmartReorderPoint } from "@/utils/reorderCalculations";
 
 interface StatData {
   id: string;
@@ -112,7 +113,14 @@ interface LowStockItem {
   name: string;
   category: string;
   currentStock: number;
-  status: 'critical' | 'low';
+  status: 'critical' | 'low' | 'sufficient';
+  staticReorderPoint: number;
+  smartReorderPoint: number;
+  isSmartAdjusted: boolean;
+  adjustmentReason?: string;
+  predictedDemand30d?: number;
+  daysUntilStockout?: number;
+  recommendedLeadTime?: number;
 }
 
 const containerVariants: Variants = {
@@ -150,6 +158,22 @@ const modalVariants: Variants = {
 const CURRENT_PERIOD = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const MIN_TRANSACTIONS_FOR_ML = 10;
 
+// Helper function to get default lead time based on category
+const getDefaultLeadTime = (category: string): number => {
+  const leadTimes: Record<string, number> = {
+    'Contact Lenses': 5,
+    'Solutions': 5,
+    'Frames': 7,
+    'Lenses': 7,
+    'Accessories': 5,
+    'Vitamins': 3,
+  };
+  return leadTimes[category] || 5; // Default 5 days
+};
+
+
+
+
 const CATEGORY_COLORS: Record<string, string> = {
   'Frames': 'bg-emerald-500',
   'Lenses': 'bg-blue-500',
@@ -179,8 +203,11 @@ export default function AdminDashboard() {
   const [showForecastExplanationModal, setShowForecastExplanationModal] = useState(false);
   const [selectedDeadstock, setSelectedDeadstock] = useState<DeadstockItem | null>(null);
   const [showLowStockModal, setShowLowStockModal] = useState(false);
+  const [showUpcomingModal, setShowUpcomingModal] = useState(false);
   const [showDeadstockModal, setShowDeadstockModal] = useState(false);
   const [showForecastModal, setShowForecastModal] = useState(false);
+  const [selectedSmartReorderItem, setSelectedSmartReorderItem] = useState<LowStockItem | null>(null);
+  const [showSmartReorderModal, setShowSmartReorderModal] = useState(false);
   
   const { products, transactions } = useFirebase();
   const { 
@@ -229,24 +256,136 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [allTransactions]);
 
-  // Low stock count - only from active (non-archived) products
+  // Low stock count - using smart reorder points (only in-demand items)
   const lowStockCount = useMemo(() => {
-    return activeProducts.filter((p: any) => p.stock <= p.reorderPoint && p.stock > 0).length;
-  }, [activeProducts]);
+    return activeProducts.filter(p => {
+      const leadTime = (p as any).leadTime || getDefaultLeadTime(p.category);
+      const recommendation = recommendations?.find(r => r.productName === p.name || r.productId === p.id);
+      const predictedDemand30d = recommendation?.predictedDemand30d || 0;
+      const daysUntilStockout = recommendation?.daysUntilOut || 999;
+      const trend = recommendation?.trend || 'stable';
+      
+      const { smartPoint } = calculateSmartReorderPoint(
+        p.reorderPoint,
+        p.stock,
+        predictedDemand30d,
+        daysUntilStockout,
+        leadTime,
+        trend
+      );
+      
+      // Count ALL items below smart point (regardless of demand)
+      return p.stock <= smartPoint && p.stock > 0;
+    }).length;
+  }, [activeProducts, recommendations, usingML, mlDataLoaded]);
 
-  // Low stock items - only from active (non-archived) products
-  const lowStockItems = useMemo(() => {
+  // ALL Low stock items - from active products below reorder point (no demand filter)
+  // Low Stock Alerts displays these items
+  const allLowStockItems = useMemo((): LowStockItem[] => {
     return activeProducts
-      .filter(p => p.stock <= p.reorderPoint && p.stock >= 0)
-      .sort((a, b) => a.stock - b.stock)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        category: p.category,
-        currentStock: p.stock,
-        status: p.stock === 0 ? 'critical' as const : 'low' as const
-      }));
-  }, [activeProducts]);
+      .map(p => {
+        const leadTime = (p as any).leadTime || getDefaultLeadTime(p.category);
+        const recommendation = recommendations?.find(r => r.productName === p.name || r.productId === p.id);
+        
+        const predictedDemand30d = recommendation?.predictedDemand30d || 0;
+        const daysUntilStockout = recommendation?.daysUntilOut || 999;
+        const trend = recommendation?.trend || 'stable';
+
+        // Calculate smart reorder point
+        const { smartPoint, adjustmentReason } = calculateSmartReorderPoint(
+          p.reorderPoint,
+          p.stock,
+          predictedDemand30d,
+          daysUntilStockout,
+          leadTime,
+          trend
+        );
+
+        const status: 'critical' | 'low' | 'sufficient' = p.stock <= smartPoint 
+          ? (p.stock === 0 ? 'critical' : 'low') 
+          : 'sufficient';
+
+        return {
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          currentStock: p.stock,
+          staticReorderPoint: p.reorderPoint,
+          smartReorderPoint: smartPoint,
+          isSmartAdjusted: smartPoint !== p.reorderPoint,
+          adjustmentReason: smartPoint !== p.reorderPoint ? adjustmentReason : undefined,
+          status,
+          predictedDemand30d,
+          daysUntilStockout,
+          recommendedLeadTime: leadTime,
+        } as LowStockItem;
+      })
+      .filter(item => item.currentStock <= item.smartReorderPoint && item.currentStock >= 0)
+      .sort((a, b) => a.currentStock - b.currentStock);
+  }, [activeProducts, recommendations, usingML, mlDataLoaded]);
+
+  // Low stock items - IN-DEMAND products below reorder point
+  // Smart Reorder Points container displays these items
+  // In-demand criteria: predictedDemand30d >= 5 OR daysUntilStockout <= 7
+  const lowStockItems = useMemo((): LowStockItem[] => {
+    return allLowStockItems.filter(item => {
+      // Must be in high demand (predicted demand >= 5 OR will stockout soon)
+      const isInDemand = (item.predictedDemand30d !== undefined && item.predictedDemand30d >= 5) || 
+                        (item.daysUntilStockout !== undefined && item.daysUntilStockout <= 7);
+      return isInDemand;
+    });
+  }, [allLowStockItems]);
+
+  // Upcoming reorder recommendations - high-demand items approaching low stock threshold
+  const upcomingReorderItems = useMemo((): LowStockItem[] => {
+    return activeProducts
+      .map(p => {
+        const leadTime = (p as any).leadTime || getDefaultLeadTime(p.category);
+        const recommendation = recommendations?.find(r => r.productName === p.name || r.productId === p.id);
+        
+        const predictedDemand30d = recommendation?.predictedDemand30d || 0;
+        const daysUntilStockout = recommendation?.daysUntilOut || 999;
+        const trend = recommendation?.trend || 'stable';
+
+        const { smartPoint, adjustmentReason } = calculateSmartReorderPoint(
+          p.reorderPoint,
+          p.stock,
+          predictedDemand30d,
+          daysUntilStockout,
+          leadTime,
+          trend
+        );
+
+        return {
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          currentStock: p.stock,
+          staticReorderPoint: p.reorderPoint,
+          smartReorderPoint: smartPoint,
+          isSmartAdjusted: smartPoint !== p.reorderPoint,
+          adjustmentReason: smartPoint !== p.reorderPoint ? adjustmentReason : undefined,
+          status: 'sufficient' as const,
+          predictedDemand30d,
+          daysUntilStockout,
+          recommendedLeadTime: leadTime,
+        } as LowStockItem;
+      })
+      // Filter: HIGH DEMAND items approaching low stock
+      // Must have: upward trend OR high predicted demand (>= 5 units/month)
+      // AND: above smart point but will approach within 14 days OR within 30% buffer
+      .filter(item => {
+        const isAboveSmartPoint = item.currentStock > item.smartReorderPoint;
+        const willBecomeLowSoon = item.daysUntilStockout !== undefined && item.daysUntilStockout <= 14;
+        const withinBuffer = item.currentStock <= item.smartReorderPoint * 1.3;
+        const isHighDemand = (item.predictedDemand30d !== undefined && item.predictedDemand30d >= 5) || (item.daysUntilStockout !== undefined && item.daysUntilStockout <= 7); // High demand or will stockout soon
+        
+        return isAboveSmartPoint && isHighDemand && (willBecomeLowSoon || withinBuffer);
+      })
+      .sort((a, b) => a.daysUntilStockout !== undefined && b.daysUntilStockout !== undefined 
+        ? a.daysUntilStockout - b.daysUntilStockout 
+        : a.currentStock - b.currentStock);
+  }, [activeProducts, recommendations, usingML, mlDataLoaded]);
 
   // Gross profit - ALL transactions (replacements don't affect profit)
   const grossProfit = useMemo(() => {
@@ -603,13 +742,13 @@ export default function AdminDashboard() {
                     </p>
                   </div>
                 </div>
-                {lowStockItems.length > 3 && (
+                {allLowStockItems.length > 3 && (
                   <button
                     onClick={() => setShowLowStockModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
                   >
                     <Eye size={14} />
-                    View All ({lowStockItems.length})
+                    View All ({allLowStockItems.length})
                   </button>
                 )}
               </div>
@@ -617,7 +756,7 @@ export default function AdminDashboard() {
             
             <div className="p-4 sm:p-5 pt-0">
               <div className="space-y-3">
-                {lowStockItems.slice(0, 3).map((item) => (
+                {allLowStockItems.slice(0, 3).map((item) => (
                   <motion.div
                     key={item.id}
                     initial={{ x: -20, opacity: 0 }}
@@ -644,7 +783,7 @@ export default function AdminDashboard() {
                     </div>
                   </motion.div>
                 ))}
-                {lowStockItems.length === 0 && (
+                {allLowStockItems.length === 0 && (
                   <div className="text-center py-8">
                     <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
                     <p className="text-sm text-gray-500">All stock levels healthy</p>
@@ -850,64 +989,232 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
 
-          {/* Performance Heatmap */}
+          {/* Smart Reorder Points - Upcoming Recommendations */}
           <motion.div
             variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
+            className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden flex flex-col"
           >
-            <div className="p-4 sm:p-5 border-b border-gray-100 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-emerald-100 rounded-lg">
-                  <BarChart3 className="text-emerald-700 w-5 h-5" />
+            <div className="p-4 sm:p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <Clock className="text-blue-600 w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">
+                      Smart Reorder Points
+                    </h2>
+                    <p className="text-xs font-medium text-blue-600">
+                      AI-adjusted reorder recommendations
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800">Performance Heatmap</h2>
-                  <p className="text-xs text-gray-500">Profit vs. Volume Analysis</p>
-                </div>
+                {lowStockItems.length > 3 && (
+                  <button
+                    onClick={() => setShowUpcomingModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                  >
+                    <Eye size={14} />
+                    View All ({lowStockItems.length})
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="p-4 sm:p-5 pt-0 flex-1">
-              <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                Identifies which categories generate the most revenue (Solid Color)
-                relative to how many physical units are sold (Gray Overlay).
-              </p>
-
-              <div className="space-y-4">
-                {HEATMAP_DATA.length > 0 ? (
-                  HEATMAP_DATA.map((item, idx) => (
-                    <div key={idx} className="space-y-1.5">
-                      <div className="flex justify-between text-sm">
-                        <span className="font-semibold text-gray-700">{item.category}</span>
-                      </div>
-                      <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${item.profit}%` }}
-                          transition={{ duration: 1, ease: "easeOut" }}
-                          className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-white`}
-                        >
-                          Profit {item.profit}%
-                        </motion.div>
-                        <div
-                          className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-700"
-                          style={{ width: `${100 - item.volume}%` }}
-                        >
-                          Vol {item.volume}%
+            <div className="p-4 sm:p-5 pt-0">
+              <div className="space-y-3">
+                {lowStockItems.slice(0, 3).map((item) => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ duration: 0.5 }}
+                    onClick={() => {
+                      setSelectedSmartReorderItem(item);
+                      setShowSmartReorderModal(true);
+                    }}
+                    className="bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all"
+                  >
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-800 text-sm truncate">
+                            {item.name}
+                          </h3>
+                          {item.isSmartAdjusted && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
+                              <Zap size={10} /> Smart
+                            </span>
+                          )}
                         </div>
+                        <p className="text-xs text-gray-500">{item.category}</p>
+                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-700">
+                        REORDER
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div>
+                        <p className="text-gray-500 text-xs">Static Reorder Point</p>
+                        <p className="font-bold text-gray-900">{item.staticReorderPoint}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Smart Reorder</p>
+                        <p className="font-bold text-blue-600">{item.smartReorderPoint}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Lead Time</p>
+                        <p className="font-bold text-gray-900">{item.recommendedLeadTime}d</p>
                       </div>
                     </div>
-                  ))
-                ) : (
+                    {item.isSmartAdjusted && (() => {
+                      const pct = item.staticReorderPoint > 0 
+                        ? Math.round(((item.smartReorderPoint - item.staticReorderPoint) / item.staticReorderPoint) * 100)
+                        : 0;
+                      return (
+                        <div className="text-xs bg-white text-blue-700 p-2 rounded border border-blue-200">
+                          <p className="font-semibold">{pct > 0 ? '+' : ''}{pct}% extra safety stock added to keep you safe from running out</p>
+                        </div>
+                      );
+                    })()}
+                  </motion.div>
+                ))}  
+                {lowStockItems.length === 0 && (
                   <div className="text-center py-8">
-                    <p className="text-sm text-gray-500">No product data available.</p>
+                    <CheckCircle2 className="mx-auto w-10 h-10 text-gray-300 mb-3" />
+                    <p className="text-sm text-gray-500">No reorder needed</p>
+                    <p className="text-xs text-gray-400 mt-1">All items are above smart reorder points</p>
                   </div>
                 )}
               </div>
             </div>
           </motion.div>
         </div>
+
+        {/* Performance Heatmap */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
+        >
+          <div className="p-4 sm:p-5 border-b border-gray-100 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <BarChart3 className="text-emerald-700 w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Performance Heatmap</h2>
+                <p className="text-xs text-gray-500">Profit vs. Volume Analysis</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 pt-0 flex-1">
+            <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+              Identifies which categories generate the most revenue (Solid Color)
+              relative to how many physical units are sold (Gray Overlay).
+            </p>
+
+            <div className="space-y-4">
+              {HEATMAP_DATA.length > 0 ? (
+                HEATMAP_DATA.map((item, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-semibold text-gray-700">{item.category}</span>
+                    </div>
+                    <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${item.profit}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-white`}
+                      >
+                        Profit {item.profit}%
+                      </motion.div>
+                      <div
+                        className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-700"
+                        style={{ width: `${100 - item.volume}%` }}
+                      >
+                        Vol {item.volume}%
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-500">No product data available.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
       </motion.div>
+
+      {/* Smart Reorder Points Modal */}
+      <AnimatePresence>
+        {showUpcomingModal && (
+          <Modal
+            title="Smart Reorder Points - All Items"
+            onClose={() => setShowUpcomingModal(false)}
+          >
+            <div className="space-y-3">
+              {lowStockItems.map((item) => (
+                <div 
+                  key={item.id} 
+                  onClick={() => {
+                    setShowUpcomingModal(false);
+                    setSelectedSmartReorderItem(item);
+                    setShowSmartReorderModal(true);
+                  }}
+                  className="bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all"
+                >
+                  <div className="flex justify-between items-start gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-800 text-sm truncate">
+                          {item.name}
+                        </h3>
+                        {item.isSmartAdjusted && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
+                            <Zap size={10} /> Smart
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">{item.category}</p>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-700">
+                      REORDER
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <div>
+                      <p className="text-gray-500 text-xs">Static Reorder Point</p>
+                      <p className="font-bold text-gray-900">{item.staticReorderPoint}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs">Smart Reorder</p>
+                      <p className="font-bold text-blue-600">{item.smartReorderPoint}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs">Lead Time</p>
+                      <p className="font-bold text-gray-900">{item.recommendedLeadTime}d</p>
+                    </div>
+                  </div>
+                  {item.isSmartAdjusted && (() => {
+                    const pct = item.staticReorderPoint > 0 
+                      ? Math.round(((item.smartReorderPoint - item.staticReorderPoint) / item.staticReorderPoint) * 100)
+                      : 0;
+                    return (
+                      <div className="text-xs bg-white text-blue-700 p-2 rounded border border-blue-200">
+                        <p className="font-semibold mb-1">{pct > 0 ? '+' : ''}{pct}% extra safety stock added to keep you safe from running out</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
 
       {/* Low Stock Modal */}
       <AnimatePresence>
@@ -917,7 +1224,7 @@ export default function AdminDashboard() {
             onClose={() => setShowLowStockModal(false)}
           >
             <div className="space-y-3">
-              {lowStockItems.map((item) => (
+              {allLowStockItems.map((item) => (
                 <div key={item.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                   <div className="flex justify-between items-start gap-2 mb-2">
                     <div className="flex-1 min-w-0">
@@ -1033,6 +1340,19 @@ export default function AdminDashboard() {
           <SimplifiedForecastExplanationModal
             explanation={generateForecastExplanation(selectedForecastProduct)}
             onClose={() => setShowForecastExplanationModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Smart Reorder Point Explanation Modal */}
+      <AnimatePresence>
+        {showSmartReorderModal && selectedSmartReorderItem && (
+          <SmartReorderExplanationModal
+            item={selectedSmartReorderItem}
+            onClose={() => {
+              setShowSmartReorderModal(false);
+              setSelectedSmartReorderItem(null);
+            }}
           />
         )}
       </AnimatePresence>
@@ -1564,6 +1884,195 @@ function DeadstockAnalysisModal({
                   : "This product has low profit margin. Recommended discount is minimal to avoid loss."}
               </p>
             </div>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200 rounded-b-2xl">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// Smart Reorder Point Explanation Modal
+function SmartReorderExplanationModal({ 
+  item, 
+  onClose
+}: { 
+  item: LowStockItem; 
+  onClose: () => void;
+}) {
+  const adjustmentPercentage = item.staticReorderPoint > 0 
+    ? Math.round(((item.smartReorderPoint - item.staticReorderPoint) / item.staticReorderPoint) * 100)
+    : 0;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      >
+        <div className="sticky top-0 bg-gradient-to-r from-blue-50 to-white p-5 border-b border-gray-200 rounded-t-2xl">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">{item.name}</h2>
+              <p className="text-sm text-gray-500 mt-1">{item.category} • Smart Reorder Analysis</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <X size={20} className="text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Main Metrics */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-200">
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Current Stock</p>
+              <p className="text-3xl font-bold text-gray-900">{item.currentStock}</p>
+              <p className="text-xs text-gray-400 mt-1">units</p>
+            </div>
+            <div className="bg-blue-50 rounded-xl p-4 text-center border border-blue-200">
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Smart Reorder Point</p>
+              <p className="text-3xl font-bold text-blue-700">{item.smartReorderPoint}</p>
+              <p className="text-xs text-blue-600 mt-1">units</p>
+            </div>
+          </div>
+
+          {/* Static vs Smart Comparison */}
+          <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+              <BarChart3 size={18} className="text-emerald-600" />
+              Reorder Point Comparison
+            </h3>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-700">Static Reorder Point</span>
+                <span className="font-bold text-gray-900">{item.staticReorderPoint} units</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-gray-400 h-2 rounded-full" 
+                  style={{ width: `${(item.staticReorderPoint / Math.max(item.staticReorderPoint, item.smartReorderPoint)) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-700">Smart Reorder Point</span>
+                <span className="font-bold text-blue-700">{item.smartReorderPoint} units</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-500 h-2 rounded-full" 
+                  style={{ width: '100%' }}
+                ></div>
+              </div>
+            </div>
+            {item.isSmartAdjusted && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-3">
+                <p className="text-xs text-blue-700">
+                  <span className="font-bold">{adjustmentPercentage > 0 ? '+' : ''}{adjustmentPercentage}%</span> extra safety stock added to keep you safe from running out
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Adjustment Factors */}
+          <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+              <Zap size={18} className="text-orange-600" />
+              What's Affecting This Number?
+            </h3>
+            <div className="space-y-2">
+              {/* Delivery Wait Time */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock size={16} className="text-blue-600" />
+                  <span className="font-semibold text-gray-800 text-sm">Delivery Wait Time</span>
+                </div>
+                <p className="text-xs text-gray-600 ml-6">
+                  It takes <span className="font-bold text-gray-900">{item.recommendedLeadTime} days</span> to receive new stock, so we keep extra on hand
+                </p>
+              </div>
+
+              {/* Expected Sales */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp size={16} className="text-green-600" />
+                  <span className="font-semibold text-gray-800 text-sm">Expected Sales (Next 30 Days)</span>
+                </div>
+                <p className="text-xs text-gray-600 ml-6">
+                  We expect to sell: <span className="font-bold text-gray-900">{item.predictedDemand30d || 'N/A'} units</span>
+                </p>
+              </div>
+
+              {/* Days Until We Run Out */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle size={16} className="text-red-600" />
+                  <span className="font-semibold text-gray-800 text-sm">Days Until We Run Out</span>
+                </div>
+                <p className="text-xs text-gray-600 ml-6">
+                  Current stock will last: <span className="font-bold text-gray-900">{item.daysUntilStockout === 999 ? 'Very long time' : item.daysUntilStockout + ' days'}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Why This Amount */}
+          {item.isSmartAdjusted && item.adjustmentReason && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+              <h3 className="font-bold text-gray-800 mb-2 text-sm">Why We Recommend This Amount</h3>
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {item.adjustmentReason}
+              </p>
+            </div>
+          )}
+
+          {/* What You Should Do */}
+          <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 size={20} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-emerald-900 mb-1">What to Do</p>
+                <p className="text-sm text-emerald-800">
+                  {item.currentStock <= item.smartReorderPoint 
+                    ? `⚠️ Order now! You have ${item.currentStock} units, but should have at least ${item.smartReorderPoint} units.`
+                    : `✓ Stock is good. No order needed right now.`
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* How This Works */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <h3 className="font-bold text-gray-800 mb-3 text-sm">How We Calculate This Number</h3>
+            <ul className="space-y-3 text-xs text-gray-600">
+              <li className="flex gap-3">
+                <span className="font-bold text-gray-800 flex-shrink-0 w-5">1.</span>
+                <span><span className="font-semibold">Delivery Time Buffer:</span> We add extra stock for the {item.recommendedLeadTime} days it takes to receive new orders</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-gray-800 flex-shrink-0 w-5">2.</span>
+                <span><span className="font-semibold">Sales Trend:</span> If sales are going up, we keep more stock. If going down, we keep less.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-gray-800 flex-shrink-0 w-5">3.</span>
+                <span><span className="font-semibold">Urgency:</span> If you're about to run out, we push the number higher to prevent stockouts</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="font-bold text-gray-800 flex-shrink-0 w-5">4.</span>
+                <span><span className="font-semibold">Final Recommendation:</span> All these factors combine to give you the safest stock level</span>
+              </li>
+            </ul>
           </div>
         </div>
 

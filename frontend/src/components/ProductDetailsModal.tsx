@@ -2,12 +2,14 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Package, Calendar, Plus, Edit2, QrCode, AlertTriangle, RefreshCw, Trash2, TrendingUp, TrendingDown, Minus, ChevronDown } from 'lucide-react';
+import { X, Package, Calendar, Plus, Edit2, QrCode, AlertTriangle, RefreshCw, Trash2, TrendingUp, TrendingDown, Minus, ChevronDown, Zap } from 'lucide-react';
+import { calculateSmartReorderPoint, calculateSmartReorderPointSimple } from '@/utils/reorderCalculations';
 import Image from 'next/image';
 import { useFirebase, ProductBatch } from '@/context/FirebaseContext';
 import { useNotification } from './NotificationProvider';
+import { useMLForecasting } from '@/hooks/useMLForecasting';
 import QRCodeModal from './QRCodeModal';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -46,6 +48,7 @@ interface ProductDetailsModalProps {
     updatedAt?: any;
   };
   onClose: () => void;
+  recommendations?: any[];
 }
 
 interface BatchWithId extends ProductBatch {
@@ -60,9 +63,13 @@ interface ProductData {
   beginningInventory: number;
 }
 
-export default function ProductDetailsModal({ product: initialProduct, onClose }: ProductDetailsModalProps) {
+export default function ProductDetailsModal({ product: initialProduct, onClose, recommendations: passedRecommendations }: ProductDetailsModalProps) {
   const { addProductBatch, updateBatchStock, getProductBatches, deleteBatch, userName, userId, adjustStock } = useFirebase();
   const { showNotification, showToastOnly } = useNotification();
+  const { recommendations: mlRecommendations } = useMLForecasting();
+  
+  // Use passed recommendations or fall back to ML hook
+  const recommendations = passedRecommendations || mlRecommendations;
   
   const [product, setProduct] = useState(initialProduct);
   const [batches, setBatches] = useState<BatchWithId[]>(initialProduct.batches || []);
@@ -94,6 +101,50 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const isPerishable = product.isPerishable || product.category === "Solutions" || product.category === "Vitamins";
+
+  // Calculate smart reorder point
+  const smartReorderInfo = useMemo(() => {
+    const leadTime = product.leadTimeDays || 5;
+    
+    // Try to find ML recommendations for this product
+    const productRecommendation = recommendations?.find(
+      (rec: any) => rec.productId === product.id
+    );
+    
+    // If ML data available, use full calculation; otherwise use simplified
+    if (productRecommendation?.predictedDemand30d) {
+      const { smartPoint, adjustmentReason } = calculateSmartReorderPoint(
+        product.reorderPoint,
+        product.stock,
+        productRecommendation.predictedDemand30d,
+        productRecommendation.daysUntilOut || leadTime,
+        leadTime,
+        productRecommendation.trend || 'stable'
+      );
+      return { smartPoint, adjustmentReason };
+    } else {
+      // Fallback to simplified calculation
+      const { smartPoint, adjustmentReason } = calculateSmartReorderPointSimple(
+        product.reorderPoint,
+        leadTime,
+        product.category
+      );
+      return { smartPoint, adjustmentReason };
+    }
+  }, [product.reorderPoint, product.leadTimeDays, product.category, product.stock, product.id, recommendations]);
+
+  // Check if product is in-demand (for conditional Smart Reorder Point display)
+  const isProductInDemand = useMemo(() => {
+    const productRecommendation = recommendations?.find(
+      (rec: any) => rec.productId === product.id || rec.productName === product.name
+    );
+    
+    if (!productRecommendation) return false;
+    
+    const isInDemand = (productRecommendation.predictedDemand30d !== undefined && productRecommendation.predictedDemand30d >= 5) || 
+                       (productRecommendation.daysUntilOut !== undefined && productRecommendation.daysUntilOut <= 7);
+    return isInDemand;
+  }, [product.id, product.name, recommendations]);
 
   // Get selected batch data
   const selectedBatch = batches.find(b => b.id === selectedBatchId);
@@ -443,17 +494,38 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
                     <p className="text-sm sm:text-base font-bold text-gray-800">{product.category}</p>
                   </div>
                   <div>
-                    <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase mb-1">Reorder Point</p>
-                    <p className="text-sm sm:text-base font-bold text-gray-800">{product.reorderPoint} units</p>
+                    <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase mb-1">Lead Time</p>
+                    <p className="text-sm sm:text-base font-bold text-gray-800">{product.leadTimeDays || 5} days</p>
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
                 {product.specifications && (
                   <div>
                     <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase mb-1">Specifications</p>
                     <p className="text-sm sm:text-base text-gray-700">{product.specifications}</p>
                   </div>
                 )}
+
+                {/* Reorder Points */}
+                  <div>
+                    <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase mb-1">Reorder Point</p>
+                    <p className="text-sm sm:text-base font-bold text-gray-800 mb-3">{product.reorderPoint} units</p>
+                  </div>
+
+                  {isProductInDemand && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Zap className="w-4 h-4 text-blue-600" />
+                        <p className="text-xs sm:text-sm font-semibold text-gray-500 uppercase">Smart Reorder Point</p>
+                      </div>
+                      <p className="text-sm sm:text-base font-bold text-blue-600">{smartReorderInfo.smartPoint} units</p>
+                      {smartReorderInfo.adjustmentReason && (
+                        <p className="text-xs text-gray-500 mt-1">{smartReorderInfo.adjustmentReason}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
