@@ -34,9 +34,26 @@ import {
   Brain,
   Info,
   Zap,
-  History
+  History,
+  Sparkles,
+  Target,
+  Award,
+  Rocket,
+  Star,
+  TrendingUp as TrendingUpIcon
 } from "lucide-react";
-import { calculateSmartReorderPoint } from "@/utils/reorderCalculations";
+import { calculateSmartReorderPoint, calculateSmartReorderPointSimple } from "@/utils/reorderCalculations";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  Cell
+} from "recharts";
 
 interface StatData {
   id: string;
@@ -123,6 +140,34 @@ interface LowStockItem {
   recommendedLeadTime?: number;
 }
 
+interface PredictiveProduct {
+  id: string;
+  name: string;
+  category: string;
+  currentSales: number;
+  predictedSales30d: number;
+  predictedSales60d: number;
+  predictedSales90d: number;
+  growthRate: number;
+  trend: 'up' | 'down' | 'stable';
+  confidence: 'high' | 'medium' | 'low';
+  rank: number;
+  isCurrentTopSeller: boolean;
+  isPredictedTopSeller: boolean;
+}
+
+interface AIGeneratedRecommendation {
+  id: string;
+  type: 'promotion' | 'restock' | 'phase_out' | 'bundle' | 'markdown';
+  title: string;
+  description: string;
+  impact: 'high' | 'medium' | 'low';
+  reasoning: string;
+  targetProducts: string[];
+  estimatedROI?: number;
+  actionDeadline?: string;
+}
+
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
@@ -171,9 +216,6 @@ const getDefaultLeadTime = (category: string): number => {
   return leadTimes[category] || 5; // Default 5 days
 };
 
-
-
-
 const CATEGORY_COLORS: Record<string, string> = {
   'Frames': 'bg-emerald-500',
   'Lenses': 'bg-blue-500',
@@ -208,6 +250,11 @@ export default function AdminDashboard() {
   const [showForecastModal, setShowForecastModal] = useState(false);
   const [selectedSmartReorderItem, setSelectedSmartReorderItem] = useState<LowStockItem | null>(null);
   const [showSmartReorderModal, setShowSmartReorderModal] = useState(false);
+  
+  // New state for Predictive Analytics tab
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'overview' | 'predictive'>('overview');
+  const [selectedProductForInsight, setSelectedProductForInsight] = useState<PredictiveProduct | null>(null);
+  const [showProductInsightModal, setShowProductInsightModal] = useState(false);
   
   const { products, transactions } = useFirebase();
   const { 
@@ -638,6 +685,245 @@ export default function AdminDashboard() {
     };
   };
 
+  // ================= PREDICTIVE ANALYTICS DATA =================
+  
+  const currentSalesByProduct = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const salesMap = new Map<string, number>();
+    
+    allTransactions.forEach((t: any) => {
+      const transDate = new Date(t.date);
+      if (transDate >= thirtyDaysAgo && t.status === 'completed') {
+        t.items.forEach((item: any) => {
+          const current = salesMap.get(item.id) || 0;
+          salesMap.set(item.id, current + (item.quantity || 1));
+        });
+      }
+    });
+    
+    return salesMap;
+  }, [allTransactions]);
+  
+  const predictiveProducts = useMemo((): PredictiveProduct[] => {
+    if (!usingML || !recommendations || recommendations.length === 0) {
+      return [];
+    }
+    
+    const productsList: PredictiveProduct[] = [];
+    
+    recommendations.forEach((rec, index) => {
+      const product = activeProducts.find(p => p.id === rec.productId || p.name === rec.productName);
+      if (!product) return;
+      
+      const currentSales = currentSalesByProduct.get(product.id) || 0;
+      const predictedSales30d = rec.predictedDemand30d || 0;
+      const predictedSales60d = rec.predictedDemand60d || 0;
+      const predictedSales90d = rec.predictedDemand90d || 0;
+      
+      let growthRate = 0;
+      if (currentSales > 0) {
+        growthRate = ((predictedSales30d - currentSales) / currentSales) * 100;
+      } else if (predictedSales30d > 0) {
+        growthRate = 100;
+      }
+      
+      productsList.push({
+        id: product.id,
+        name: product.name,
+        category: product.category,
+        currentSales,
+        predictedSales30d,
+        predictedSales60d,
+        predictedSales90d,
+        growthRate,
+        trend: rec.trend,
+        confidence: rec.confidence,
+        rank: index + 1,
+        isCurrentTopSeller: false,
+        isPredictedTopSeller: false,
+      });
+    });
+    
+    const sortedByCurrent = [...productsList].sort((a, b) => b.currentSales - a.currentSales);
+    sortedByCurrent.slice(0, 10).forEach((p) => {
+      const product = productsList.find(pl => pl.id === p.id);
+      if (product) product.isCurrentTopSeller = true;
+    });
+    
+    const sortedByPredicted = [...productsList].sort((a, b) => b.predictedSales30d - a.predictedSales30d);
+    sortedByPredicted.slice(0, 10).forEach((p) => {
+      const product = productsList.find(pl => pl.id === p.id);
+      if (product) product.isPredictedTopSeller = true;
+    });
+    
+    return productsList.sort((a, b) => b.predictedSales30d - a.predictedSales30d);
+  }, [recommendations, activeProducts, currentSalesByProduct, usingML]);
+  
+  const topCurrentSellers = useMemo(() => {
+    return [...predictiveProducts]
+      .sort((a, b) => b.currentSales - a.currentSales)
+      .slice(0, 5);
+  }, [predictiveProducts]);
+  
+  const topPredictedSellers = useMemo(() => {
+    return [...predictiveProducts]
+      .sort((a, b) => b.predictedSales30d - a.predictedSales30d)
+      .slice(0, 5);
+  }, [predictiveProducts]);
+  
+  // Chart data for top sellers comparison
+  const topSellersChartData = useMemo(() => {
+    const allTopSellers = new Map<string, { current: number; predicted: number; category: string; fullName: string }>();
+    
+    topCurrentSellers.forEach(product => {
+      allTopSellers.set(product.name, {
+        current: product.currentSales,
+        predicted: product.predictedSales30d,
+        category: product.category,
+        fullName: product.name
+      });
+    });
+    
+    topPredictedSellers.forEach(product => {
+      const existing = allTopSellers.get(product.name);
+      if (existing) {
+        existing.predicted = product.predictedSales30d;
+      } else {
+        allTopSellers.set(product.name, {
+          current: product.currentSales,
+          predicted: product.predictedSales30d,
+          category: product.category,
+          fullName: product.name
+        });
+      }
+    });
+    
+    return Array.from(allTopSellers.entries())
+      .map(([name, data]) => ({
+        name: name.length > 20 ? name.substring(0, 18) + '...' : name,
+        fullName: data.fullName,
+        currentSales: data.current,
+        predictedSales: data.predicted,
+        category: data.category,
+        growth: data.current > 0 ? ((data.predicted - data.current) / data.current) * 100 : 100
+      }))
+      .sort((a, b) => b.predictedSales - a.predictedSales)
+      .slice(0, 8);
+  }, [topCurrentSellers, topPredictedSellers]);
+  
+  const aiRecommendations = useMemo((): AIGeneratedRecommendation[] => {
+    if (!usingML || recommendations.length === 0) {
+      return [];
+    }
+    
+    const recs: AIGeneratedRecommendation[] = [];
+    
+    const risingStars = predictiveProducts
+      .filter(p => p.growthRate > 30 && p.predictedSales30d > p.currentSales)
+      .sort((a, b) => b.growthRate - a.growthRate)
+      .slice(0, 3);
+    
+    if (risingStars.length > 0) {
+      recs.push({
+        id: 'rising-stars',
+        type: 'restock',
+        title: 'Rising Stars - Increase Stock',
+        description: `${risingStars.length} product(s) showing strong upward momentum. Increase inventory to meet projected demand.`,
+        impact: 'high',
+        reasoning: `Products like ${risingStars.slice(0, 2).map(p => p.name).join(', ')} are showing ${Math.round(risingStars[0]?.growthRate || 0)}% growth. Prophet ML predicts continued upward trend.`,
+        targetProducts: risingStars.map(p => p.name),
+        estimatedROI: 35,
+        actionDeadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      });
+    }
+    
+    const decliningProducts = predictiveProducts
+      .filter(p => p.growthRate < -20 && p.currentSales > 5)
+      .sort((a, b) => a.growthRate - b.growthRate)
+      .slice(0, 3);
+    
+    if (decliningProducts.length > 0) {
+      recs.push({
+        id: 'declining',
+        type: 'phase_out',
+        title: 'Declining Demand - Review Inventory',
+        description: `${decliningProducts.length} product(s) showing consistent decline. Consider reducing stock levels or running clearance promotions.`,
+        impact: 'medium',
+        reasoning: `Sales trend is downward with ${Math.abs(Math.round(decliningProducts[0]?.growthRate || 0))}% decrease. ML confidence is ${decliningProducts[0]?.confidence || 'medium'}.`,
+        targetProducts: decliningProducts.map(p => p.name),
+        estimatedROI: 15,
+        actionDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      });
+    }
+    
+    const categoryDemand = new Map<string, PredictiveProduct[]>();
+    predictiveProducts.forEach(p => {
+      if (!categoryDemand.has(p.category)) {
+        categoryDemand.set(p.category, []);
+      }
+      categoryDemand.get(p.category)!.push(p);
+    });
+    
+    for (const [category, productsInCat] of categoryDemand) {
+      const topInCategory = productsInCat
+        .sort((a, b) => b.predictedSales30d - a.predictedSales30d)
+        .slice(0, 2);
+      
+      if (topInCategory.length >= 2 && topInCategory[0].predictedSales30d > 10 && topInCategory[1].predictedSales30d > 5) {
+        recs.push({
+          id: `bundle-${category}`,
+          type: 'bundle',
+          title: `${category} Bundle Opportunity`,
+          description: `Create a bundle with ${topInCategory[0].name} and ${topInCategory[1].name}. Both show strong projected demand in the ${category} category.`,
+          impact: 'medium',
+          reasoning: `Combining these high-demand products could increase average order value by 25-40%. Prophet ML shows both with ${topInCategory[0].trend} demand trends.`,
+          targetProducts: topInCategory.map(p => p.name),
+          estimatedROI: 25,
+        });
+        break;
+      }
+    }
+    
+    const seasonalProducts = predictiveProducts
+      .filter(p => p.growthRate > 50 && p.predictedSales30d > p.currentSales * 1.5)
+      .slice(0, 2);
+    
+    if (seasonalProducts.length > 0) {
+      recs.push({
+        id: 'seasonal',
+        type: 'promotion',
+        title: 'Seasonal Demand Surge Detected',
+        description: `${seasonalProducts.length} product(s) showing potential seasonal spike. Prepare marketing campaigns and ensure adequate stock.`,
+        impact: 'high',
+        reasoning: `Prophet ML detected pattern indicating upcoming demand surge for ${seasonalProducts.map(p => p.name).join(', ')}.`,
+        targetProducts: seasonalProducts.map(p => p.name),
+        estimatedROI: 45,
+        actionDeadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      });
+    }
+    
+    const uncertainHighDemand = predictiveProducts
+      .filter(p => p.predictedSales30d > 20 && p.confidence === 'low' && p.currentSales < p.predictedSales30d * 0.5)
+      .slice(0, 2);
+    
+    if (uncertainHighDemand.length > 0) {
+      recs.push({
+        id: 'markdown',
+        type: 'markdown',
+        title: 'Test Market with Promotional Pricing',
+        description: `${uncertainHighDemand.length} product(s) show high predicted demand but low ML confidence. Run a small promotion to validate demand.`,
+        impact: 'low',
+        reasoning: `Prophet ML predicts ${uncertainHighDemand[0]?.predictedSales30d} units for ${uncertainHighDemand[0]?.name} but confidence is low. A 10-15% discount can validate the forecast.`,
+        targetProducts: uncertainHighDemand.map(p => p.name),
+        estimatedROI: 20,
+      });
+    }
+    
+    return recs;
+  }, [predictiveProducts, usingML]);
+
   // Show loading only on first load when no data is available
   const isLoading = (!mlDataLoaded && mlLoading) || (products.length === 0 && !mlDataLoaded);
 
@@ -658,496 +944,808 @@ export default function AdminDashboard() {
     setShowForecastExplanationModal(true);
   };
 
-  return (
-    <>
-      <motion.div
-        initial="hidden"
-        animate="visible"
-        variants={containerVariants}
-        className="min-h-screen p-4 space-y-4"
-      >
-        {/* ML Status Message - Only show when data is loaded */}
-        {mlDataLoaded && (
-          <>
-            {mlLoading && (
-              <motion.div 
-                variants={itemVariants}
-                className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
-              >
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                Refreshing AI insights in background...
-              </motion.div>
-            )}
+  // Render Predictive Analytics Tab Content
+  const renderPredictiveAnalytics = () => (
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+      className="space-y-4"
+    >
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-4 border border-purple-200">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-purple-100 rounded-lg">
+            <Brain className="text-purple-600 w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-purple-800">AI Predictive Analytics Engine</h3>
+            <p className="text-xs text-purple-600">
+              Prophet ML model analyzing {predictiveProducts.length} products • {recommendations.length} active predictions
+            </p>
+          </div>
+        </div>
+      </div>
 
-            {!mlLoading && usingML && hasEnoughDataForML && mlServiceAvailable && (
-              <motion.div 
-                variants={itemVariants}
-                className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
-              >
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                AI-Powered Forecasts Active - Demand predictions and Deadstock Suggestion using Prophet ML model
-              </motion.div>
-            )}
-
-            {!mlLoading && (!usingML || !mlServiceAvailable) && mlServiceChecked && (
-              <motion.div 
-                variants={itemVariants}
-                className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700 flex items-center gap-2"
-              >
-                <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                Prophet Unavailable - AI features disabled.
-              </motion.div>
-            )}
-
-            {!mlLoading && !usingML && mlServiceAvailable && mlServiceChecked && hasEnoughDataForML && (
-              <motion.div 
-                variants={itemVariants}
-                className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-700 flex items-center gap-2"
-              >
-                <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                ML Service available but insufficient data for predictions. Need more sales transactions.
-              </motion.div>
-            )}
-          </>
-        )}
-
-        {/* Stats Cards */}
-        <motion.div
-          variants={containerVariants}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-        >
-          {STATS_DATA.map((stat: StatData) => (
-            <StatCard key={stat.id} data={stat} />
-          ))}
-        </motion.div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Low Stock Alerts */}
-          <motion.div
-            variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
-          >
-            <div className="p-4 sm:p-5 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-orange-100 rounded-lg">
-                    <AlertTriangle className="text-orange-600 w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-gray-800">
-                      Low Stock Alerts
-                    </h2>
-                    <p className="text-xs font-medium text-orange-600">
-                      Items below reorder point
-                    </p>
-                  </div>
-                </div>
-                {allLowStockItems.length > 3 && (
-                  <button
-                    onClick={() => setShowLowStockModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
-                  >
-                    <Eye size={14} />
-                    View All ({allLowStockItems.length})
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            <div className="p-4 sm:p-5 pt-0">
-              <div className="space-y-3">
-                {allLowStockItems.slice(0, 3).map((item) => (
-                  <motion.div
-                    key={item.id}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ duration: 0.5 }}
-                    className="bg-gray-50 p-3 rounded-lg border border-gray-100"
-                  >
-                    <div className="flex justify-between items-start gap-2 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-800 text-sm truncate">
-                          {item.name}
-                        </h3>
-                        <p className="text-xs text-gray-500">{item.category}</p>
-                      </div>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
-                        item.status === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
-                      }`}>
-                        {item.status === 'critical' ? 'OUT' : 'LOW'}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs">Current Stock</p>
-                      <p className="font-bold text-gray-900">{item.currentStock} units</p>
-                    </div>
-                  </motion.div>
-                ))}
-                {allLowStockItems.length === 0 && (
-                  <div className="text-center py-8">
-                    <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
-                    <p className="text-sm text-gray-500">All stock levels healthy</p>
-                    <p className="text-xs text-gray-400 mt-1">No items below reorder point</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Deadstock Impact Card */}
-          <motion.div
-            variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden flex flex-col relative"
-          >
-            <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
-            <div className="p-4 sm:p-5 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-red-50 rounded-lg">
-                    <AlertTriangle className="text-red-600 w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-gray-800">
-                      Deadstock Items
-                    </h2>
-                    <p className="text-xs font-medium text-red-600">
-                      Items without sales (30+ days)
-                    </p>
-                  </div>
-                </div>
-                {DEADSTOCK_DATA.length > 3 && (
-                  <button
-                    onClick={() => setShowDeadstockModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
-                  >
-                    <Eye size={14} />
-                    View All ({DEADSTOCK_DATA.length})
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="p-4 sm:p-5 pt-0">
-              <p className="text-xs text-gray-600 mb-4 leading-relaxed">
-                Monitors slow-moving inventory that ties up capital. AI analyzes each item to recommend optimal discounts.
-              </p>
-
-              <div className="space-y-3">
-                {DEADSTOCK_DATA.slice(0, 2).map((item: DeadstockItem) => {
-                  const hasAISuggestion = usingML && item.aiSuggestion;
-                  const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
-                  const daysToShow = item.daysSinceSale;
-                  const isAILoading = mlLoading && hasEnoughDataForML;
-                  
-                  return (
-                    <div 
-                      key={item.id} 
-                      onClick={() => setSelectedDeadstock(item)}
-                      className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 pr-3 flex-1">
-                          <h4 className="text-sm font-semibold text-gray-800 truncate">
-                            {item.name}
-                          </h4>
-                          <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
-                            <Clock size={12}/> {daysToShow} Days Unsold • {item.stock} units
-                          </span>
-                        </div>
-                        <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
-                          ₱{item.lockedCapital.toLocaleString()}
-                        </div>
-                      </div>
-                      
-                      <div className="border-t border-gray-100 pt-2">
-                        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
-                          {usingML && hasAISuggestion ? 'AI SUGGESTION' : isAILoading ? 'AI SUGGESTION (LOADING)' : 'STATUS'}
-                        </p>
-                        <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
-                          suggestionType === 'critical' ? 'border-red-200' : 
-                          suggestionType === 'warning' ? 'border-orange-200' : 
-                          'border-blue-200'
-                        }`}>
-                          {isAILoading && !item.aiSuggestion ? (
-                            <div className="flex items-center gap-2 flex-1">
-                              <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                              <p className="text-xs text-gray-500">Analyzing item...</p>
-                            </div>
-                          ) : (
-                            <p className={`text-xs ${
-                              suggestionType === 'critical' ? 'text-red-600' : 
-                              suggestionType === 'warning' ? 'text-orange-600' : 
-                              'text-blue-600'
-                            } leading-relaxed flex-1`}>
-                              {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
-                            </p>
-                          )}
-                          <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {DEADSTOCK_DATA.length === 0 && (
-                  <div className="text-center py-8">
-                    <Package size={32} className="mx-auto mb-3 text-gray-300" />
-                    <p className="text-sm text-gray-500">No deadstock items identified</p>
-                    <p className="text-xs text-gray-400 mt-1">Items with no sales in 30+ days will appear here</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </motion.div>
+      {/* Top Sellers Comparison Chart */}
+      <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-2 bg-blue-100 rounded-lg">
+            <TrendingUpIcon className="text-blue-600 w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-800">Top Sellers: Current vs AI Forecast</h2>
+            <p className="text-xs text-gray-500">Compare current sales with Prophet ML predictions for the next 30 days</p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Demand Forecasting Card */}
-          <motion.div
-            variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
-          >
-            <div className="p-4 sm:p-5 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <Package className="text-[#047857] w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-gray-800">
-                      Demand Forecasting
-                    </h2>
-                    <p className="text-xs font-medium text-blue-600">
-                      {usingML && hasEnoughDataForML && mlServiceAvailable ? 'AI Predictive Insight' : 'Data Analysis'}
-                    </p>
-                  </div>
-                </div>
-                {FORECAST_DATA.length > 3 && (
-                  <button
-                    onClick={() => setShowForecastModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
-                  >
-                    <Eye size={14} />
-                    View All ({FORECAST_DATA.length})
-                  </button>
-                )}
+        <div className="h-96">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={topSellersChartData} margin={{ top: 20, right: 30, left: 60, bottom: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis 
+                dataKey="name" 
+                tick={{ fontSize: 11 }} 
+                angle={-45} 
+                textAnchor="end" 
+                height={80}
+                interval={0}
+              />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(value: number) => `${value}`} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="currentSales" name="Current Sales (30d)" fill="#0B3C8A" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="predictedSales" name="AI Forecast (30d)" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
+        <div className="mt-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+          <Info size={14} className="inline mr-1" />
+          Blue bars show actual sales from the last 30 days. Purple bars show Prophet ML predictions for the next 30 days.
+          Products with significantly higher purple bars are expected to see increased demand.
+        </div>
+      </motion.div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-white">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <Award className="text-emerald-600 w-5 h-5" />
               </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Current Top Sellers</h2>
+                <p className="text-xs text-gray-500">Last 30 days sales performance</p>
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {topCurrentSellers.length > 0 ? (
+              topCurrentSellers.map((product, idx) => (
+                <div
+                  key={product.id}
+                  onClick={() => {
+                    setSelectedProductForInsight(product);
+                    setShowProductInsightModal(true);
+                  }}
+                  className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                      idx === 0 ? 'bg-yellow-100 text-yellow-700' :
+                      idx === 1 ? 'bg-gray-100 text-gray-600' :
+                      idx === 2 ? 'bg-amber-100 text-amber-700' :
+                      'bg-blue-50 text-blue-600'
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">{product.name}</p>
+                      <p className="text-xs text-gray-500">{product.category}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-emerald-600">{product.currentSales} units</p>
+                    <p className="text-xs text-gray-400">sold</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center text-gray-400">
+                <Package size={32} className="mx-auto mb-2 opacity-20" />
+                <p className="text-sm">No sales data available yet</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-white">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-purple-100 rounded-lg">
+                <Target className="text-purple-600 w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">Predicted Future Top Sellers</h2>
+                <p className="text-xs text-gray-500">AI forecast for next 30 days</p>
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {topPredictedSellers.length > 0 ? (
+              topPredictedSellers.map((product, idx) => {
+                const isAlsoCurrentTop = product.isCurrentTopSeller;
+                const growthIcon = product.growthRate > 0 ? 
+                  <TrendingUp size={12} className="text-green-500" /> : 
+                  product.growthRate < 0 ? 
+                  <TrendingDown size={12} className="text-red-500" /> : 
+                  <Minus size={12} className="text-gray-400" />;
+                
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => {
+                      setSelectedProductForInsight(product);
+                      setShowProductInsightModal(true);
+                    }}
+                    className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                        idx === 0 ? 'bg-yellow-100 text-yellow-700' :
+                        idx === 1 ? 'bg-gray-100 text-gray-600' :
+                        idx === 2 ? 'bg-amber-100 text-amber-700' :
+                        'bg-purple-50 text-purple-600'
+                      }`}>
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-gray-800">{product.name}</p>
+                          {isAlsoCurrentTop && (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">Current</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500">{product.category}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-1 justify-end">
+                        {growthIcon}
+                        <p className="font-bold text-purple-600">{product.predictedSales30d} units</p>
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        {product.growthRate > 0 ? `+${Math.round(product.growthRate)}%` : `${Math.round(product.growthRate)}%`} growth
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center text-gray-400">
+                <Database size={32} className="mx-auto mb-2 opacity-20" />
+                <p className="text-sm">Insufficient data for predictions</p>
+                <p className="text-xs mt-1">Need {MIN_TRANSACTIONS_FOR_ML - allTransactions.length} more transactions</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+
+      <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-amber-50 to-white">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-100 rounded-lg">
+              <Sparkles className="text-amber-600 w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-800">AI-Generated Recommendations</h2>
+              <p className="text-xs text-gray-500">Actionable insights from Prophet ML analysis</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {aiRecommendations.length > 0 ? (
+            aiRecommendations.map((rec) => {
+              const getImpactColor = () => {
+                switch (rec.impact) {
+                  case 'high': return 'border-l-4 border-red-500';
+                  case 'medium': return 'border-l-4 border-yellow-500';
+                  default: return 'border-l-4 border-blue-500';
+                }
+              };
               
-              {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable && (
-                <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
-                  <div className="px-3 py-1.5 text-xs font-bold bg-white text-[#0B3C8A] shadow-sm rounded-md">
-                    {nextThreeMonths[0]} Forecast
+              const getTypeIcon = () => {
+                switch (rec.type) {
+                  case 'restock': return <Package size={16} className="text-green-600" />;
+                  case 'promotion': return <Rocket size={16} className="text-orange-600" />;
+                  case 'phase_out': return <AlertTriangle size={16} className="text-red-600" />;
+                  case 'bundle': return <Star size={16} className="text-purple-600" />;
+                  default: return <Sparkles size={16} className="text-amber-600" />;
+                }
+              };
+              
+              return (
+                <div key={rec.id} className={`p-4 ${getImpactColor()} hover:bg-gray-50 transition-colors`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="p-1.5 rounded-lg bg-gray-100">
+                        {getTypeIcon()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-800">{rec.title}</h3>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            rec.impact === 'high' ? 'bg-red-100 text-red-700' :
+                            rec.impact === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {rec.impact.toUpperCase()} IMPACT
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">{rec.description}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {rec.targetProducts.map((product, idx) => (
+                            <span key={idx} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                              {product}
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                          <Info size={10} /> {rec.reasoning}
+                        </p>
+                      </div>
+                    </div>
+                    {rec.estimatedROI && (
+                      <div className="text-right">
+                        <div className="bg-green-50 rounded-lg px-2 py-1">
+                          <p className="text-[10px] text-green-600 font-semibold">Est. ROI</p>
+                          <p className="text-sm font-bold text-green-700">+{rec.estimatedROI}%</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              );
+            })
+          ) : (
+            <div className="p-8 text-center text-gray-400">
+              <Brain size={32} className="mx-auto mb-2 opacity-20" />
+              <p className="text-sm">No AI recommendations available</p>
+              <p className="text-xs mt-1">Enable ML service and ensure sufficient transaction data</p>
             </div>
-            
-            <div className="p-4 sm:p-5 pt-0">
-              {mlLoading && hasEnoughDataForML && (
-                <div className="flex flex-col items-center justify-center text-center py-8">
-                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-blue-100 flex items-center justify-center">
-                    <div className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
-                  </div>
-                  <p className="text-sm text-gray-600">Loading AI forecasts...</p>
-                  <p className="text-xs text-gray-400 mt-1">This may take a moment</p>
-                </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+
+  return (
+    <>
+      {/* Dashboard Tab Navigation */}
+      <div className="mb-4 border-b border-gray-200">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveDashboardTab('overview')}
+            className={`px-4 py-2 font-semibold text-sm rounded-t-lg transition-colors ${
+              activeDashboardTab === 'overview'
+                ? 'bg-[#0B3C8A] text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setActiveDashboardTab('predictive')}
+            className={`px-4 py-2 font-semibold text-sm rounded-t-lg transition-colors flex items-center gap-2 ${
+              activeDashboardTab === 'predictive'
+                ? 'bg-[#0B3C8A] text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Brain size={14} />
+            Predictive Analytics
+            {usingML && mlServiceAvailable && (
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {activeDashboardTab === 'overview' ? (
+        // ORIGINAL OVERVIEW DASHBOARD - COMPLETELY UNCHANGED
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={containerVariants}
+          className="min-h-screen p-4 space-y-4"
+        >
+          {/* ML Status Message - Only show when data is loaded */}
+          {mlDataLoaded && (
+            <>
+              {mlLoading && (
+                <motion.div 
+                  variants={itemVariants}
+                  className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  Refreshing AI insights in background...
+                </motion.div>
               )}
-              {!mlLoading && usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable ? (
-                <div className="space-y-3">
-                  {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
-                    <ForecastCard 
-                      key={i}
-                      data={item}
-                      selectedMonth={nextThreeMonths[0]}
-                      onClick={() => openForecastExplanation(item)}
-                    />
-                  ))}
-                </div>
-              ) : !mlLoading ? (
-                <div className="flex flex-col items-center justify-center text-center py-8">
-                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                    <Database size={20} className="text-gray-400" />
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    {!mlServiceAvailable 
-                      ? "Prophet ML service is currently unavailable" 
-                      : !hasEnoughDataForML 
-                      ? "Insufficient data for ML predictions"
-                      : "No recommendations at this time"}
-                  </p>
-                  {!hasEnoughDataForML && mlServiceAvailable && (
-                    <p className="text-xs text-gray-400 mt-2">
-                      Need {MIN_TRANSACTIONS_FOR_ML - allTransactions.length} more sales for accurate predictions
-                    </p>
-                  )}
-                  {!mlServiceAvailable && (
-                    <p className="text-xs text-gray-400 mt-2">
-                      ML service is not responding. Showing historical data only.
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </div>
+
+              {!mlLoading && usingML && hasEnoughDataForML && mlServiceAvailable && (
+                <motion.div 
+                  variants={itemVariants}
+                  className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  AI-Powered Forecasts Active - Demand predictions and Deadstock Suggestion using Prophet ML model
+                </motion.div>
+              )}
+
+              {!mlLoading && (!usingML || !mlServiceAvailable) && mlServiceChecked && (
+                <motion.div 
+                  variants={itemVariants}
+                  className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-700 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                  Prophet Unavailable - AI features disabled.
+                </motion.div>
+              )}
+
+              {!mlLoading && !usingML && mlServiceAvailable && mlServiceChecked && hasEnoughDataForML && (
+                <motion.div 
+                  variants={itemVariants}
+                  className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-700 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                  ML Service available but insufficient data for predictions. Need more sales transactions.
+                </motion.div>
+              )}
+            </>
+          )}
+
+          {/* Stats Cards */}
+          <motion.div
+            variants={containerVariants}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+          >
+            {STATS_DATA.map((stat: StatData) => (
+              <StatCard key={stat.id} data={stat} />
+            ))}
           </motion.div>
 
-          {/* Smart Reorder Points - Upcoming Recommendations */}
-          <motion.div
-            variants={itemVariants}
-            className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden flex flex-col"
-          >
-            <div className="p-4 sm:p-5 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Clock className="text-blue-600 w-5 h-5" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Low Stock Alerts */}
+            <motion.div
+              variants={itemVariants}
+              className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
+            >
+              <div className="p-4 sm:p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-orange-100 rounded-lg">
+                      <AlertTriangle className="text-orange-600 w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-800">
+                        Low Stock Alerts
+                      </h2>
+                      <p className="text-xs font-medium text-orange-600">
+                        Items below reorder point
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-gray-800">
-                      Smart Reorder Points
-                    </h2>
-                    <p className="text-xs font-medium text-blue-600">
-                      AI-adjusted reorder recommendations
-                    </p>
-                  </div>
+                  {allLowStockItems.length > 3 && (
+                    <button
+                      onClick={() => setShowLowStockModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                    >
+                      <Eye size={14} />
+                      View All ({allLowStockItems.length})
+                    </button>
+                  )}
                 </div>
-                {lowStockItems.length > 3 && (
-                  <button
-                    onClick={() => setShowUpcomingModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
-                  >
-                    <Eye size={14} />
-                    View All ({lowStockItems.length})
-                  </button>
-                )}
               </div>
-            </div>
-
-            <div className="p-4 sm:p-5 pt-0">
-              <div className="space-y-3">
-                {lowStockItems.slice(0, 3).map((item) => (
-                  <motion.div
-                    key={item.id}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ duration: 0.5 }}
-                    onClick={() => {
-                      setSelectedSmartReorderItem(item);
-                      setShowSmartReorderModal(true);
-                    }}
-                    className="bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all"
-                  >
-                    <div className="flex justify-between items-start gap-2 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+              
+              <div className="p-4 sm:p-5 pt-0">
+                <div className="space-y-3">
+                  {allLowStockItems.slice(0, 3).map((item) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      transition={{ duration: 0.5 }}
+                      className="bg-gray-50 p-3 rounded-lg border border-gray-100"
+                    >
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-gray-800 text-sm truncate">
                             {item.name}
                           </h3>
-                          {item.isSmartAdjusted && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
-                              <Zap size={10} /> Smart
+                          <p className="text-xs text-gray-500">{item.category}</p>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
+                          item.status === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                        }`}>
+                          {item.status === 'critical' ? 'OUT' : 'LOW'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs">Current Stock</p>
+                        <p className="font-bold text-gray-900">{item.currentStock} units</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                  {allLowStockItems.length === 0 && (
+                    <div className="text-center py-8">
+                      <AlertTriangle className="mx-auto w-10 h-10 text-gray-300 mb-3" />
+                      <p className="text-sm text-gray-500">All stock levels healthy</p>
+                      <p className="text-xs text-gray-400 mt-1">No items below reorder point</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Deadstock Impact Card */}
+            <motion.div
+              variants={itemVariants}
+              className="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden flex flex-col relative"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1 bg-red-400"></div>
+              <div className="p-4 sm:p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-red-50 rounded-lg">
+                      <AlertTriangle className="text-red-600 w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-800">
+                        Deadstock Items
+                      </h2>
+                      <p className="text-xs font-medium text-red-600">
+                        Items without sales (30+ days)
+                      </p>
+                    </div>
+                  </div>
+                  {DEADSTOCK_DATA.length > 3 && (
+                    <button
+                      onClick={() => setShowDeadstockModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                    >
+                      <Eye size={14} />
+                      View All ({DEADSTOCK_DATA.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 pt-0">
+                <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+                  Monitors slow-moving inventory that ties up capital. AI analyzes each item to recommend optimal discounts.
+                </p>
+
+                <div className="space-y-3">
+                  {DEADSTOCK_DATA.slice(0, 2).map((item: DeadstockItem) => {
+                    const hasAISuggestion = usingML && item.aiSuggestion;
+                    const suggestionType = hasAISuggestion ? item.aiSuggestionType : 'info';
+                    const daysToShow = item.daysSinceSale;
+                    const isAILoading = mlLoading && hasEnoughDataForML;
+                    
+                    return (
+                      <div 
+                        key={item.id} 
+                        onClick={() => setSelectedDeadstock(item)}
+                        className="p-3 bg-white border border-gray-200 rounded-lg space-y-2 hover:shadow-md transition-all cursor-pointer hover:border-blue-300"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="min-w-0 pr-3 flex-1">
+                            <h4 className="text-sm font-semibold text-gray-800 truncate">
+                              {item.name}
+                            </h4>
+                            <span className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 flex-wrap">
+                              <Clock size={12}/> {daysToShow} Days Unsold • {item.stock} units
                             </span>
-                          )}
+                          </div>
+                          <div className="text-sm font-bold text-gray-700 bg-gray-50 px-2 py-1 rounded shrink-0 ml-2">
+                            ₱{item.lockedCapital.toLocaleString()}
+                          </div>
                         </div>
-                        <p className="text-xs text-gray-500">{item.category}</p>
-                      </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-700">
-                        REORDER
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 mb-2">
-                      <div>
-                        <p className="text-gray-500 text-xs">Static Reorder Point</p>
-                        <p className="font-bold text-gray-900">{item.staticReorderPoint}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs">Smart Reorder</p>
-                        <p className="font-bold text-blue-600">{item.smartReorderPoint}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs">Lead Time</p>
-                        <p className="font-bold text-gray-900">{item.recommendedLeadTime}d</p>
-                      </div>
-                    </div>
-                    {item.isSmartAdjusted && (() => {
-                      const pct = item.staticReorderPoint > 0 
-                        ? Math.round(((item.smartReorderPoint - item.staticReorderPoint) / item.staticReorderPoint) * 100)
-                        : 0;
-                      return (
-                        <div className="text-xs bg-white text-blue-700 p-2 rounded border border-blue-200">
-                          <p className="font-semibold">{pct > 0 ? '+' : ''}{pct}% extra safety stock added to keep you safe from running out</p>
+                        
+                        <div className="border-t border-gray-100 pt-2">
+                          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
+                            {usingML && hasAISuggestion ? 'AI SUGGESTION' : isAILoading ? 'AI SUGGESTION (LOADING)' : 'STATUS'}
+                          </p>
+                          <div className={`bg-gray-50 border rounded p-2 flex items-center justify-between ${
+                            suggestionType === 'critical' ? 'border-red-200' : 
+                            suggestionType === 'warning' ? 'border-orange-200' : 
+                            'border-blue-200'
+                          }`}>
+                            {isAILoading && !item.aiSuggestion ? (
+                              <div className="flex items-center gap-2 flex-1">
+                                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                                <p className="text-xs text-gray-500">Analyzing item...</p>
+                              </div>
+                            ) : (
+                              <p className={`text-xs ${
+                                suggestionType === 'critical' ? 'text-red-600' : 
+                                suggestionType === 'warning' ? 'text-orange-600' : 
+                                'text-blue-600'
+                              } leading-relaxed flex-1`}>
+                                {item.aiSuggestion || `Item unsold for ${daysToShow} days`}
+                              </p>
+                            )}
+                            <ChevronRight size={16} className="text-gray-400 ml-2 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })()}
-                  </motion.div>
-                ))}  
-                {lowStockItems.length === 0 && (
+                      </div>
+                    );
+                  })}
+                  {DEADSTOCK_DATA.length === 0 && (
+                    <div className="text-center py-8">
+                      <Package size={32} className="mx-auto mb-3 text-gray-300" />
+                      <p className="text-sm text-gray-500">No deadstock items identified</p>
+                      <p className="text-xs text-gray-400 mt-1">Items with no sales in 30+ days will appear here</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Demand Forecasting Card */}
+            <motion.div
+              variants={itemVariants}
+              className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
+            >
+              <div className="p-4 sm:p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <Package className="text-[#047857] w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-800">
+                        Demand Forecasting
+                      </h2>
+                      <p className="text-xs font-medium text-blue-600">
+                        {usingML && hasEnoughDataForML && mlServiceAvailable ? 'AI Predictive Insight' : 'Data Analysis'}
+                      </p>
+                    </div>
+                  </div>
+                  {FORECAST_DATA.length > 3 && (
+                    <button
+                      onClick={() => setShowForecastModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                    >
+                      <Eye size={14} />
+                      View All ({FORECAST_DATA.length})
+                    </button>
+                  )}
+                </div>
+                
+                {usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable && (
+                  <div className="flex items-center bg-gray-50 p-1 rounded-lg mt-3 w-fit">
+                    <div className="px-3 py-1.5 text-xs font-bold bg-white text-[#0B3C8A] shadow-sm rounded-md">
+                      {nextThreeMonths[0]} Forecast
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-4 sm:p-5 pt-0">
+                {mlLoading && hasEnoughDataForML && (
+                  <div className="flex flex-col items-center justify-center text-center py-8">
+                    <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-blue-100 flex items-center justify-center">
+                      <div className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
+                    </div>
+                    <p className="text-sm text-gray-600">Loading AI forecasts...</p>
+                    <p className="text-xs text-gray-400 mt-1">This may take a moment</p>
+                  </div>
+                )}
+                {!mlLoading && usingML && hasEnoughDataForML && FORECAST_DATA.length > 0 && mlServiceAvailable ? (
+                  <div className="space-y-3">
+                    {FORECAST_DATA.slice(0, 3).map((item: ForecastDisplayData, i: number) => (
+                      <ForecastCard 
+                        key={i}
+                        data={item}
+                        selectedMonth={nextThreeMonths[0]}
+                        onClick={() => openForecastExplanation(item)}
+                      />
+                    ))}
+                  </div>
+                ) : !mlLoading ? (
+                  <div className="flex flex-col items-center justify-center text-center py-8">
+                    <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                      <Database size={20} className="text-gray-400" />
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      {!mlServiceAvailable 
+                        ? "Prophet ML service is currently unavailable" 
+                        : !hasEnoughDataForML 
+                        ? "Insufficient data for ML predictions"
+                        : "No recommendations at this time"}
+                    </p>
+                    {!hasEnoughDataForML && mlServiceAvailable && (
+                      <p className="text-xs text-gray-400 mt-2">
+                        Need {MIN_TRANSACTIONS_FOR_ML - allTransactions.length} more sales for accurate predictions
+                      </p>
+                    )}
+                    {!mlServiceAvailable && (
+                      <p className="text-xs text-gray-400 mt-2">
+                        ML service is not responding. Showing historical data only.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </motion.div>
+
+            {/* Smart Reorder Points - Upcoming Recommendations */}
+            <motion.div
+              variants={itemVariants}
+              className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden flex flex-col"
+            >
+              <div className="p-4 sm:p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Clock className="text-blue-600 w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-800">
+                        Smart Reorder Points
+                      </h2>
+                      <p className="text-xs font-medium text-blue-600">
+                        AI-adjusted reorder recommendations
+                      </p>
+                    </div>
+                  </div>
+                  {lowStockItems.length > 3 && (
+                    <button
+                      onClick={() => setShowUpcomingModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                    >
+                      <Eye size={14} />
+                      View All ({lowStockItems.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 sm:p-5 pt-0">
+                <div className="space-y-3">
+                  {lowStockItems.slice(0, 3).map((item) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ x: -20, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      transition={{ duration: 0.5 }}
+                      onClick={() => {
+                        setSelectedSmartReorderItem(item);
+                        setShowSmartReorderModal(true);
+                      }}
+                      className="bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all"
+                    >
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-gray-800 text-sm truncate">
+                              {item.name}
+                            </h3>
+                            {item.isSmartAdjusted && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
+                                <Zap size={10} /> Smart
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500">{item.category}</p>
+                        </div>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-700">
+                          REORDER
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-2">
+                        <div>
+                          <p className="text-gray-500 text-xs">Static Reorder Point</p>
+                          <p className="font-bold text-gray-900">{item.staticReorderPoint}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs">Smart Reorder</p>
+                          <p className="font-bold text-blue-600">{item.smartReorderPoint}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs">Lead Time</p>
+                          <p className="font-bold text-gray-900">{item.recommendedLeadTime}d</p>
+                        </div>
+                      </div>
+                      {item.isSmartAdjusted && (() => {
+                        const pct = item.staticReorderPoint > 0 
+                          ? Math.round(((item.smartReorderPoint - item.staticReorderPoint) / item.staticReorderPoint) * 100)
+                          : 0;
+                        return (
+                          <div className="text-xs bg-white text-blue-700 p-2 rounded border border-blue-200">
+                            <p className="font-semibold">{pct > 0 ? '+' : ''}{pct}% extra safety stock added to keep you safe from running out</p>
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
+                  ))}  
+                  {lowStockItems.length === 0 && (
+                    <div className="text-center py-8">
+                      <CheckCircle2 className="mx-auto w-10 h-10 text-gray-300 mb-3" />
+                      <p className="text-sm text-gray-500">No reorder needed</p>
+                      <p className="text-xs text-gray-400 mt-1">All items are above smart reorder points</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Performance Heatmap */}
+          <motion.div
+            variants={itemVariants}
+            className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
+          >
+            <div className="p-4 sm:p-5 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <BarChart3 className="text-emerald-700 w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">Performance Heatmap</h2>
+                  <p className="text-xs text-gray-500">Profit vs. Volume Analysis</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-5 pt-0 flex-1">
+              <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                Identifies which categories generate the most revenue (Solid Color)
+                relative to how many physical units are sold (Gray Overlay).
+              </p>
+
+              <div className="space-y-4">
+                {HEATMAP_DATA.length > 0 ? (
+                  HEATMAP_DATA.map((item, idx) => (
+                    <div key={idx} className="space-y-1.5">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-semibold text-gray-700">{item.category}</span>
+                      </div>
+                      <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${item.profit}%` }}
+                          transition={{ duration: 1, ease: "easeOut" }}
+                          className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-white`}
+                        >
+                          Profit {item.profit}%
+                        </motion.div>
+                        <div
+                          className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-700"
+                          style={{ width: `${100 - item.volume}%` }}
+                        >
+                          Vol {item.volume}%
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
                   <div className="text-center py-8">
-                    <CheckCircle2 className="mx-auto w-10 h-10 text-gray-300 mb-3" />
-                    <p className="text-sm text-gray-500">No reorder needed</p>
-                    <p className="text-xs text-gray-400 mt-1">All items are above smart reorder points</p>
+                    <p className="text-sm text-gray-500">No product data available.</p>
                   </div>
                 )}
               </div>
             </div>
           </motion.div>
-        </div>
-
-        {/* Performance Heatmap */}
-        <motion.div
-          variants={itemVariants}
-          className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
-        >
-          <div className="p-4 sm:p-5 border-b border-gray-100 shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-emerald-100 rounded-lg">
-                <BarChart3 className="text-emerald-700 w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-gray-800">Performance Heatmap</h2>
-                <p className="text-xs text-gray-500">Profit vs. Volume Analysis</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-5 pt-0 flex-1">
-            <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-              Identifies which categories generate the most revenue (Solid Color)
-              relative to how many physical units are sold (Gray Overlay).
-            </p>
-
-            <div className="space-y-4">
-              {HEATMAP_DATA.length > 0 ? (
-                HEATMAP_DATA.map((item, idx) => (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-semibold text-gray-700">{item.category}</span>
-                    </div>
-                    <div className="relative h-6 bg-gray-100 rounded-md overflow-hidden flex">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${item.profit}%` }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                        className={`${item.color} h-full flex items-center px-2 text-[10px] font-bold whitespace-nowrap z-10 text-white`}
-                      >
-                        Profit {item.profit}%
-                      </motion.div>
-                      <div
-                        className="absolute top-0 right-0 h-full border-l-2 border-dashed border-gray-400 bg-gray-200/50 flex items-center justify-end px-2 text-[10px] font-bold text-gray-700"
-                        style={{ width: `${100 - item.volume}%` }}
-                      >
-                        Vol {item.volume}%
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8">
-                  <p className="text-sm text-gray-500">No product data available.</p>
-                </div>
-              )}
-            </div>
-          </div>
         </motion.div>
-      </motion.div>
+      ) : (
+        renderPredictiveAnalytics()
+      )}
 
       {/* Smart Reorder Points Modal */}
       <AnimatePresence>
@@ -1364,6 +1962,20 @@ export default function AdminDashboard() {
             item={selectedDeadstock}
             onClose={() => setSelectedDeadstock(null)}
             analysis={calculateDetailedAnalysis(selectedDeadstock)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Predictive Analytics Product Insight Modal */}
+      <AnimatePresence>
+        {showProductInsightModal && selectedProductForInsight && (
+          <PredictiveProductInsightModal
+            product={selectedProductForInsight}
+            onClose={() => {
+              setShowProductInsightModal(false);
+              setSelectedProductForInsight(null);
+            }}
+            recommendations={recommendations}
           />
         )}
       </AnimatePresence>
@@ -2072,6 +2684,217 @@ function SmartReorderExplanationModal({
                 <span className="font-bold text-gray-800 flex-shrink-0 w-5">4.</span>
                 <span><span className="font-semibold">Final Recommendation:</span> All these factors combine to give you the safest stock level</span>
               </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-gray-50 p-4 border-t border-gray-200 rounded-b-2xl">
+          <button onClick={onClose} className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// Predictive Product Insight Modal Component
+function PredictiveProductInsightModal({
+  product,
+  onClose,
+  recommendations
+}: {
+  product: PredictiveProduct;
+  onClose: () => void;
+  recommendations: any[];
+}) {
+  const productRecommendation = recommendations.find(
+    (rec: any) => rec.productId === product.id || rec.productName === product.name
+  );
+  
+  const getTrendColor = () => {
+    switch (product.trend) {
+      case 'up': return 'text-green-600 bg-green-100';
+      case 'down': return 'text-red-600 bg-red-100';
+      default: return 'text-gray-600 bg-gray-100';
+    }
+  };
+  
+  const getTrendIcon = () => {
+    switch (product.trend) {
+      case 'up': return <TrendingUp size={16} className="text-green-600" />;
+      case 'down': return <TrendingDown size={16} className="text-red-600" />;
+      default: return <Minus size={16} className="text-gray-600" />;
+    }
+  };
+  
+  const getConfidenceText = () => {
+    switch (product.confidence) {
+      case 'high': return 'High confidence - Prophet ML strongly indicates this trend';
+      case 'medium': return 'Medium confidence - Additional data would improve accuracy';
+      default: return 'Low confidence - Based on limited historical data';
+    }
+  };
+  
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+      >
+        <div className="sticky top-0 bg-gradient-to-r from-purple-50 to-white p-5 border-b border-gray-200 rounded-t-2xl">
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <Target size={20} className="text-purple-600" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-800">{product.name}</h2>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${getTrendColor()}`}>
+                  {getTrendIcon()}
+                  {product.trend === 'up' ? 'Upward' : product.trend === 'down' ? 'Declining' : 'Stable'} Trend
+                </span>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">{product.category}</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+              <X size={20} className="text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Prediction Chart */}
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[
+                { name: 'Current', sales: product.currentSales },
+                { name: '30d Forecast', sales: product.predictedSales30d },
+                { name: '60d Forecast', sales: product.predictedSales60d },
+                { name: '90d Forecast', sales: product.predictedSales90d }
+              ]}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="sales" fill="#8B5CF6" radius={[4, 4, 0, 0]}>
+                  <Cell fill="#0B3C8A" />
+                  <Cell fill="#8B5CF6" />
+                  <Cell fill="#A855F7" />
+                  <Cell fill="#C084FC" />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Key Metrics */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Growth Rate</p>
+              <p className={`text-2xl font-bold ${product.growthRate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {product.growthRate >= 0 ? '+' : ''}{Math.round(product.growthRate)}%
+              </p>
+              <p className="text-[10px] text-gray-400 mt-1">30-day projection</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">ML Confidence</p>
+              <p className={`text-2xl font-bold ${
+                product.confidence === 'high' ? 'text-green-600' :
+                product.confidence === 'medium' ? 'text-yellow-600' :
+                'text-orange-600'
+              }`}>
+                {product.confidence === 'high' ? 'High' : product.confidence === 'medium' ? 'Medium' : 'Low'}
+              </p>
+              <p className="text-[10px] text-gray-400 mt-1">{getConfidenceText()}</p>
+            </div>
+          </div>
+
+          {/* Current vs Predicted Performance */}
+          <div className="border border-gray-200 rounded-xl p-4">
+            <h3 className="font-bold text-gray-800 mb-3">Performance Comparison</h3>
+            <div className="space-y-3">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">Current Sales (30 days)</span>
+                  <span className="font-bold text-gray-800">{product.currentSales} units</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${Math.min(100, (product.currentSales / Math.max(product.predictedSales30d, product.currentSales)) * 100)}%` }}></div>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">Predicted Sales (30 days)</span>
+                  <span className="font-bold text-purple-600">{product.predictedSales30d} units</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="bg-purple-600 h-2 rounded-full" style={{ width: `${Math.min(100, (product.predictedSales30d / Math.max(product.predictedSales30d, product.currentSales)) * 100)}%` }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Insights */}
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Brain size={18} className="text-purple-600" />
+              <h3 className="font-bold text-purple-800">AI-Generated Insights</h3>
+            </div>
+            <ul className="space-y-2 text-sm text-purple-700">
+              {product.trend === 'up' && (
+                <li className="flex items-start gap-2">
+                  <TrendingUpIcon size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>This product is trending upward. Consider increasing stock levels to meet projected demand.</span>
+                </li>
+              )}
+              {product.trend === 'down' && (
+                <li className="flex items-start gap-2">
+                  <TrendingDown size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Declining sales pattern detected. Review pricing or consider promotional activities.</span>
+                </li>
+              )}
+              {product.predictedSales30d > product.currentSales * 1.5 && (
+                <li className="flex items-start gap-2">
+                  <Rocket size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Demand is expected to surge by {Math.round(((product.predictedSales30d - product.currentSales) / product.currentSales) * 100)}%. Prepare inventory accordingly.</span>
+                </li>
+              )}
+              {product.currentSales > 0 && product.predictedSales30d < product.currentSales * 0.5 && (
+                <li className="flex items-start gap-2">
+                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Demand may drop significantly. Consider reducing stock levels or running promotions.</span>
+                </li>
+              )}
+              {productRecommendation && productRecommendation.recommendedOrder > 0 && (
+                <li className="flex items-start gap-2">
+                  <Package size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Recommended to order {productRecommendation.recommendedOrder} units to cover demand through stockout.</span>
+                </li>
+              )}
+            </ul>
+          </div>
+
+          {/* Recommended Actions */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap size={18} className="text-amber-600" />
+              <h3 className="font-bold text-amber-800">Recommended Actions</h3>
+            </div>
+            <ul className="space-y-2 text-sm text-amber-700">
+              {product.trend === 'up' && (
+                <li>• Increase stock levels by {Math.ceil(product.predictedSales30d - product.currentSales)}+ units</li>
+              )}
+              {product.trend === 'down' && (
+                <li>• Consider {product.currentSales > 0 ? '10-15%' : '20-25%'} discount promotion</li>
+              )}
+              {product.predictedSales30d > product.currentSales && product.currentSales > 0 && (
+                <li>• Prepare marketing campaign for upcoming demand surge</li>
+              )}
+              <li>• Monitor stock levels closely over the next 30 days</li>
+              <li>• Review category performance for bundle opportunities</li>
             </ul>
           </div>
         </div>
