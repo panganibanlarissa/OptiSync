@@ -75,10 +75,10 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
   const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
   const [adjustmentType, setAdjustmentType] = useState<'restock' | 'damaged'>('restock');
   
-  // Selected batch for inventory information display - default to first batch, no "all" option
+  // Selected batch for inventory information display - default to first batch
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   
-  // Parent summary data (only used for batch list, not displayed in Inventory Information)
+  // Parent summary data (used for non-perishable products OR aggregate view)
   const [parentData, setParentData] = useState<ProductData>({
     stock: initialProduct.stock,
     totalSold: initialProduct.totalSold || 0,
@@ -98,19 +98,21 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
   // Get selected batch data
   const selectedBatch = batches.find(b => b.id === selectedBatchId);
   
-  // Get display data based on selected batch (only batch data, no summary)
-  const displayData = selectedBatch ? {
+  // Determine what data to display in inventory stats
+  // For perishable with batch selected: show batch data
+  // For non-perishable or no batch selected: show parent product data
+  const displayData = (isPerishable && selectedBatch) ? {
     beginningInventory: selectedBatch.beginningInventory || 0,
     totalSold: selectedBatch.totalSold || 0,
     damageExchanged: selectedBatch.damageExchanged || 0,
     restockCount: selectedBatch.restockCount || 0,
     stock: selectedBatch.stock,
   } : {
-    beginningInventory: 0,
-    totalSold: 0,
-    damageExchanged: 0,
-    restockCount: 0,
-    stock: 0,
+    beginningInventory: parentData.beginningInventory || 0,
+    totalSold: parentData.totalSold || 0,
+    damageExchanged: parentData.damageExchanged || 0,
+    restockCount: parentData.restockCount || 0,
+    stock: parentData.stock || 0,
   };
 
   // Find batch with nearest expiry date
@@ -130,7 +132,7 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
     return sortedByExpiry[0];
   };
 
-  // Set default selected batch to the one with nearest expiry date
+  // Set default selected batch to the one with nearest expiry date (only for perishable)
   useEffect(() => {
     if (isPerishable && batches.length > 0 && !selectedBatchId) {
       const nearestBatch = findNearestExpiryBatch(batches);
@@ -146,7 +148,7 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
     setLoading(true);
     
     try {
-      // First, reload batches
+      // First, reload batches (for perishable products)
       const fetchedBatches = await getProductBatches(product.id);
       setBatches(fetchedBatches);
       
@@ -192,8 +194,8 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
             setSelectedBatchId(nearestBatch.id);
           }
         }
-      } else if (fetchedBatches.length > 0) {
-        // No batch selected, select the nearest expiry batch
+      } else if (fetchedBatches.length > 0 && isPerishable) {
+        // No batch selected, select the nearest expiry batch (only for perishable)
         const nearestBatch = findNearestExpiryBatch(fetchedBatches);
         if (nearestBatch) {
           setSelectedBatchId(nearestBatch.id);
@@ -216,8 +218,8 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
       console.log("Fetched batches:", fetchedBatches);
       setBatches(fetchedBatches);
       
-      // Set selected batch to nearest expiry after loading
-      if (fetchedBatches.length > 0 && !selectedBatchId) {
+      // Set selected batch to nearest expiry after loading (only for perishable)
+      if (fetchedBatches.length > 0 && !selectedBatchId && isPerishable) {
         const nearestBatch = findNearestExpiryBatch(fetchedBatches);
         if (nearestBatch) {
           setSelectedBatchId(nearestBatch.id);
@@ -476,14 +478,14 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
               </div>
             </div>
 
-            {/* Inventory Information - WITH BATCH SELECTOR (No "All Batches" option) */}
+            {/* Inventory Information - Banner removed for non-perishable */}
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 sm:p-5">
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <h3 className="font-bold text-gray-800 text-sm sm:text-base flex items-center gap-2">
                   Inventory Information
                 </h3>
                 
-                {/* Batch Selector Dropdown - Only shows individual batches, no "All Batches" */}
+                {/* Batch Selector Dropdown - Only for perishable products */}
                 {isPerishable && batches.length > 0 && (
                   <div className="relative">
                     <select
@@ -502,8 +504,8 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
                 )}
               </div>
               
-              {/* Selected Batch Info Banner */}
-              {selectedBatch && (
+              {/* Info Banner - Only shown for perishable products when a batch is selected */}
+              {isPerishable && selectedBatch && (
                 <div className="mb-3 p-2 bg-purple-100 rounded-lg text-xs text-purple-700">
                   Showing data for batch: <span className="font-bold">{selectedBatch.batchSku}</span>
                   {selectedBatch.expiryDate && (
@@ -514,30 +516,30 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
                 </div>
               )}
               
-              {/* Inventory Stats Grid - Only shows selected batch data */}
+              {/* Inventory Stats Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                 <div>
                   <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Beginning Inventory</p>
                   <p className="text-lg sm:text-xl font-bold text-gray-800">
-                    {displayData.beginningInventory} {pluralize(displayData.beginningInventory, 'unit', 'units')}
+                    {displayData.beginningInventory.toLocaleString()} {pluralize(displayData.beginningInventory, 'unit', 'units')}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Total Sold</p>
                   <p className="text-lg sm:text-xl font-bold text-blue-600">
-                    {displayData.totalSold} {pluralize(displayData.totalSold, 'unit', 'units')}
+                    {displayData.totalSold.toLocaleString()} {pluralize(displayData.totalSold, 'unit', 'units')}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Damaged</p>
                   <p className="text-lg sm:text-xl font-bold text-red-600">
-                    {displayData.damageExchanged} {pluralize(displayData.damageExchanged, 'unit', 'units')}
+                    {displayData.damageExchanged.toLocaleString()} {pluralize(displayData.damageExchanged, 'unit', 'units')}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-600 uppercase mb-1">Restocked</p>
                   <p className="text-lg sm:text-xl font-bold text-green-600">
-                    {displayData.restockCount} {pluralize(displayData.restockCount, 'unit', 'units')}
+                    {displayData.restockCount.toLocaleString()} {pluralize(displayData.restockCount, 'unit', 'units')}
                   </p>
                 </div>
                 <div>
@@ -547,13 +549,13 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
                     displayData.stock <= product.reorderPoint ? 'text-orange-600' : 
                     'text-green-600'
                   }`}>
-                    {displayData.stock} {pluralize(displayData.stock, 'unit', 'units')}
+                    {displayData.stock.toLocaleString()} {pluralize(displayData.stock, 'unit', 'units')}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Batch List Section - UNCHANGED */}
+            {/* Batch List Section - Only for perishable products */}
             {isPerishable && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 sm:p-5">
                 <div className="flex justify-between items-center mb-4">
@@ -887,8 +889,8 @@ export default function ProductDetailsModal({ product: initialProduct, onClose }
         {selectedQRBatch && (
           <QRCodeModal
             productId={product.id}
-            productSku={`${product.sku}-${selectedQRBatch.batchSku}`}
-            productName={`${product.name} (Batch: ${selectedQRBatch.batchSku})`}
+            productSku={product.sku}
+            productName={product.name}
             productPrice={product.markupPrice}
             batchId={selectedQRBatch.id}
             batchSku={selectedQRBatch.batchSku}
