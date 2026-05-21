@@ -726,7 +726,8 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
                                       historical_velocity: float, category: str, never_sold: bool = False) -> Dict[str, Any]:
     """Generate AI/ML-based suggestion for deadstock products.
     
-    Discount calculation based on days since last sale:
+    Discount calculation based on days since last sale with additional factors:
+    Base discount by days:
     - 30 days: 1%
     - 31-59 days: 1% to 5% (progressive)
     - 60 days: 5%
@@ -750,47 +751,87 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
     - 330 days: 41%
     - 331-359 days: 41% to 42% (progressive)
     - 360+ days: 42% (maximum cap)
+    
+    Additional factors applied:
+    - Capital adjustment: High-value inventory increases urgency
+    - Category urgency: Perishable/seasonal items get higher multiplier
+    - Velocity reduction: Fast-moving items historically reduce urgency
+    - Never-sold boost: Items with no sales get additional discount pressure
     """
     
-    # Calculate discount based on days since sale with extended ranges
+    # Calculate base discount based on days since sale with extended ranges
     if days_since_sale < 30:
-        final_discount_percent = 0
+        base_discount = 0
     elif days_since_sale <= 60:
         # 30-60 days: 1% to 5%
-        final_discount_percent = 1 + (days_since_sale - 30) * 0.133
+        base_discount = 1 + (days_since_sale - 30) * 0.133
     elif days_since_sale <= 90:
         # 61-90 days: 5% to 12%
-        final_discount_percent = 5 + (days_since_sale - 60) * 0.233
+        base_discount = 5 + (days_since_sale - 60) * 0.233
     elif days_since_sale <= 120:
         # 91-120 days: 12% to 18%
-        final_discount_percent = 12 + (days_since_sale - 90) * 0.2
+        base_discount = 12 + (days_since_sale - 90) * 0.2
     elif days_since_sale <= 150:
         # 121-150 days: 18% to 23%
-        final_discount_percent = 18 + (days_since_sale - 120) * 0.167
+        base_discount = 18 + (days_since_sale - 120) * 0.167
     elif days_since_sale <= 180:
         # 151-180 days: 23% to 27%
-        final_discount_percent = 23 + (days_since_sale - 150) * 0.133
+        base_discount = 23 + (days_since_sale - 150) * 0.133
     elif days_since_sale <= 210:
         # 181-210 days: 27% to 31%
-        final_discount_percent = 27 + (days_since_sale - 180) * 0.133
+        base_discount = 27 + (days_since_sale - 180) * 0.133
     elif days_since_sale <= 240:
         # 211-240 days: 31% to 34%
-        final_discount_percent = 31 + (days_since_sale - 210) * 0.1
+        base_discount = 31 + (days_since_sale - 210) * 0.1
     elif days_since_sale <= 270:
         # 241-270 days: 34% to 37%
-        final_discount_percent = 34 + (days_since_sale - 240) * 0.1
+        base_discount = 34 + (days_since_sale - 240) * 0.1
     elif days_since_sale <= 300:
         # 271-300 days: 37% to 39%
-        final_discount_percent = 37 + (days_since_sale - 270) * 0.067
+        base_discount = 37 + (days_since_sale - 270) * 0.067
     elif days_since_sale <= 330:
         # 301-330 days: 39% to 41%
-        final_discount_percent = 39 + (days_since_sale - 300) * 0.067
+        base_discount = 39 + (days_since_sale - 300) * 0.067
     elif days_since_sale <= 360:
         # 331-360 days: 41% to 42%
-        final_discount_percent = 41 + (days_since_sale - 330) * 0.033
+        base_discount = 41 + (days_since_sale - 330) * 0.033
     else:
         # 360+ days: 42% max (nearly clearance price)
-        final_discount_percent = 42
+        base_discount = 42
+    
+    # Apply capital adjustment - high-value inventory increases discount pressure (reduced impact)
+    if locked_capital > 150000:
+        capital_adjustment = 2
+    elif locked_capital > 100000:
+        capital_adjustment = 1.5
+    elif locked_capital > 50000:
+        capital_adjustment = 1
+    else:
+        capital_adjustment = 0
+    
+    # Apply category urgency multiplier
+    category_urgency = {
+        'Frames': 1.0, 'Lenses': 0.9, 'Contact Lenses': 0.7, 'Solutions': 0.6, 'Accessories': 1.0
+    }
+    urgency_multiplier = category_urgency.get(category, 1.0)
+    
+    # Apply velocity reduction - fast-moving items historically get less discount pressure
+    velocity_reduction = 0
+    if historical_velocity > 15:
+        velocity_reduction = 1.5
+    elif historical_velocity > 8:
+        velocity_reduction = 0.75
+    elif historical_velocity > 0 and historical_velocity < 2:
+        velocity_reduction = 0
+    
+    # Never-sold boost - items with no sales history get additional pressure (reduced impact)
+    never_sold_boost = 1.5 if never_sold else 0
+    
+    # Apply all factors with reduced multiplier for adjustments
+    # Base discount drives the recommendation; adjustments have minimal impact
+    total_discount = base_discount + ((capital_adjustment + never_sold_boost) * urgency_multiplier * 0.5)
+    total_discount = max(0, total_discount - velocity_reduction)
+    final_discount_percent = total_discount
     
     # Safety check: ensure discount doesn't exceed safe margin
     profit_per_unit = product.markupPrice - product.baseCost
@@ -856,11 +897,18 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
         'recommended_discount': final_discount_percent,
         'ml_factors': {
             'days_factor': round(min(1.0, days_since_sale / 90), 2),
+            'base_discount': round(base_discount, 1),
             'capital_factor': round(min(1.0, locked_capital / 200000), 2),
+            'capital_adjustment': capital_adjustment,
+            'category_urgency': round(urgency_multiplier, 2),
+            'velocity_reduction': velocity_reduction,
+            'never_sold_boost': never_sold_boost,
             'profit_margin': round(profit_margin, 1),
             'max_safe_discount': round(max_safe_discount_percent, 1),
             'final_discount': final_discount_percent,
-            'never_sold': never_sold
+            'never_sold': never_sold,
+            'locked_capital': round(locked_capital, 0),
+            'historical_velocity': round(historical_velocity, 2)
         }
     }
 
