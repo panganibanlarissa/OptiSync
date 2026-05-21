@@ -32,7 +32,9 @@ import { useMLForecasting } from "@/hooks/useMLForecasting";
 
 import type { Product, ProductBatch } from "@/context/FirebaseContext";
 
-type InventoryData = Product;
+type InventoryData = Product & {
+  publicViewCount?: number;
+};
 
 // Helper function to get default lead time based on category
 const getDefaultLeadTime = (category: string): number => {
@@ -49,7 +51,7 @@ const getDefaultLeadTime = (category: string): number => {
 
 interface ReportFilters {
   category: string;
-  stockStatus: string; // "all", "low", "out", "healthy", "deadstock"
+  stockStatus: string;
   searchQuery: string;
   dateRange: { startDate: string; endDate: string };
 }
@@ -89,7 +91,7 @@ export default function InventoryReports({
         endDate: ""
       },
     });
-    
+    clearDateRange();
     if (setSearchQuery) setSearchQuery("");
   };
 
@@ -118,16 +120,51 @@ export default function InventoryReports({
   const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
   const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
   
+  // Date Range State for validation
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
+  
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
+
+  // Handle from date change
+  const handleFromDateChange = (value: string) => {
+    setFromDate(value);
+    setFilters(prev => ({
+      ...prev,
+      dateRange: { ...prev.dateRange, startDate: value }
+    }));
+    // If toDate is set and is less than the new fromDate, clear toDate
+    if (toDate && value && new Date(value) > new Date(toDate)) {
+      setToDate("");
+      setFilters(prev => ({
+        ...prev,
+        dateRange: { startDate: value, endDate: "" }
+      }));
+    }
+  };
+  
+  // Handle to date change
+  const handleToDateChange = (value: string) => {
+    setToDate(value);
+    setFilters(prev => ({
+      ...prev,
+      dateRange: { ...prev.dateRange, endDate: value }
+    }));
+  };
+  
+  // Clear date range
+  const clearDateRange = () => {
+    setFromDate("");
+    setToDate("");
+    setFilters(prev => ({
+      ...prev,
+      dateRange: { startDate: "", endDate: "" }
+    }));
+  };
 
   // Helper function to check if a product is perishable
   const isProductPerishable = (product: InventoryData): boolean => {
     return product.category === "Solutions" || product.category === "Vitamins";
-  };
-
-  // Helper function to get display SKU (don't show batch SKU in inventory list)
-  const getDisplaySku = (product: InventoryData): string => {
-    return product.sku;
   };
 
   // Helper function to calculate days since last sale for a product
@@ -211,13 +248,39 @@ export default function InventoryReports({
       }
 
       let dateMatch = true;
-      if (filters.dateRange.startDate || filters.dateRange.endDate) {
+      if (fromDate && toDate) {
+        const fromDateObj = new Date(fromDate);
+        const toDateObj = new Date(toDate);
+        if (fromDateObj <= toDateObj) {
+          let createdDate: string | null = null;
+          if (product.createdAt) {
+            try {
+              let date: Date | null = null;
+              if (product.createdAt && typeof product.createdAt.toDate === 'function') {
+                date = product.createdAt.toDate();
+              } else if (typeof product.createdAt === 'string') {
+                date = new Date(product.createdAt);
+              } else if (product.createdAt instanceof Date) {
+                date = product.createdAt;
+              }
+              if (date && !isNaN(date.getTime())) {
+                createdDate = date.toISOString().split('T')[0];
+              }
+            } catch (e) {
+              createdDate = null;
+            }
+          }
+          if (createdDate) {
+            dateMatch = createdDate >= fromDate && createdDate <= toDate;
+          } else {
+            dateMatch = false;
+          }
+        }
+      } else if (fromDate) {
         let createdDate: string | null = null;
-        
         if (product.createdAt) {
           try {
             let date: Date | null = null;
-            
             if (product.createdAt && typeof product.createdAt.toDate === 'function') {
               date = product.createdAt.toDate();
             } else if (typeof product.createdAt === 'string') {
@@ -225,7 +288,6 @@ export default function InventoryReports({
             } else if (product.createdAt instanceof Date) {
               date = product.createdAt;
             }
-            
             if (date && !isNaN(date.getTime())) {
               createdDate = date.toISOString().split('T')[0];
             }
@@ -233,22 +295,40 @@ export default function InventoryReports({
             createdDate = null;
           }
         }
-        
         if (createdDate) {
-          if (filters.dateRange.startDate) {
-            dateMatch = dateMatch && createdDate >= filters.dateRange.startDate;
+          dateMatch = createdDate >= fromDate;
+        } else {
+          dateMatch = false;
+        }
+      } else if (toDate) {
+        let createdDate: string | null = null;
+        if (product.createdAt) {
+          try {
+            let date: Date | null = null;
+            if (product.createdAt && typeof product.createdAt.toDate === 'function') {
+              date = product.createdAt.toDate();
+            } else if (typeof product.createdAt === 'string') {
+              date = new Date(product.createdAt);
+            } else if (product.createdAt instanceof Date) {
+              date = product.createdAt;
+            }
+            if (date && !isNaN(date.getTime())) {
+              createdDate = date.toISOString().split('T')[0];
+            }
+          } catch (e) {
+            createdDate = null;
           }
-          if (filters.dateRange.endDate) {
-            dateMatch = dateMatch && createdDate <= filters.dateRange.endDate;
-          }
-        } else if (filters.dateRange.startDate || filters.dateRange.endDate) {
+        }
+        if (createdDate) {
+          dateMatch = createdDate <= toDate;
+        } else {
           dateMatch = false;
         }
       }
 
       return categoryMatch && searchMatch && stockStatusMatch && dateMatch;
     });
-  }, [products, filters, effectiveSearchQuery, transactions]);
+  }, [products, filters, effectiveSearchQuery, transactions, fromDate, toDate]);
 
   const handleFilterChange = (key: keyof ReportFilters, value: any) => {
     setFilters((prev) => ({
@@ -343,9 +423,7 @@ export default function InventoryReports({
       showToastOnly(`Batch ${adjustingBatch.batchSku} updated successfully`, "success");
       setAdjustingBatch(null);
       
-      // Refresh products view
       if (onProductAdjust) {
-        // This will trigger a refresh
         const product = products.find(p => p.id === adjustingBatch.productId);
         if (product) {
           onProductAdjust(product.id, product.stock, reason, adjustingBatch.batchId);
@@ -372,9 +450,7 @@ export default function InventoryReports({
 
   const handleSaveProduct = async (formData: ProductFormData) => {
     try {
-      // Check if this is a batch adjustment (has batchId)
       if ((formData as any).batchId && onProductAdjust) {
-        // This is a batch-level adjustment
         console.log("Batch adjustment detected:", {
           productId: formData.id,
           batchId: (formData as any).batchId,
@@ -384,7 +460,6 @@ export default function InventoryReports({
           adjustmentType: (formData as any).adjustmentType
         });
         
-        // Call onProductAdjust with batchId
         onProductAdjust(
           formData.id!, 
           formData.stock, 
@@ -397,7 +472,6 @@ export default function InventoryReports({
         return;
       }
       
-      // Regular product adjustment (non-batch or non-perishable)
       if (adjustingProduct && onProductAdjust) {
         onProductAdjust(formData.id!, Number(formData.stock), formData.adjustmentReason || "Manual adjustment");
         setAdjustingProduct(null);
@@ -405,10 +479,8 @@ export default function InventoryReports({
         return;
       }
 
-      // Determine if product is perishable (Solutions or Vitamins)
       const isPerishable = formData.category === "Solutions" || formData.category === "Vitamins";
 
-      // Regular product edit
       if (formData.id) {
         const updates: Partial<Product> = {
           sku: formData.sku,
@@ -445,11 +517,8 @@ export default function InventoryReports({
         setEditingProduct(null);
         showToastOnly(`Product "${formData.name}" updated successfully`, "success");
       } else if (!formData.id && onAddProduct) {
-        // This is a new product being added
         const newId = await onAddProduct(formData);
         
-        // ONLY show QR code modal for NON-perishable products
-        // Perishable products (Solutions, Vitamins) should only use batch-level QR codes
         if (newId && !isPerishable) {
           setSelectedQRProduct({
             id: newId,
@@ -475,7 +544,6 @@ export default function InventoryReports({
       statuses.push("Deadstock");
     }
     
-    // Only show expiry status for non-perishable products in the main list
     if (!isProductPerishable(product) && product.expiryDate) {
       const expiryDate = new Date(product.expiryDate);
       expiryDate.setHours(0, 0, 0, 0);
@@ -566,6 +634,7 @@ export default function InventoryReports({
         `₱${product.baseCost.toLocaleString()}`,
         `₱${product.markupPrice.toLocaleString()}`,
         !isProductPerishable(product) && product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
+        ((product as any).publicViewCount || 0).toString(),
         getProductStatus(product).join(" | "),
       ];
     });
@@ -600,10 +669,12 @@ export default function InventoryReports({
         `Stock Status: ${filters.stockStatus === 'deadstock' ? 'Deadstock' : filters.stockStatus.charAt(0).toUpperCase() + filters.stockStatus.slice(1)}`
       );
     }
-    if (filters.dateRange.startDate || filters.dateRange.endDate) {
-      filterSummary.push(
-        `Date Range: ${filters.dateRange.startDate} to ${filters.dateRange.endDate}`
-      );
+    if (fromDate && toDate) {
+      filterSummary.push(`Date Range: ${fromDate} to ${toDate}`);
+    } else if (fromDate) {
+      filterSummary.push(`From Date: ${fromDate}`);
+    } else if (toDate) {
+      filterSummary.push(`Until Date: ${toDate}`);
     }
     if (effectiveSearchQuery) {
       filterSummary.push(`Search: ${effectiveSearchQuery}`);
@@ -632,6 +703,7 @@ export default function InventoryReports({
           "Cost",
           "Price",
           "Expiry",
+          "Views",
           "Status",
         ],
       ],
@@ -664,7 +736,8 @@ export default function InventoryReports({
         8: { halign: "right", cellWidth: 20 },
         9: { halign: "right", cellWidth: 20 },
         10: { halign: "center", cellWidth: 22 },
-        11: { cellWidth: 25 },
+        11: { halign: "center", cellWidth: 15 },
+        12: { cellWidth: 25 },
       },
       bodyStyles: {
         fillColor: [255, 255, 255],
@@ -725,6 +798,9 @@ export default function InventoryReports({
     
     const deadstockCount = filteredProducts.filter(p => isProductDeadstock(p, new Date()) && p.stock > 0).length;
     doc.text(`Deadstock Items (30+ days unsold): ${deadstockCount}`, 14, finalY + 32);
+    
+    const totalViews = filteredProducts.reduce((sum, p) => sum + ((p as any).publicViewCount || 0), 0);
+    doc.text(`Total Public Views: ${totalViews.toLocaleString()}`, 14, finalY + 38);
 
     doc.save(
       `Inventory_Report_${new Date().toISOString().split("T")[0]}.pdf`
@@ -933,14 +1009,8 @@ export default function InventoryReports({
                   </label>
                   <input
                     type="date"
-                    value={filters.dateRange.startDate}
-                    onChange={(e) =>
-                      handleFilterChange("dateRange", {
-                        ...filters.dateRange,
-                        startDate: e.target.value,
-                      })
-                    }
-                    onKeyDown={handleDateKeyDown}
+                    value={fromDate}
+                    onChange={(e) => handleFromDateChange(e.target.value)}
                     className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
                   />
                 </div>
@@ -951,14 +1021,9 @@ export default function InventoryReports({
                   </label>
                   <input
                     type="date"
-                    value={filters.dateRange.endDate}
-                    onChange={(e) =>
-                      handleFilterChange("dateRange", {
-                        ...filters.dateRange,
-                        endDate: e.target.value,
-                      })
-                    }
-                    onKeyDown={handleDateKeyDown}
+                    value={toDate}
+                    onChange={(e) => handleToDateChange(e.target.value)}
+                    min={fromDate || undefined}
                     className="w-full px-2.5 py-1.5 rounded-md border border-gray-300 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-900"
                   />
                 </div>
@@ -979,7 +1044,7 @@ export default function InventoryReports({
         {/* Results Summary and Table */}
         <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
           {/* Inventory Value Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 sm:gap-3 mb-4">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
                 Total Products
@@ -1039,6 +1104,14 @@ export default function InventoryReports({
                 {deadstockCount}
               </p>
             </div>
+            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
+              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
+                Total Views
+              </p>
+              <p className="text-lg sm:text-2xl font-bold text-purple-600 mt-1">
+                {filteredProducts.reduce((sum, p) => sum + ((p as any).publicViewCount || 0), 0).toLocaleString()}
+              </p>
+            </div>
           </div>
 
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -1063,7 +1136,10 @@ export default function InventoryReports({
                         Damaged
                       </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                        Total Stock
+                        Stock
+                      </th>
+                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
+                        Views
                       </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
                         Status
@@ -1081,8 +1157,6 @@ export default function InventoryReports({
                       const isArchived = (product as any).archived === true;
                       const isDimmed = isArchived || product.stock === 0;
                       const isPerishable = isProductPerishable(product);
-                      
-                      // For perishable products, show "—" instead of SKU
                       const displaySku = isPerishable ? "—" : product.sku;
 
                       return (
@@ -1107,6 +1181,9 @@ export default function InventoryReports({
                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
                             {product.stock}
+                          </td>
+                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-purple-600">
+                            {(product as any).publicViewCount || 0}
                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
                             <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
@@ -1136,7 +1213,6 @@ export default function InventoryReports({
                               >
                                 <Edit2 size={14} />
                               </button>
-                              {/* QR Code button only shown for non-perishable products */}
                               {!isPerishable && (
                                 <button
                                   title="QR Code"
@@ -1255,7 +1331,7 @@ export default function InventoryReports({
           </div>
         )}
 
-        {/* Edit Product Modal - with delete functionality */}
+        {/* Edit Product Modal */}
         {editingProduct && (
           <ProductModal
             mode="edit"

@@ -451,7 +451,6 @@ export default function ActivityLogsPage() {
         console.log('No logout_logs collection found yet');
       }
 
-      // Sort logs by timestamp (newest first)
       logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       
       const sortedMonths = Array.from(monthsSet).sort((a, b) => {
@@ -483,6 +482,7 @@ export default function ActivityLogsPage() {
     showToastOnly("Activity logs refreshed", "success");
   };
 
+  // Handle date range application with validation
   const applyDateRange = () => {
     if (tempStartDate && tempEndDate) {
       const start = new Date(tempStartDate);
@@ -504,10 +504,25 @@ export default function ActivityLogsPage() {
     }
   };
 
+  // Handle start date change - also adjust tempEndDate min and clear if invalid
+  const handleTempStartDateChange = (value: string) => {
+    setTempStartDate(value);
+    // If end date is set and is less than the new start date, clear end date
+    if (tempEndDate && value && new Date(value) > new Date(tempEndDate)) {
+      setTempEndDate("");
+    }
+  };
+
+  // Handle end date change
+  const handleTempEndDateChange = (value: string) => {
+    setTempEndDate(value);
+  };
+
   const clearDateRange = () => {
     setDateRange({ startDate: null, endDate: null });
     setTempStartDate("");
     setTempEndDate("");
+    setShowDatePicker(false);
     if (dateRange.startDate || dateRange.endDate) {
       showToastOnly("Date range filter cleared", "info");
     }
@@ -698,42 +713,58 @@ export default function ActivityLogsPage() {
               />
             </div>
 
+            {/* Date Range Picker Modal - UPDATED WITH VALIDATION */}
             {showDatePicker && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-bold text-gray-800">Select Date Range</h3>
-                    <button onClick={() => setShowDatePicker(false)} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-                      <X size={20} className="text-gray-500" />
-                    </button>
-                  </div>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        value={tempStartDate}
-                        onChange={(e) => setTempStartDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                      <input
-                        type="date"
-                        value={tempEndDate}
-                        onChange={(e) => setTempEndDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-3 mt-6">
-                    <button onClick={() => { setShowDatePicker(false); clearDateRange(); }} className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50">Clear</button>
-                    <button onClick={applyDateRange} className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E]">Apply Range</button>
-                  </div>
-                </div>
-              </div>
-            )}
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-bold text-gray-800">Select Date Range</h3>
+        <button onClick={() => setShowDatePicker(false)} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+          <X size={20} className="text-gray-500" />
+        </button>
+      </div>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+          <input
+            type="date"
+            value={tempStartDate}
+            onChange={(e) => handleTempStartDateChange(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+          <input
+            type="date"
+            value={tempEndDate}
+            onChange={(e) => handleTempEndDateChange(e.target.value)}
+            min={tempStartDate || undefined}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+          />
+          {tempStartDate && tempEndDate && new Date(tempEndDate) < new Date(tempStartDate) && (
+            <p className="text-red-500 text-xs mt-1">End date cannot be before start date</p>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-3 mt-6">
+        <button 
+          onClick={() => { setShowDatePicker(false); clearDateRange(); }} 
+          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+        >
+          Clear
+        </button>
+        <button 
+          onClick={applyDateRange} 
+          disabled={!tempStartDate || !tempEndDate || (!!tempStartDate && !!tempEndDate && new Date(tempEndDate) < new Date(tempStartDate))}
+          className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Apply Range
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
             {(activityFilter !== "all" || activityMonthFilter !== "all" || dateRange.startDate || activitySearch) && (
               <div className="flex flex-wrap items-center gap-2 pt-2">

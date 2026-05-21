@@ -38,6 +38,7 @@ interface InventoryData {
   damageExchanged?: number;
   restockCount?: number;
   beginningInventory?: number;
+  publicViewCount?: number;
 }
 
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
@@ -164,7 +165,8 @@ export default function InventoryPage() {
                 batches: freshBatches, 
                 stock: totalStock,
                 damageExchanged: freshProductData.damageExchanged || p.damageExchanged,
-                restockCount: freshProductData.restockCount || p.restockCount
+                restockCount: freshProductData.restockCount || p.restockCount,
+                publicViewCount: freshProductData.publicViewCount || p.publicViewCount
               }
             : p
         ));
@@ -272,7 +274,8 @@ export default function InventoryPage() {
                         batches: freshBatches, 
                         stock: totalStock,
                         damageExchanged: freshProductData.damageExchanged || p.damageExchanged,
-                        restockCount: freshProductData.restockCount || p.restockCount
+                        restockCount: freshProductData.restockCount || p.restockCount,
+                        publicViewCount: freshProductData.publicViewCount || p.publicViewCount
                       }
                     : p
                 ));
