@@ -193,7 +193,7 @@ export default function ReportsPage() {
   
   // Pagination State
   const [reportCurrentPage, setReportCurrentPage] = useState<number>(1);
-  const [reportsPerPage] = useState<number>(15);
+  const [reportsPerPage] = useState<number>(10);
   
   const { showNotification } = useNotification();
   const { 
