@@ -281,6 +281,39 @@ export default function ReportsPage() {
     return "All Time";
   };
 
+  // Get minimum date for end date picker (cannot be before start date)
+  const getMinEndDate = (): string => {
+    if (fromDate) {
+      return fromDate;
+    }
+    // Default to earliest transaction date or 2020
+    const earliestDate = new Date(Math.min(...transactions.map(t => new Date(t.date).getTime()), new Date(2020, 0, 1).getTime()));
+    return earliestDate.toISOString().split('T')[0];
+  };
+
+  // Handle from date change - also reset toDate if it becomes invalid
+  const handleFromDateChange = (value: string) => {
+    setFromDate(value);
+    // If toDate is set and is less than the new fromDate, clear toDate
+    if (toDate && value && new Date(value) > new Date(toDate)) {
+      setToDate("");
+    }
+    setReportCurrentPage(1);
+  };
+  
+  // Handle to date change
+  const handleToDateChange = (value: string) => {
+    setToDate(value);
+    setReportCurrentPage(1);
+  };
+  
+  // Clear date range
+  const clearDateRange = () => {
+    setFromDate("");
+    setToDate("");
+    setReportCurrentPage(1);
+  };
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(trx => {
       const searchLower = searchQuery.toLowerCase();
@@ -300,16 +333,23 @@ export default function ReportsPage() {
       } else if (statusFilter === "completed") {
         matchesStatus = trx.status === "completed";
       } else if (statusFilter === "replaced") {
-        // Only show "replaced" status, not "processing_replacement"
         matchesStatus = trx.status === "replaced";
       }
       
       // Date filtering
       let matchesDate = true;
-      if (fromDate || toDate) {
-        const fromDateObj = fromDate ? new Date(fromDate) : null;
-        const toDateObj = toDate ? new Date(toDate) : null;
-        matchesDate = isDateInRange(transactionDate, fromDateObj, toDateObj);
+      if (fromDate && toDate) {
+        const fromDateObj = new Date(fromDate);
+        const toDateObj = new Date(toDate);
+        if (fromDateObj <= toDateObj) {
+          matchesDate = isDateInRange(transactionDate, fromDateObj, toDateObj);
+        }
+      } else if (fromDate) {
+        const fromDateObj = new Date(fromDate);
+        matchesDate = isDateInRange(transactionDate, fromDateObj, null);
+      } else if (toDate) {
+        const toDateObj = new Date(toDate);
+        matchesDate = isDateInRange(transactionDate, null, toDateObj);
       } else {
         const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
         const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
@@ -321,7 +361,7 @@ export default function ReportsPage() {
     });
   }, [transactions, searchQuery, selectedYear, selectedMonth, selectedDay, statusFilter, fromDate, toDate]);
 
-  // Summary statistics - only count "replaced" status, not "processing_replacement"
+  // Summary statistics
   const summaryStats = useMemo(() => {
     const completed = filteredTransactions.filter(t => t.status === 'completed');
     const replaced = filteredTransactions.filter(t => t.status === 'replaced');
@@ -363,10 +403,19 @@ export default function ReportsPage() {
         const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
         const transactionDay = transactionDate.getDate();
         
-        if (fromDate || toDate) {
-          const fromDateObj = fromDate ? new Date(fromDate) : null;
-          const toDateObj = toDate ? new Date(toDate) : null;
-          return isDateInRange(transactionDate, fromDateObj, toDateObj);
+        if (fromDate && toDate) {
+          const fromDateObj = new Date(fromDate);
+          const toDateObj = new Date(toDate);
+          if (fromDateObj <= toDateObj) {
+            return isDateInRange(transactionDate, fromDateObj, toDateObj);
+          }
+          return true;
+        } else if (fromDate) {
+          const fromDateObj = new Date(fromDate);
+          return isDateInRange(transactionDate, fromDateObj, null);
+        } else if (toDate) {
+          const toDateObj = new Date(toDate);
+          return isDateInRange(transactionDate, null, toDateObj);
         } else {
           const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
           const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
@@ -379,7 +428,7 @@ export default function ReportsPage() {
     return filtered;
   };
 
-      const exportLedgerReport = () => {
+  const exportLedgerReport = () => {
     if (filteredTransactions.length === 0) {
       showNotification("No transactions found for this period to export.", "error");
       return;
@@ -625,7 +674,7 @@ export default function ReportsPage() {
     doc.save(`Sales_Report_${fileNameStamp}.pdf`);
   };
 
-    const exportInventoryOptimizationReport = () => {
+  const exportInventoryOptimizationReport = () => {
     if (products.length === 0) {
       showNotification("No products found to generate optimization report.", "error");
       return;
@@ -818,7 +867,7 @@ export default function ReportsPage() {
     doc.save(`Inventory_Optimization_${fileNameStamp}.pdf`);
   };
 
-    const exportAgingReport = () => {
+  const exportAgingReport = () => {
     if (products.length === 0) {
       showNotification("No products found to generate aging report.", "error");
       return;
@@ -1032,12 +1081,14 @@ export default function ReportsPage() {
     setSelectedYear(new Date().getFullYear());
     setSelectedDay("all");
     setStatusFilter("all");
-    setFromDate("");
-    setToDate("");
+    clearDateRange();
     setReportCurrentPage(1);
   };
 
   const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear() || selectedDay !== 'all' || fromDate || toDate;
+
+  // Calculate min date for end date picker based on fromDate
+  const endDateMin = fromDate ? fromDate : undefined;
 
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20 space-y-4">
@@ -1117,8 +1168,7 @@ export default function ReportsPage() {
                 setSelectedDay("all");
                 setReportCurrentPage(1);
                 if (yearValue !== 0) {
-                  setFromDate("");
-                  setToDate("");
+                  clearDateRange();
                 }
               }}
               className="px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] bg-white text-gray-700"
@@ -1136,8 +1186,7 @@ export default function ReportsPage() {
                 setSelectedDay("all");
                 setReportCurrentPage(1);
                 if (e.target.value !== "all") {
-                  setFromDate("");
-                  setToDate("");
+                  clearDateRange();
                 }
               }}
               disabled={selectedYear === 0}
@@ -1161,8 +1210,7 @@ export default function ReportsPage() {
                 setSelectedDay(e.target.value);
                 setReportCurrentPage(1);
                 if (e.target.value !== "all") {
-                  setFromDate("");
-                  setToDate("");
+                  clearDateRange();
                 }
               }}
               disabled={selectedYear === 0 || selectedMonth === "all"}
@@ -1179,16 +1227,8 @@ export default function ReportsPage() {
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  setReportCurrentPage(1);
-                  if (e.target.value) {
-                    setSelectedYear(0);
-                    setSelectedMonth("all");
-                    setSelectedDay("all");
-                  }
-                }}
-                className="pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                onChange={(e) => handleFromDateChange(e.target.value)}
+                className="pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 bg-white"
                 placeholder="From"
               />
             </div>
@@ -1198,16 +1238,9 @@ export default function ReportsPage() {
               <input
                 type="date"
                 value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  setReportCurrentPage(1);
-                  if (e.target.value) {
-                    setSelectedYear(0);
-                    setSelectedMonth("all");
-                    setSelectedDay("all");
-                  }
-                }}
-                className="pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                onChange={(e) => handleToDateChange(e.target.value)}
+                min={fromDate || undefined}
+                className="pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700 bg-white"
                 placeholder="To"
               />
             </div>

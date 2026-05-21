@@ -829,7 +829,7 @@ export default function AdminDashboard() {
       recs.push({
         id: 'rising-stars',
         type: 'restock',
-        title: 'Rising Stars - Increase Stock',
+        title: 'Rising Products - Increase Stock',
         description: `${risingStars.length} product(s) showing strong upward momentum. Increase inventory to meet projected demand.`,
         impact: 'high',
         reasoning: `Products like ${risingStars.slice(0, 2).map(p => p.name).join(', ')} are showing ${Math.round(risingStars[0]?.growthRate || 0)}% growth. Prophet ML predicts continued upward trend.`,
