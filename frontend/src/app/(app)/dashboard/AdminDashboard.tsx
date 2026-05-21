@@ -1234,7 +1234,7 @@ export default function AdminDashboard() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            Overview
+            Dashboard
           </button>
           <button
             onClick={() => setActiveDashboardTab('predictive')}
@@ -1600,7 +1600,7 @@ export default function AdminDashboard() {
                         Smart Reorder Points
                       </h2>
                       <p className="text-xs font-medium text-blue-600">
-                        AI-adjusted reorder recommendations
+                        AI-adjusted reorder point recommendations
                       </p>
                     </div>
                   </div>
@@ -1636,16 +1636,11 @@ export default function AdminDashboard() {
                             <h3 className="font-semibold text-gray-800 text-sm truncate">
                               {item.name}
                             </h3>
-                            {item.isSmartAdjusted && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
-                                <Zap size={10} /> Smart
-                              </span>
-                            )}
                           </div>
                           <p className="text-xs text-gray-500">{item.category}</p>
                         </div>
-                        <span className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 bg-blue-100 text-blue-700">
-                          REORDER
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-200 rounded text-[10px] font-bold text-blue-800 whitespace-nowrap">
+                          <Zap size={10} /> Smart
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 mb-2">
@@ -1654,7 +1649,7 @@ export default function AdminDashboard() {
                           <p className="font-bold text-gray-900">{item.staticReorderPoint}</p>
                         </div>
                         <div>
-                          <p className="text-gray-500 text-xs">Smart Reorder</p>
+                          <p className="text-gray-500 text-xs">Smart Reorder Point</p>
                           <p className="font-bold text-blue-600">{item.smartReorderPoint}</p>
                         </div>
                         <div>
@@ -2233,7 +2228,7 @@ function SimplifiedForecastExplanationModal({
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
           <button 
             onClick={onClose}
-            className="w-full px-4 py-2.5 text-sm font-medium text-gray-600 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors"
+            className="w-full px-4 py-2.5 text-sm font-medium bg-[#0B3C8A] text-white rounded-xl hover:bg-[#082F6E] transition-colors"
           >
             Close
           </button>
@@ -2534,7 +2529,7 @@ function SmartReorderExplanationModal({
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-xl font-bold text-gray-800">{item.name}</h2>
-              <p className="text-sm text-gray-500 mt-1">{item.category} • Smart Reorder Analysis</p>
+              <p className="text-sm text-gray-500 mt-1">{item.category} • Smart Reorder Point Analysis</p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
               <X size={20} className="text-gray-500" />
@@ -2656,8 +2651,8 @@ function SmartReorderExplanationModal({
                 <p className="font-bold text-emerald-900 mb-1">What to Do</p>
                 <p className="text-sm text-emerald-800">
                   {item.currentStock <= item.smartReorderPoint 
-                    ? `⚠️ Order now! You have ${item.currentStock} units, but should have at least ${item.smartReorderPoint} units.`
-                    : `✓ Stock is good. No order needed right now.`
+                    ? `Update your reorder point to ${item.smartReorderPoint} units and place an order now! You currently have ${item.currentStock} units.`
+                    : `✓ Stock is good. No reorder point update needed right now.`
                   }
                 </p>
               </div>
