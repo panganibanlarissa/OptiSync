@@ -724,106 +724,123 @@ def generate_overall_forecast_data(transactions: List[Transaction], reference_da
 
 def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, locked_capital: float, 
                                       historical_velocity: float, category: str, never_sold: bool = False) -> Dict[str, Any]:
-    """Generate AI/ML-based suggestion for deadstock products."""
+    """Generate AI/ML-based suggestion for deadstock products.
     
+    Discount calculation based on days since last sale:
+    - 30 days: 1%
+    - 31-59 days: 1% to 5% (progressive)
+    - 60 days: 5%
+    - 61-89 days: 5% to 12% (progressive)
+    - 90 days: 12%
+    - 91-119 days: 12% to 18% (progressive)
+    - 120 days: 18%
+    - 121-149 days: 18% to 23% (progressive)
+    - 150 days: 23%
+    - 151-179 days: 23% to 27% (progressive)
+    - 180 days: 27%
+    - 181-209 days: 27% to 31% (progressive)
+    - 210 days: 31%
+    - 211-239 days: 31% to 34% (progressive)
+    - 240 days: 34%
+    - 241-269 days: 34% to 37% (progressive)
+    - 270 days: 37%
+    - 271-299 days: 37% to 39% (progressive)
+    - 300 days: 39%
+    - 301-329 days: 39% to 41% (progressive)
+    - 330 days: 41%
+    - 331-359 days: 41% to 42% (progressive)
+    - 360+ days: 42% (maximum cap)
+    """
+    
+    # Calculate discount based on days since sale with extended ranges
+    if days_since_sale < 30:
+        final_discount_percent = 0
+    elif days_since_sale <= 60:
+        # 30-60 days: 1% to 5%
+        final_discount_percent = 1 + (days_since_sale - 30) * 0.133
+    elif days_since_sale <= 90:
+        # 61-90 days: 5% to 12%
+        final_discount_percent = 5 + (days_since_sale - 60) * 0.233
+    elif days_since_sale <= 120:
+        # 91-120 days: 12% to 18%
+        final_discount_percent = 12 + (days_since_sale - 90) * 0.2
+    elif days_since_sale <= 150:
+        # 121-150 days: 18% to 23%
+        final_discount_percent = 18 + (days_since_sale - 120) * 0.167
+    elif days_since_sale <= 180:
+        # 151-180 days: 23% to 27%
+        final_discount_percent = 23 + (days_since_sale - 150) * 0.133
+    elif days_since_sale <= 210:
+        # 181-210 days: 27% to 31%
+        final_discount_percent = 27 + (days_since_sale - 180) * 0.133
+    elif days_since_sale <= 240:
+        # 211-240 days: 31% to 34%
+        final_discount_percent = 31 + (days_since_sale - 210) * 0.1
+    elif days_since_sale <= 270:
+        # 241-270 days: 34% to 37%
+        final_discount_percent = 34 + (days_since_sale - 240) * 0.1
+    elif days_since_sale <= 300:
+        # 271-300 days: 37% to 39%
+        final_discount_percent = 37 + (days_since_sale - 270) * 0.067
+    elif days_since_sale <= 330:
+        # 301-330 days: 39% to 41%
+        final_discount_percent = 39 + (days_since_sale - 300) * 0.067
+    elif days_since_sale <= 360:
+        # 331-360 days: 41% to 42%
+        final_discount_percent = 41 + (days_since_sale - 330) * 0.033
+    else:
+        # 360+ days: 42% max (nearly clearance price)
+        final_discount_percent = 42
+    
+    # Safety check: ensure discount doesn't exceed safe margin
     profit_per_unit = product.markupPrice - product.baseCost
-    profit_margin = (profit_per_unit / product.markupPrice) * 100
+    profit_margin = (profit_per_unit / product.markupPrice) * 100 if product.markupPrice > 0 else 0
     SAFETY_BUFFER = 2
     max_safe_discount_percent = max(0, profit_margin - SAFETY_BUFFER)
     
-    base_discount = 0
-    if days_since_sale >= 90:
-        base_discount = 25
-    elif days_since_sale >= 80:
-        base_discount = 22
-    elif days_since_sale >= 70:
-        base_discount = 18
-    elif days_since_sale >= 60:
-        base_discount = 15
-    elif days_since_sale >= 50:
-        base_discount = 12
-    elif days_since_sale >= 40:
-        base_discount = 8
-    elif days_since_sale >= 30:
-        base_discount = 5
-    else:
-        base_discount = 0
-    
-    if locked_capital > 150000:
-        capital_adjustment = 3
-    elif locked_capital > 100000:
-        capital_adjustment = 2
-    elif locked_capital > 50000:
-        capital_adjustment = 1
-    else:
-        capital_adjustment = 0
-    
-    category_urgency = {
-        'Frames': 1.0, 'Lenses': 0.9, 'Contact Lenses': 0.7, 'Solutions': 0.6, 'Accessories': 1.0
-    }
-    urgency_multiplier = category_urgency.get(category, 1.0)
-    
-    velocity_reduction = 0
-    if historical_velocity > 15:
-        velocity_reduction = 3
-    elif historical_velocity > 8:
-        velocity_reduction = 2
-    elif historical_velocity > 0 and historical_velocity < 2:
-        velocity_reduction = 0
-    
-    never_sold_boost = 2 if never_sold else 0
-    
-    total_discount = (base_discount + capital_adjustment + never_sold_boost) * urgency_multiplier
-    total_discount = max(0, total_discount - velocity_reduction)
-    final_discount_percent = min(total_discount, max_safe_discount_percent)
-    
-    if days_since_sale >= 30 and final_discount_percent < 5 and max_safe_discount_percent >= 5:
-        final_discount_percent = 5
-    
+    # Cap discount at safe level
+    final_discount_percent = min(final_discount_percent, max_safe_discount_percent)
+    final_discount_percent = round(final_discount_percent * 10) / 10
     final_discount_percent = int(round(final_discount_percent))
-    discounted_price = product.markupPrice * (1 - final_discount_percent / 100)
-    profit_after_discount = discounted_price - product.baseCost
     
-    if profit_after_discount < 0:
-        safe_discount = ((product.markupPrice - product.baseCost) / product.markupPrice) * 100
-        safe_discount = max(0, int(safe_discount))
-        final_discount_percent = safe_discount
-        discounted_price = product.markupPrice * (1 - final_discount_percent / 100)
-        profit_after_discount = discounted_price - product.baseCost
-    
+    # Generate contextual suggestion message
     if never_sold:
-        if days_since_sale >= 75:
+        if days_since_sale >= 180:
             suggestion_type = 'critical'
-            suggestion = f"{final_discount_percent}% discount recommended to attract first-time buyers. Capital locked: ₱{locked_capital:,.0f}"
-        elif days_since_sale >= 50:
+            suggestion = f"{final_discount_percent}% discount recommended - critical clearance. Item unsold for {days_since_sale} days. Capital locked: ₱{locked_capital:,.0f}"
+        elif days_since_sale >= 120:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended to attract first-time buyers. Item unsold for {days_since_sale} days."
+        elif days_since_sale >= 60:
             suggestion_type = 'critical'
             suggestion = f"{final_discount_percent}% discount recommended. Item unsold for {days_since_sale} days."
-        elif days_since_sale >= 40:
+        elif days_since_sale >= 30:
             suggestion_type = 'warning'
             suggestion = f"{final_discount_percent}% discount recommended to generate first sale."
-        elif days_since_sale >= 30:
-            suggestion_type = 'info'
-            suggestion = f"{final_discount_percent}% discount recommended for this slow-moving item."
         else:
             suggestion_type = 'info'
             suggestion = "Item has no sales history. Consider promotional pricing."
     else:
-        if days_since_sale >= 75:
+        if days_since_sale >= 270:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% URGENT clearance discount needed. Item deadstocked for {days_since_sale} days. Capital at risk: ₱{locked_capital:,.0f}"
+        elif days_since_sale >= 180:
+            suggestion_type = 'critical'
+            suggestion = f"{final_discount_percent}% discount recommended for critical clearance. {days_since_sale} days without sales. Capital locked: ₱{locked_capital:,.0f}"
+        elif days_since_sale >= 120:
             suggestion_type = 'critical'
             suggestion = f"{final_discount_percent}% discount recommended to recover ₱{locked_capital:,.0f} locked capital."
-        elif days_since_sale >= 50:
+        elif days_since_sale >= 60:
             suggestion_type = 'critical'
             suggestion = f"{final_discount_percent}% discount recommended. Capital at risk: ₱{locked_capital:,.0f}"
-        elif days_since_sale >= 40:
-            suggestion_type = 'warning'
-            suggestion = f"{final_discount_percent}% discount recommended to move stock."
         elif days_since_sale >= 30:
             suggestion_type = 'info'
-            suggestion = f"{final_discount_percent}% discount recommended."
+            suggestion = f"{final_discount_percent}% discount recommended to move stagnant stock."
         else:
             suggestion_type = 'info'
             suggestion = "No discount recommended at this time."
     
+    # Add category-specific suggestions
     if category in ['Contact Lenses', 'Solutions']:
         suggestion += f" Priority clearance before expiry."
     elif locked_capital > 100000:
@@ -840,8 +857,6 @@ def generate_deadstock_ai_suggestion(product: Product, days_since_sale: int, loc
         'ml_factors': {
             'days_factor': round(min(1.0, days_since_sale / 90), 2),
             'capital_factor': round(min(1.0, locked_capital / 200000), 2),
-            'category_urgency': urgency_multiplier,
-            'velocity_factor': round(min(1.0, historical_velocity / 30), 2),
             'profit_margin': round(profit_margin, 1),
             'max_safe_discount': round(max_safe_discount_percent, 1),
             'final_discount': final_discount_percent,
