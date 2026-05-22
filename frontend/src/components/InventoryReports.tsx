@@ -1044,7 +1044,7 @@ export default function InventoryReports({
         {/* Results Summary and Table */}
         <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
           {/* Inventory Value Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 sm:gap-3 mb-4">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
                 Total Products
@@ -1102,14 +1102,6 @@ export default function InventoryReports({
               </p>
               <p className="text-lg sm:text-2xl font-bold text-gray-600 mt-1">
                 {deadstockCount}
-              </p>
-            </div>
-            <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
-              <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
-                Total Views
-              </p>
-              <p className="text-lg sm:text-2xl font-bold text-purple-600 mt-1">
-                {filteredProducts.reduce((sum, p) => sum + ((p as any).publicViewCount || 0), 0).toLocaleString()}
               </p>
             </div>
           </div>

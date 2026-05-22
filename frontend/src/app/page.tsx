@@ -143,11 +143,24 @@ function ProductModal({ product, onClose }: { product: any; onClose: () => void 
               )}
             </div>
 
-            {/* Product Details - SKU REMOVED */}
+            {/* Product Details */}
             <div className="space-y-4">
+              {/* Availability Status */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Category</p>
-                <p className="text-gray-800 font-medium">{product.category}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Availability</p>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${(product.stock || 0) > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <p className="text-gray-800 font-medium">{(product.stock || 0) > 0 ? 'In Stock' : 'Out of Stock'}</p>
+                </div>
+              </div>
+
+              {/* Popularity */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Popularity</p>
+                <div className="flex items-center gap-2">
+                  <Star size={16} className="text-amber-500 fill-amber-500" />
+                  <p className="text-gray-800 font-medium">{product.publicViewCount || 0} customer views</p>
+                </div>
               </div>
 
               {product.specifications && (
@@ -201,6 +214,28 @@ export default function ClinicLandingPage() {
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showProductModal, setShowProductModal] = useState(false);
+  const [bestSellers, setBestSellers] = useState<any[]>([]);
+
+  // Calculate best sellers based on product data
+  const calculateBestSellers = (productsData: any[]) => {
+    if (!productsData || productsData.length === 0) return [];
+    
+    // Sort by public view count (highest first), then by stock (lower stock = more sold)
+    const sorted = [...productsData].sort((a, b) => {
+      const viewsA = a.publicViewCount || 0;
+      const viewsB = b.publicViewCount || 0;
+      
+      if (viewsA !== viewsB) {
+        return viewsB - viewsA; // Higher view count = more popular
+      }
+      
+      // If same views, products with lower stock may indicate higher sales
+      return (a.stock || 0) - (b.stock || 0);
+    });
+    
+    // Return top 6 best sellers
+    return sorted.slice(0, 6);
+  };
 
   // Handle Scroll Effect
   useEffect(() => {
@@ -264,9 +299,12 @@ export default function ClinicLandingPage() {
           setAllProducts(fetchedProducts);
           // Show first 12 products on landing page
           setProducts(fetchedProducts.slice(0, 12));
+          // Calculate and set best sellers
+          setBestSellers(calculateBestSellers(fetchedProducts));
         } else {
           setAllProducts(FALLBACK_PRODUCTS);
           setProducts(FALLBACK_PRODUCTS);
+          setBestSellers(calculateBestSellers(FALLBACK_PRODUCTS));
         }
       } catch (error) {
         console.error("Error fetching products from Firestore:", error);
@@ -318,10 +356,11 @@ export default function ClinicLandingPage() {
           </div>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
-            <a href="#products" className="hover:text-[#0B3C8A] transition-colors">Our Products</a>
+            <a href="#best-sellers" className="hover:text-[#0B3C8A] transition-colors">Best Sellers</a>
             <a href="#services" className="hover:text-[#0B3C8A] transition-colors">Services</a>
             <a href="#location" className="hover:text-[#0B3C8A] transition-colors">Map</a>
             <a href="#contact" className="hover:text-[#0B3C8A] transition-colors">Facebook</a>
+            <a href="#products" className="hover:text-[#0B3C8A] transition-colors">Our Products</a>
           </nav>
 
           <div className="hidden md:flex items-center gap-4">
@@ -340,10 +379,11 @@ export default function ClinicLandingPage() {
 
         {mobileMenuOpen && (
           <div className="md:hidden absolute top-full left-0 w-full bg-white border-b border-slate-100 p-5 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-top-5">
-            <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Our Products</a>
+            <a href="#best-sellers" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Best Sellers</a>
             <a href="#services" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Services</a>
             <a href="#location" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Map</a>
             <a href="#contact" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Facebook</a>
+            <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Our Products</a>
             <div className="h-px bg-slate-100 my-1"></div>
             <a href="/login" className={`w-full text-center py-3.5 ${THEME_BG} text-white rounded-xl font-bold text-base`} onClick={() => setMobileMenuOpen(false)}>
               Login
@@ -392,18 +432,22 @@ export default function ClinicLandingPage() {
         </div>
       </section>
 
-      {/* --- 3. OUR PRODUCTS SECTION --- */}
-      <section id="products" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
+      {/* --- 3. BEST SELLERS SECTION --- */}
+      <section id="best-sellers" className="py-16 sm:py-24 px-4 sm:px-6 bg-gradient-to-b from-slate-50 to-white">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
-            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Our Products</h2>
+            <div className="flex items-center justify-center gap-2 mb-3 sm:mb-4">
+              <Star className="w-6 h-6 text-amber-500 fill-amber-500" />
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900">Best Sellers</h2>
+              <Star className="w-6 h-6 text-amber-500 fill-amber-500" />
+            </div>
             <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
-              Explore our wide selection of premium frames, lenses, and accessories for every style and prescription need.
+              Customer favorites and most popular products from our collection
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-            {products.map((product, idx) => {
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6">
+            {bestSellers.map((product, idx) => {
               const hasImageError = imageErrors.has(product.id);
               const productImage = product.image || product.productImage;
               const isValidImage = !hasImageError && productImage && typeof productImage === 'string' && productImage.startsWith('http');
@@ -415,8 +459,13 @@ export default function ClinicLandingPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
                   onClick={() => handleProductClick(product)}
-                  className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-2 flex flex-col cursor-pointer"
+                  className="group bg-white rounded-2xl border-2 border-amber-200 overflow-hidden hover:shadow-xl hover:border-amber-400 transition-all duration-300 hover:-translate-y-2 flex flex-col cursor-pointer relative"
                 >
+                  {/* Best Seller Badge */}
+                  <div className="absolute top-2 right-2 z-10 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                    <Star size={14} className="fill-white" /> Best
+                  </div>
+
                   <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
                     {isValidImage ? (
                       <div className="relative w-full h-full">
@@ -424,10 +473,10 @@ export default function ClinicLandingPage() {
                           src={productImage}
                           alt={product.name}
                           fill
-                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16.67vw"
                           className="object-cover transition-transform duration-500 group-hover:scale-110"
                           onError={() => handleImageError(product.id)}
-                          priority={idx < 4}
+                          priority={idx < 6}
                         />
                       </div>
                     ) : (
@@ -437,26 +486,26 @@ export default function ClinicLandingPage() {
                     )}
                     {/* View Details Overlay */}
                     <div className="absolute inset-0 bg-[#0B3C8A]/80 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                      <span className="text-white font-semibold text-sm px-4 py-2 border-2 border-white rounded-lg">
+                      <span className="text-white font-semibold text-xs px-3 py-1.5 border-2 border-white rounded-lg">
                         View Details
                       </span>
                     </div>
                   </div>
-                  <div className="p-4 sm:p-5 flex flex-col flex-1">
-                    <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
+                  <div className="p-3 sm:p-4 flex flex-col flex-1">
+                    <h3 className="text-xs sm:text-sm font-bold text-slate-900 line-clamp-2 leading-snug">
                       {product.name}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1">{product.category}</p>
+                    <p className="text-[10px] text-slate-500 mt-1">{product.category}</p>
                   </div>
                 </motion.div>
               );
             })}
           </div>
-          
-          {products.length === 0 && !loading && (
+
+          {bestSellers.length === 0 && !loading && (
             <div className="text-center py-12">
               <Package className="w-16 h-16 mx-auto text-slate-300 mb-4" />
-              <p className="text-slate-500">No products found in our inventory.</p>
+              <p className="text-slate-500">No best sellers available at this time.</p>
             </div>
           )}
         </div>
@@ -654,7 +703,77 @@ export default function ClinicLandingPage() {
         </div>
       </section>
 
-      <footer className="bg-[#0B3C8A] text-white pt-16 pb-8 px-4 sm:px-6">
+      {/* --- 3. OUR PRODUCTS SECTION (MOVED) --- */}
+      <section id="products" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Our Products</h2>
+            <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
+              Explore our wide selection of premium frames, lenses, and accessories for every style and prescription need.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
+            {products.map((product, idx) => {
+              const hasImageError = imageErrors.has(product.id);
+              const productImage = product.image || product.productImage;
+              const isValidImage = !hasImageError && productImage && typeof productImage === 'string' && productImage.startsWith('http');
+              
+              return (
+                <motion.div
+                  key={product.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  onClick={() => handleProductClick(product)}
+                  className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:border-[#0B3C8A] transition-all duration-300 hover:-translate-y-2 flex flex-col cursor-pointer"
+                >
+                  <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
+                    {isValidImage ? (
+                      <div className="relative w-full h-full">
+                        <Image
+                          src={productImage}
+                          alt={product.name}
+                          fill
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                          className="object-cover transition-transform duration-500 group-hover:scale-110"
+                          onError={() => handleImageError(product.id)}
+                          priority={idx < 4}
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+                        <Package className="w-16 h-16 text-slate-300" />
+                      </div>
+                    )}
+                    {/* View Details Overlay */}
+                    <div className="absolute inset-0 bg-[#0B3C8A]/80 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                      <span className="text-white font-semibold text-sm px-4 py-2 border-2 border-white rounded-lg">
+                        View Details
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 sm:p-5 flex flex-col flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
+                      {product.name}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">{product.category}</p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+          
+          {products.length === 0 && !loading && (
+            <div className="text-center py-12">
+              <Package className="w-16 h-16 mx-auto text-slate-300 mb-4" />
+              <p className="text-slate-500">No products found in our inventory.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <footer className="bg-[#093274] text-white pt-16 pb-8 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-start gap-10 mb-12">
             <div className="max-w-xs">
