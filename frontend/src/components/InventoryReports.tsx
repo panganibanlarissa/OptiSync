@@ -622,6 +622,27 @@ export default function InventoryReports({
       const marginRaw = product.markupPrice - product.baseCost;
       const marginPercent = product.baseCost > 0 ? ((marginRaw / product.baseCost) * 100).toFixed(1) : "0";
       
+      // Build expiry column based on product type
+      let expiryDisplay = "N/A";
+      if (isProductPerishable(product) && (product as any).batches && (product as any).batches.length > 0) {
+        // For perishable products, show all batch expiry dates
+        const batchExpiries = (product as any).batches
+          .map((batch: any, index: number) => {
+            if (batch.expiryDate) {
+              const expDate = new Date(batch.expiryDate);
+              return `Batch ${index + 1} - ${(expDate.getMonth() + 1).toString().padStart(2, '0')}/${expDate.getDate().toString().padStart(2, '0')}/${expDate.getFullYear()}`;
+            }
+            return null;
+          })
+          .filter((e: string | null) => e !== null)
+          .join("\n");
+        expiryDisplay = batchExpiries || "N/A";
+      } else if (!isProductPerishable(product) && product.expiryDate) {
+        // For non-perishable products, show the product expiry date
+        const expDate = new Date(product.expiryDate);
+        expiryDisplay = `${(expDate.getMonth() + 1).toString().padStart(2, '0')}/${expDate.getDate().toString().padStart(2, '0')}/${expDate.getFullYear()}`;
+      }
+      
       return [
         product.sku,
         product.name,
@@ -633,8 +654,7 @@ export default function InventoryReports({
         product.stock.toString(),
         `₱${product.baseCost.toLocaleString()}`,
         `₱${product.markupPrice.toLocaleString()}`,
-        !isProductPerishable(product) && product.expiryDate ? new Date(product.expiryDate).toLocaleDateString("en-US") : "N/A",
-        ((product as any).publicViewCount || 0).toString(),
+        expiryDisplay,
         getProductStatus(product).join(" | "),
       ];
     });
@@ -703,7 +723,6 @@ export default function InventoryReports({
           "Cost",
           "Price",
           "Expiry",
-          "Views",
           "Status",
         ],
       ],
@@ -735,9 +754,8 @@ export default function InventoryReports({
         7: { halign: "center", cellWidth: 15 },
         8: { halign: "right", cellWidth: 20 },
         9: { halign: "right", cellWidth: 20 },
-        10: { halign: "center", cellWidth: 22 },
-        11: { halign: "center", cellWidth: 15 },
-        12: { cellWidth: 25 },
+        10: { halign: "center", cellWidth: 32, fontSize: 7 },
+        11: { cellWidth: 25 },
       },
       bodyStyles: {
         fillColor: [255, 255, 255],
@@ -798,9 +816,6 @@ export default function InventoryReports({
     
     const deadstockCount = filteredProducts.filter(p => isProductDeadstock(p, new Date()) && p.stock > 0).length;
     doc.text(`Deadstock Items (30+ days unsold): ${deadstockCount}`, 14, finalY + 32);
-    
-    const totalViews = filteredProducts.reduce((sum, p) => sum + ((p as any).publicViewCount || 0), 0);
-    doc.text(`Total Public Views: ${totalViews.toLocaleString()}`, 14, finalY + 38);
 
     doc.save(
       `Inventory_Report_${new Date().toISOString().split("T")[0]}.pdf`
@@ -1131,9 +1146,6 @@ export default function InventoryReports({
                         Stock
                       </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
-                        Views
-                      </th>
-                      <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
                         Status
                       </th>
                       <th className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-gray-700">
@@ -1173,9 +1185,6 @@ export default function InventoryReports({
                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-[#0B3C8A]">
                             {product.stock}
-                          </td>
-                          <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-semibold text-purple-600">
-                            {(product as any).publicViewCount || 0}
                           </td>
                           <td className="px-2 sm:px-4 py-2 sm:py-3 text-center font-bold">
                             <span className={`inline-block px-2 py-0.5 rounded ${statusColor}`}>
