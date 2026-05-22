@@ -128,9 +128,9 @@ const isDateInRange = (date: Date, fromDate: Date | null, toDate: Date | null): 
 
 // Calculate days since last sale
 const getDaysSinceLastSale = (product: any, transactions: TransactionType[], today: Date): { days: number; lastSaleDate: Date | null; hasSales: boolean; totalSalesCount: number } => {
-  const completedTransactions = transactions.filter(t => t.status === 'completed');
+  const allTransactions = transactions;
   
-  const salesForProduct = completedTransactions
+  const salesForProduct = allTransactions
     .filter(t => t.items.some(item => item.id === product.id))
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
@@ -205,6 +205,7 @@ export default function ReportsPage() {
 
   const { recommendations, usingML } = useMLForecasting();
 
+  // CRITICAL: ALL transactions are counted for revenue - replacements are NOT refunds
   const transactions = useMemo(() => {
     return firebaseTransactions as TransactionType[];
   }, [firebaseTransactions]);
@@ -281,39 +282,26 @@ export default function ReportsPage() {
     return "All Time";
   };
 
-  // Get minimum date for end date picker (cannot be before start date)
-  const getMinEndDate = (): string => {
-    if (fromDate) {
-      return fromDate;
-    }
-    // Default to earliest transaction date or 2020
-    const earliestDate = new Date(Math.min(...transactions.map(t => new Date(t.date).getTime()), new Date(2020, 0, 1).getTime()));
-    return earliestDate.toISOString().split('T')[0];
-  };
-
-  // Handle from date change - also reset toDate if it becomes invalid
   const handleFromDateChange = (value: string) => {
     setFromDate(value);
-    // If toDate is set and is less than the new fromDate, clear toDate
     if (toDate && value && new Date(value) > new Date(toDate)) {
       setToDate("");
     }
     setReportCurrentPage(1);
   };
   
-  // Handle to date change
   const handleToDateChange = (value: string) => {
     setToDate(value);
     setReportCurrentPage(1);
   };
   
-  // Clear date range
   const clearDateRange = () => {
     setFromDate("");
     setToDate("");
     setReportCurrentPage(1);
   };
 
+  // Filter transactions for display based on selected date range
   const filteredTransactions = useMemo(() => {
     return transactions.filter(trx => {
       const searchLower = searchQuery.toLowerCase();
@@ -336,13 +324,15 @@ export default function ReportsPage() {
         matchesStatus = trx.status === "replaced";
       }
       
-      // Date filtering
+      // Date filtering - ONLY use the selected date range
       let matchesDate = true;
       if (fromDate && toDate) {
         const fromDateObj = new Date(fromDate);
         const toDateObj = new Date(toDate);
         if (fromDateObj <= toDateObj) {
           matchesDate = isDateInRange(transactionDate, fromDateObj, toDateObj);
+        } else {
+          matchesDate = false;
         }
       } else if (fromDate) {
         const fromDateObj = new Date(fromDate);
@@ -361,11 +351,11 @@ export default function ReportsPage() {
     });
   }, [transactions, searchQuery, selectedYear, selectedMonth, selectedDay, statusFilter, fromDate, toDate]);
 
-  // Summary statistics
+  // Summary statistics - uses filtered transactions for accurate date range
   const summaryStats = useMemo(() => {
     const completed = filteredTransactions.filter(t => t.status === 'completed');
     const replaced = filteredTransactions.filter(t => t.status === 'replaced');
-    const totalRevenue = completed.reduce((sum, t) => sum + t.total, 0);
+    const totalRevenue = filteredTransactions.reduce((sum, t) => sum + t.total, 0);
     
     return {
       total: filteredTransactions.length,
@@ -393,41 +383,6 @@ export default function ReportsPage() {
     };
   }, [filteredTransactions, reportCurrentPage, reportsPerPage]);
 
-  const getFilteredTransactionsForRange = (): TransactionType[] => {
-    let filtered = transactions;
-    
-    if (selectedYear !== 0 || selectedMonth !== "all" || selectedDay !== "all" || fromDate || toDate) {
-      filtered = filtered.filter(trx => {
-        const transactionDate = new Date(trx.date);
-        const transactionYear = transactionDate.getFullYear();
-        const transactionMonth = `${transactionYear}-${String(transactionDate.getMonth() + 1).padStart(2, '0')}`;
-        const transactionDay = transactionDate.getDate();
-        
-        if (fromDate && toDate) {
-          const fromDateObj = new Date(fromDate);
-          const toDateObj = new Date(toDate);
-          if (fromDateObj <= toDateObj) {
-            return isDateInRange(transactionDate, fromDateObj, toDateObj);
-          }
-          return true;
-        } else if (fromDate) {
-          const fromDateObj = new Date(fromDate);
-          return isDateInRange(transactionDate, fromDateObj, null);
-        } else if (toDate) {
-          const toDateObj = new Date(toDate);
-          return isDateInRange(transactionDate, null, toDateObj);
-        } else {
-          const matchesYear = selectedYear === 0 || transactionYear === selectedYear;
-          const matchesMonth = selectedMonth === "all" || transactionMonth === selectedMonth;
-          const matchesDay = selectedDay === "all" || transactionDay === parseInt(selectedDay);
-          return matchesYear && matchesMonth && matchesDay;
-        }
-      });
-    }
-    
-    return filtered;
-  };
-
   const exportLedgerReport = () => {
     if (filteredTransactions.length === 0) {
       showNotification("No transactions found for this period to export.", "error");
@@ -443,10 +398,9 @@ export default function ReportsPage() {
 
     const periodText = getPeriodText();
 
-    const validTransactions = filteredTransactions.filter(t => t.status === 'completed');
+    // Use filteredTransactions for ALL calculations - this ensures date filtering works correctly
+    const totalSales = filteredTransactions.reduce((sum, trx) => sum + trx.total, 0);
     const replacedTransactions = filteredTransactions.filter(t => t.status === 'replaced');
-    const totalSales = validTransactions.reduce((sum, trx) => sum + trx.total, 0);
-    const replacedAmount = replacedTransactions.reduce((sum, trx) => sum + trx.total, 0);
     
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(16);
@@ -597,7 +551,7 @@ export default function ReportsPage() {
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text(`Completed: ${validTransactions.length}`, margin, summaryStartY + 18);
+    doc.text(`Completed: ${filteredTransactions.filter(t => t.status === 'completed').length}`, margin, summaryStartY + 18);
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
@@ -606,7 +560,7 @@ export default function ReportsPage() {
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text(`Replaced: ${replacedTransactions.length}`, margin, summaryStartY + 28);
+    doc.text(`Replaced: ${filteredTransactions.filter(t => t.status === 'replaced').length}`, margin, summaryStartY + 28);
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
@@ -626,18 +580,7 @@ export default function ReportsPage() {
     doc.setFont("NotoSans-Regular", "normal");
     doc.setFontSize(8);
     doc.setTextColor(100, 100, 100);
-    doc.text("Sum of all completed transactions in this period.", margin, summaryStartY + 47);
-    
-    if (replacedTransactions.length > 0) {
-      doc.setFont("NotoSans-Regular", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(80, 80, 80);
-      doc.text(`Replaced Amount: ${formatPdfCurrency(replacedAmount)}`, margin, summaryStartY + 54);
-      doc.setFont("NotoSans-Regular", "normal");
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text("Total value of replaced transactions; excluded from revenue.", margin, summaryStartY + 57);
-    }
+    doc.text("Sum of ALL transactions in this selected period.", margin, summaryStartY + 47);
 
     const totalPages = doc.getNumberOfPages();
     const lineY = pageHeight - 15;
@@ -680,7 +623,8 @@ export default function ReportsPage() {
       return;
     }
 
-    const rangeFilteredTransactions = getFilteredTransactionsForRange();
+    // Use filtered transactions for the date range
+    const rangeFilteredTransactions = filteredTransactions;
 
     const doc = new jsPDF('p', 'mm', 'a4');
     doc.setFont("NotoSans-Regular", "normal");
@@ -873,7 +817,8 @@ export default function ReportsPage() {
       return;
     }
 
-    const rangeFilteredTransactions = getFilteredTransactionsForRange();
+    // Use filtered transactions for the date range
+    const rangeFilteredTransactions = filteredTransactions;
 
     const doc = new jsPDF('p', 'mm', 'a4');
     doc.setFont("NotoSans-Regular", "normal");
@@ -886,9 +831,9 @@ export default function ReportsPage() {
     const allProductsData = products
       .filter(p => p.stock > 0 && !(p as any).archived)
       .map(p => {
-        const completedTransactions = rangeFilteredTransactions.filter(t => t.status === 'completed');
+        const allTransactions = rangeFilteredTransactions;
         
-        const salesForProduct = completedTransactions
+        const salesForProduct = allTransactions
           .filter(t => t.items.some(item => item.id === p.id))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         
@@ -1086,9 +1031,6 @@ export default function ReportsPage() {
   };
 
   const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear() || selectedDay !== 'all' || fromDate || toDate;
-
-  // Calculate min date for end date picker based on fromDate
-  const endDateMin = fromDate ? fromDate : undefined;
 
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20 space-y-4">

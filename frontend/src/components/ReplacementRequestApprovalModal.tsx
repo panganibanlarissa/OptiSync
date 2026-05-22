@@ -54,11 +54,11 @@ export default function ReplacementRequestApprovalModal({
   onClose,
   onSuccess,
 }: ReplacementRequestApprovalModalProps) {
-  const [rejectionReason, setRejectionReason] = useState("");
+  const [declineReason, setDeclineReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [actionType, setActionType] = useState<"approve" | "reject" | null>(null);
+  const [actionType, setActionType] = useState<"approve" | "decline" | null>(null);
   const { showNotification, showToastOnly } = useNotification();
-  const { approveReplacementRequest, rejectReplacementRequest, userName, userId } = useFirebase();
+  const { approveReplacementRequest, declineReplacementRequest, userName, userId } = useFirebase();
 
   const handleApprove = async () => {
     setIsSubmitting(true);
@@ -86,33 +86,33 @@ export default function ReplacementRequestApprovalModal({
     }
   };
 
-  const handleReject = async () => {
-    if (!rejectionReason.trim()) {
-      showToastOnly("Please provide a reason for rejection", "error");
+  const handleDecline = async () => {
+    if (!declineReason.trim()) {
+      showToastOnly("Please provide a reason for declining", "error");
       return;
     }
     
     setIsSubmitting(true);
     try {
-      await rejectReplacementRequest(
+      await declineReplacementRequest(
         request.id,
         userName || "Admin",
         userId || "system",
-        rejectionReason.trim()
+        declineReason.trim()
       );
       
       showNotification(
-        `Replacement request for transaction #${request.transactionReceiptNumber} has been rejected.`,
+        `Replacement request for transaction #${request.transactionReceiptNumber} has been declined.`,
         "warning",
-        "Request Rejected",
+        "Request Declined",
         "/sales?tab=history"
       );
       
       onSuccess();
       onClose();
     } catch (error: any) {
-      console.error("Error rejecting request:", error);
-      showToastOnly(error.message || "Failed to reject request", "error");
+      console.error("Error declining request:", error);
+      showToastOnly(error.message || "Failed to decline request", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -232,11 +232,11 @@ export default function ReplacementRequestApprovalModal({
         {!actionType ? (
           <div className="p-5 flex gap-3">
             <button
-              onClick={() => setActionType("reject")}
+              onClick={() => setActionType("decline")}
               className="flex-1 px-4 py-2.5 rounded-xl border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors flex items-center justify-center gap-2"
             >
               <XCircle size={16} />
-              Reject Request
+              Decline Request
             </button>
             <button
               onClick={() => setActionType("approve")}
@@ -248,16 +248,16 @@ export default function ReplacementRequestApprovalModal({
           </div>
         ) : (
           <div className="p-5">
-            {actionType === "reject" && (
+            {actionType === "decline" && (
               <div className="mb-5">
                 <label className="block text-xs font-semibold text-gray-700 mb-2">
-                  Rejection Reason <span className="text-red-500">*</span>
+                  Decline Reason <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="Provide reason for rejecting this replacement request..."
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Provide reason for declining this replacement request..."
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-700 placeholder-gray-400 resize-none"
                   disabled={isSubmitting}
                 />
@@ -276,8 +276,8 @@ export default function ReplacementRequestApprovalModal({
                 Back
               </button>
               <button
-                onClick={actionType === "approve" ? handleApprove : handleReject}
-                disabled={isSubmitting || (actionType === "reject" && !rejectionReason.trim())}
+                onClick={actionType === "approve" ? handleApprove : handleDecline}
+                disabled={isSubmitting || (actionType === "decline" && !declineReason.trim())}
                 className={`flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-medium transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-50 ${
                   actionType === "approve" 
                     ? "bg-emerald-600 hover:bg-emerald-700" 
@@ -299,7 +299,7 @@ export default function ReplacementRequestApprovalModal({
                     ) : (
                       <>
                         <XCircle size={16} />
-                        Confirm Rejection
+                        Confirm Decline
                       </>
                     )}
                   </>

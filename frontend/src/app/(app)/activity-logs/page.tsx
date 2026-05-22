@@ -39,7 +39,7 @@ const SYSTEM_USERS = ["System", "system", "Unknown User", "unknown", "Staff", "s
 
 interface ActivityLogEntry {
   id: string;
-  type: 'login' | 'logout' | 'stock_adjustment' | 'scan_in' | 'scan_out' | 'transaction' | 'product_add' | 'product_edit' | 'product_delete' | 'product_archive' | 'staff_create' | 'staff_edit' | 'staff_deactivate' | 'staff_reactivate' | 'replacement';
+  type: 'login' | 'logout' | 'stock_adjustment' | 'scan_in' | 'scan_out' | 'transaction' | 'product_add' | 'product_edit' | 'product_delete' | 'product_archive' | 'staff_create' | 'staff_edit' | 'staff_deactivate' | 'staff_reactivate' | 'replacement' | 'replacement_request';
   action: string;
   description: string;
   staffName: string;
@@ -81,6 +81,7 @@ const getActivityIcon = (type: string) => {
     case 'staff_reactivate':
       return <Users size={14} className="text-amber-600" />;
     case 'replacement':
+    case 'replacement_request':
       return <Repeat size={14} className="text-purple-600" />;
     default:
       return <History size={14} className="text-gray-600" />;
@@ -115,6 +116,7 @@ const getActivityBadgeColor = (type: string) => {
     case 'staff_reactivate':
       return 'bg-amber-100 text-amber-700';
     case 'replacement':
+    case 'replacement_request':
       return 'bg-purple-100 text-purple-700';
     default:
       return 'bg-gray-100 text-gray-700';
@@ -252,6 +254,15 @@ export default function ActivityLogsPage() {
             } else if (data.action === 'replacement_completed') {
               action = 'Replacement Completed';
               type = 'replacement';
+            } else if (data.action === 'replacement_request_created') {
+              action = 'Replacement Request Created';
+              type = 'replacement_request';
+            } else if (data.action === 'replacement_request_approved') {
+              action = 'Replacement Request Approved';
+              type = 'replacement_request';
+            } else if (data.action === 'replacement_request_declined') {
+              action = 'Replacement Request Declined';
+              type = 'replacement_request';
             } else if (data.action === 'Scanned In') {
               action = 'Scanned In';
               type = 'scan_in';
@@ -301,7 +312,9 @@ export default function ActivityLogsPage() {
                 total: data.total,
                 productDetails: data.productDetails,
                 reason: data.reason,
-                archived: data.archived
+                archived: data.archived,
+                requestId: data.requestId,
+                declineReason: data.declineReason
               }
             });
           }
@@ -326,24 +339,29 @@ export default function ActivityLogsPage() {
         if (!SYSTEM_USERS.includes(staffName)) {
           let action = '';
           let description = '';
+          let type: ActivityLogEntry['type'] = 'transaction';
           
           if (data.status === 'completed') {
             action = 'Sale Completed';
             description = `${staffName} processed sale for ${data.patientName || 'Walk-in Patient'}. ${itemsCount} item${itemsCount !== 1 ? 's' : ''}, total: ₱${data.total?.toLocaleString() || 0}. Products: ${productDetails}`;
+            type = 'transaction';
           } else if (data.status === 'processing_replacement') {
             action = 'Replacement Initiated';
             description = `${staffName} initiated replacement for transaction #${doc.id.slice(-8).toUpperCase()} (${data.patientName || 'Walk-in Patient'} - ₱${data.total?.toLocaleString() || 0}). Products: ${productDetails}`;
+            type = 'replacement';
           } else if (data.status === 'replaced') {
             action = 'Replacement Completed';
             description = `${staffName} completed replacement for transaction #${doc.id.slice(-8).toUpperCase()} (${data.patientName || 'Walk-in Patient'} - ₱${data.total?.toLocaleString() || 0}). Products: ${productDetails}`;
+            type = 'replacement';
           } else {
             action = 'Transaction';
             description = `${staffName} processed transaction for ${data.patientName || 'Walk-in Patient'}. ${itemsCount} items, total: ₱${data.total?.toLocaleString() || 0}`;
+            type = 'transaction';
           }
           
           logs.push({
             id: `transaction-${doc.id}`,
-            type: data.status === 'processing_replacement' || data.status === 'replaced' ? 'replacement' : 'transaction',
+            type: type,
             action: action,
             description: description,
             staffName: staffName,
@@ -532,7 +550,13 @@ export default function ActivityLogsPage() {
     let filtered = [...activityLogs];
     
     if (activityFilter !== "all") {
-      filtered = filtered.filter(log => log.type === activityFilter);
+      filtered = filtered.filter(log => {
+        // When filter is "replacement", include both 'replacement' and 'replacement_request' types
+        if (activityFilter === "replacement") {
+          return log.type === 'replacement' || log.type === 'replacement_request';
+        }
+        return log.type === activityFilter;
+      });
     }
     
     if (dateRange.startDate && dateRange.endDate) {
@@ -713,58 +737,58 @@ export default function ActivityLogsPage() {
               />
             </div>
 
-            {/* Date Range Picker Modal - UPDATED WITH VALIDATION */}
+            {/* Date Range Picker Modal */}
             {showDatePicker && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-bold text-gray-800">Select Date Range</h3>
-        <button onClick={() => setShowDatePicker(false)} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-          <X size={20} className="text-gray-500" />
-        </button>
-      </div>
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-          <input
-            type="date"
-            value={tempStartDate}
-            onChange={(e) => handleTempStartDateChange(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-          <input
-            type="date"
-            value={tempEndDate}
-            onChange={(e) => handleTempEndDateChange(e.target.value)}
-            min={tempStartDate || undefined}
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
-          />
-          {tempStartDate && tempEndDate && new Date(tempEndDate) < new Date(tempStartDate) && (
-            <p className="text-red-500 text-xs mt-1">End date cannot be before start date</p>
-          )}
-        </div>
-      </div>
-      <div className="flex gap-3 mt-6">
-        <button 
-          onClick={() => { setShowDatePicker(false); clearDateRange(); }} 
-          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
-        >
-          Clear
-        </button>
-        <button 
-          onClick={applyDateRange} 
-          disabled={!tempStartDate || !tempEndDate || (!!tempStartDate && !!tempEndDate && new Date(tempEndDate) < new Date(tempStartDate))}
-          className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E] disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Apply Range
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-gray-800">Select Date Range</h3>
+                    <button onClick={() => setShowDatePicker(false)} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+                      <X size={20} className="text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                      <input
+                        type="date"
+                        value={tempStartDate}
+                        onChange={(e) => handleTempStartDateChange(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                      <input
+                        type="date"
+                        value={tempEndDate}
+                        onChange={(e) => handleTempEndDateChange(e.target.value)}
+                        min={tempStartDate || undefined}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-1 focus:ring-[#0B3C8A] text-gray-700"
+                      />
+                      {tempStartDate && tempEndDate && new Date(tempEndDate) < new Date(tempStartDate) && (
+                        <p className="text-red-500 text-xs mt-1">End date cannot be before start date</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                    <button 
+                      onClick={() => { setShowDatePicker(false); clearDateRange(); }} 
+                      className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+                    >
+                      Clear
+                    </button>
+                    <button 
+                      onClick={applyDateRange} 
+                      disabled={!tempStartDate || !tempEndDate || (!!tempStartDate && !!tempEndDate && new Date(tempEndDate) < new Date(tempStartDate))}
+                      className="flex-1 px-4 py-2 rounded-lg bg-[#0B3C8A] text-white text-sm font-medium hover:bg-[#082F6E] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Apply Range
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {(activityFilter !== "all" || activityMonthFilter !== "all" || dateRange.startDate || activitySearch) && (
               <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -870,8 +894,8 @@ export default function ActivityLogsPage() {
                         >
                           {log.description}
                         </div>
-                      </td>
-                    </tr>
+                       </td>
+                     </tr>
                   ))}
                 </tbody>
               </table>

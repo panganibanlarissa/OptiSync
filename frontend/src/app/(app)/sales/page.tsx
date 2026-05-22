@@ -132,9 +132,9 @@ interface Transaction {
   replacementRequestedBy?: string;
   replacementApprovedAt?: Date;
   replacementApprovedBy?: string;
-  replacementRejectedAt?: Date;
-  replacementRejectedBy?: string;
-  replacementRejectionReason?: string;
+  replacementDeclinedAt?: Date;
+  replacementDeclinedBy?: string;
+  replacementDeclineReason?: string;
 }
 
 // ================= HELPER FUNCTIONS FOR FEFO =================
@@ -283,7 +283,7 @@ export default function SalesPage() {
     replacementRequests,
     fetchReplacementRequests,
     approveReplacementRequest,
-    rejectReplacementRequest
+    declineReplacementRequest
   } = useFirebase();
 
   const [activeTab, setActiveTab] = useState<"pos" | "history">("pos");
@@ -323,8 +323,8 @@ export default function SalesPage() {
   const [showReplacementRequestModal, setShowReplacementRequestModal] = useState(false);
   const [transactionForReplacementRequest, setTransactionForReplacementRequest] = useState<Transaction | null>(null);
   const [selectedRequestForApproval, setSelectedRequestForApproval] = useState<any>(null);
-  const [selectedRequestForRejection, setSelectedRequestForRejection] = useState<any>(null);
-  const [rejectionReason, setRejectionReason] = useState<string>("");
+  const [selectedRequestForDecline, setSelectedRequestForDecline] = useState<any>(null);
+  const [declineReason, setDeclineReason] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
   const [outOfStockProductInfo, setOutOfStockProductInfo] = useState<{ name: string; availableStock: number } | null>(null);
@@ -1138,31 +1138,31 @@ export default function SalesPage() {
   };
 
   const handleProcessReplacement = async () => {
-  if (transactionToReplace) {
-    try {
-      await processReplacement(
-        transactionToReplace.id,
-        replacementReason || "Item replacement processed",
-        userName || "Staff"
-      );
-      
-      setReplacementModalOpen(false);
-      setTransactionToReplace(null);
-      setReplacementReason("");
-      
-      await fetchReplacementRequests(true);
-      
-      showNotification(
-        `Transaction #${transactionToReplace.id.slice(-8).toUpperCase()} is now in "Processing Replacement" status.`,
-        "info",
-        "Replacement Initiated"
-      );
-    } catch (error) {
-      console.error("Replacement processing error:", error);
-      showToastOnly("Failed to process replacement.", "error");
+    if (transactionToReplace) {
+      try {
+        await processReplacement(
+          transactionToReplace.id,
+          replacementReason || "Item replacement processed",
+          userName || "Staff"
+        );
+        
+        setReplacementModalOpen(false);
+        setTransactionToReplace(null);
+        setReplacementReason("");
+        
+        await fetchReplacementRequests(true);
+        
+        showNotification(
+          `Transaction #${transactionToReplace.id.slice(-8).toUpperCase()} is now in "Processing Replacement" status.`,
+          "info",
+          "Replacement Initiated"
+        );
+      } catch (error) {
+        console.error("Replacement processing error:", error);
+        showToastOnly("Failed to process replacement.", "error");
+      }
     }
-  }
-};
+  };
 
   const openCompleteReplacementModal = (transaction: Transaction) => {
     setTransactionToComplete(transaction);
@@ -1175,99 +1175,100 @@ export default function SalesPage() {
   };
 
   const handleMarkReplacementAsCompleted = async () => {
-  if (transactionToComplete) {
-    try {
-      await markReplacementAsCompleted(
-        transactionToComplete.id,
-        userName || "Staff"
-      );
-      
-      setCompleteReplacementModalOpen(false);
-      setTransactionToComplete(null);
-      
-      // Refresh replacement requests only - transactions update via listener
-      await fetchReplacementRequests(true);
-      
-      showNotification(
-        `Transaction #${transactionToComplete.id.slice(-8).toUpperCase()} has been marked as Replaced.`,
-        "success",
-        "Replacement Completed"
-      );
-    } catch (error) {
-      console.error("Error completing replacement:", error);
-      showToastOnly("Failed to mark replacement as completed.", "error");
+    if (transactionToComplete) {
+      try {
+        await markReplacementAsCompleted(
+          transactionToComplete.id,
+          userName || "Staff"
+        );
+        
+        setCompleteReplacementModalOpen(false);
+        setTransactionToComplete(null);
+        
+        // Close the view transaction modal if it's open
+        setViewTransactionModalOpen(false);
+        setTransactionToView(null);
+        
+        await fetchReplacementRequests(true);
+        
+        showNotification(
+          `Transaction #${transactionToComplete.id.slice(-8).toUpperCase()} has been marked as Replaced.`,
+          "success",
+          "Replacement Completed"
+        );
+      } catch (error) {
+        console.error("Error completing replacement:", error);
+        showToastOnly("Failed to mark replacement as completed.", "error");
+      }
     }
-  }
-};
+  };
 
   const handleApproveRequest = async (request: any) => {
-  try {
-    await approveReplacementRequest(
-      request.id,
-      userName || "Admin",
-      userId || "system"
-    );
-    
-    showNotification(
-      `Replacement request for transaction #${request.transactionReceiptNumber} has been approved.`,
-      "success",
-      "Request Approved",
-      "/sales?tab=history"
-    );
-    
-    await fetchReplacementRequests(true);
-    
-    setSelectedRequestForApproval(null);
-    setViewTransactionModalOpen(false);
-    setTransactionToView(null);
-    
-  } catch (error: any) {
-    console.error("Error approving request:", error);
-    showToastOnly(error.message || "Failed to approve request", "error");
-  }
-};
+    try {
+      await approveReplacementRequest(
+        request.id,
+        userName || "Admin",
+        userId || "system"
+      );
+      
+      showNotification(
+        `Replacement request for transaction #${request.transactionReceiptNumber} has been approved.`,
+        "success",
+        "Request Approved",
+        "/sales?tab=history"
+      );
+      
+      await fetchReplacementRequests(true);
+      
+      setSelectedRequestForApproval(null);
+      setViewTransactionModalOpen(false);
+      setTransactionToView(null);
+      
+    } catch (error: any) {
+      console.error("Error approving request:", error);
+      showToastOnly(error.message || "Failed to approve request", "error");
+    }
+  };
 
-  const handleRejectRequest = async (request: any, reason: string) => {
-  if (!reason.trim()) {
-    showToastOnly("Please provide a reason for rejection", "error");
-    return;
-  }
-  
-  try {
-    await rejectReplacementRequest(
-      request.id,
-      userName || "Admin",
-      userId || "system",
-      reason.trim()
-    );
+  const handleDeclineRequest = async (request: any, reason: string) => {
+    if (!reason.trim()) {
+      showToastOnly("Please provide a reason for declining", "error");
+      return;
+    }
     
-    showNotification(
-      `Replacement request for transaction #${request.transactionReceiptNumber} has been rejected.`,
-      "warning",
-      "Request Rejected",
-      "/sales?tab=history"
-    );
-    
-    await fetchReplacementRequests(true);
-    
-    setSelectedRequestForRejection(null);
-    setRejectionReason("");
-    setViewTransactionModalOpen(false);
-    setTransactionToView(null);
-    
-  } catch (error: any) {
-    console.error("Error rejecting request:", error);
-    showToastOnly(error.message || "Failed to reject request", "error");
-  }
-};
+    try {
+      await declineReplacementRequest(
+        request.id,
+        userName || "Admin",
+        userId || "system",
+        reason.trim()
+      );
+      
+      showNotification(
+        `Replacement request for transaction #${request.transactionReceiptNumber} has been declined.`,
+        "warning",
+        "Request Declined",
+        "/sales?tab=history"
+      );
+      
+      await fetchReplacementRequests(true);
+      
+      setSelectedRequestForDecline(null);
+      setDeclineReason("");
+      setViewTransactionModalOpen(false);
+      setTransactionToView(null);
+      
+    } catch (error: any) {
+      console.error("Error declining request:", error);
+      showToastOnly(error.message || "Failed to decline request", "error");
+    }
+  };
 
   const refreshData = async () => {
-  setIsRefreshing(true);
-  await fetchReplacementRequests(true);
-  // Transactions will update automatically via the onSnapshot listener
-  // No need for fetchTransactions
-  setIsRefreshing(false);
-};
+    setIsRefreshing(true);
+    await fetchReplacementRequests(true);
+    setIsRefreshing(false);
+  };
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -1916,105 +1917,105 @@ export default function SalesPage() {
               </div>
             ) : (
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
-                  <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
-                    <tr>
-                      <th className="p-2 sm:p-3">Date</th>
-                      <th className="p-2 sm:p-3">Patient Name</th>
-                      <th className="p-2 sm:p-3">User</th>
-                      <th className="p-2 sm:p-3">Items</th>
-                      <th className="p-2 sm:p-3 text-right">Amount</th>
-                      <th className="p-2 sm:p-3 text-center">Payment</th>
-                      <th className="p-2 sm:p-3 text-center">Status</th>
-                      <th className="p-2 sm:p-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {transactionPaginationData.paginatedTransactions.map((trx) => {
-                      const warrantyStatus = getWarrantyStatus(trx);
-                      const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
-                      const canProcessReplacement = trx.status === "completed" && warrantyStatus.active;
-                      const hasPendingRequest = hasPendingReplacementRequest(trx.id);
-                      const statusBadge = getStatusBadge(trx.status);
-                      
-                      return (
-                        <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-2 sm:p-3 text-gray-600">
-                            <div className="flex items-center gap-1">
-                              <Calendar size={12} className="text-gray-400" />
-                              {formatDate(trx.date)}
-                            </div>
-                          </td>
-                          <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
-                          <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
-                          <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
-                            <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
-                              {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
-                            </div>
-                          </td>
-                          <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
-                          <td className="p-2 sm:p-3 text-center">
-                            <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
-                              trx.paymentMethod === 'cash' ? 'bg-blue-100 text-blue-700' : trx.paymentMethod === 'online' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              {trx.paymentMethod || 'N/A'}
-                            </span>
-                            {trx.referenceNumber && trx.paymentMethod === 'online' && (
-                              <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3 text-center">
-                            <span className={`inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full ${statusBadge.color}`}>
-                              {statusBadge.icon}
-                              {statusBadge.text}
-                            </span>
-                            {hasPendingRequest && (
-                              <div className="text-[8px] text-amber-600 mt-0.5 font-medium">Request Pending</div>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3 text-right">
-                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
-                              <button
-                                onClick={() => openViewTransactionModal(trx)}
-                                className="p-1 sm:p-1.5 text-slate-600 hover:bg-slate-100 rounded transition-colors"
-                                title="View Transaction"
-                              >
-                                <Eye size={14} />
-                              </button>
-                              <button
-                                onClick={() => generateReceipt(trx)}
-                                className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                title="Download Receipt"
-                              >
-                                <Receipt size={14} />
-                              </button>
-                              
-                              {userRole === "staff" && trx.status === "completed" && isWarrantyValid(trx) && !hasPendingRequest && (
-                                <button
-                                  onClick={() => {
-                                    setTransactionForReplacementRequest(trx);
-                                    setShowReplacementRequestModal(true);
-                                  }}
-                                  className="p-1 sm:p-1.5 text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                                  title="Request Replacement (Under Warranty)"
-                                >
-                                  <Repeat size={14} />
-                                </button>
-                              )}
-                              
-                              {userRole === "staff" && trx.status === "completed" && hasPendingRequest && (
-                                <span className="p-1 sm:p-1.5 text-amber-400" title="Replacement request pending approval">
-                                  <Repeat size={14} />
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+  <table className="w-full text-left text-[10px] sm:text-xs whitespace-nowrap">
+    <thead className="bg-slate-50 border-b border-gray-200 text-gray-600 font-semibold sticky top-0">
+      <tr>
+        <th className="p-2 sm:p-3">Date</th>
+        <th className="p-2 sm:p-3">Patient Name</th>
+        <th className="p-2 sm:p-3">User</th>
+        <th className="p-2 sm:p-3">Items</th>
+        <th className="p-2 sm:p-3 text-right">Amount</th>
+        <th className="p-2 sm:p-3 text-center">Payment</th>
+        <th className="p-2 sm:p-3 text-center">Status</th>
+        <th className="p-2 sm:p-3 text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-gray-100">
+      {transactionPaginationData.paginatedTransactions.map((trx) => {
+        const warrantyStatus = getWarrantyStatus(trx);
+        const hasWarranty = trx.warrantyStartDate && trx.warrantyEndDate;
+        const canProcessReplacement = trx.status === "completed" && warrantyStatus.active;
+        const hasPendingRequest = hasPendingReplacementRequest(trx.id);
+        const statusBadge = getStatusBadge(trx.status);
+        
+        return (
+          <tr key={trx.id} className="hover:bg-slate-50/50 transition-colors">
+            <td className="p-2 sm:p-3 text-gray-600">
+              <div className="flex items-center gap-1">
+                <Calendar size={12} className="text-gray-400" />
+                {formatDate(trx.date)}
               </div>
+            </td>
+            <td className="p-2 sm:p-3 font-medium text-gray-800">{trx.patientName}</td>
+            <td className="p-2 sm:p-3 text-gray-600">{trx.staffName || 'User'}</td>
+            <td className="p-2 sm:p-3 text-gray-600 max-w-xs">
+              <div className="truncate" title={trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}>
+                {trx.items.map(i => `${i.quantity}x ${i.name}`).join(', ')}
+              </div>
+            </td>
+            <td className="p-2 sm:p-3 text-right font-bold text-gray-800">₱{trx.total.toLocaleString()}</td>
+            <td className="p-2 sm:p-3 text-center">
+              <span className={`px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full uppercase ${
+                trx.paymentMethod === 'cash' ? 'bg-blue-100 text-blue-700' : trx.paymentMethod === 'online' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
+              }`}>
+                {trx.paymentMethod || 'N/A'}
+              </span>
+              {trx.referenceNumber && trx.paymentMethod === 'online' && (
+                <div className="text-[8px] text-gray-500 mt-0.5 font-mono">{trx.referenceNumber}</div>
+              )}
+            </td>
+            <td className="p-2 sm:p-3 text-center">
+              <span className={`inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 text-[8px] sm:text-[9px] font-bold rounded-full ${statusBadge.color}`}>
+                {statusBadge.icon}
+                {statusBadge.text}
+              </span>
+              {hasPendingRequest && (
+                <div className="text-[8px] text-amber-600 mt-0.5 font-medium">Request Pending</div>
+              )}
+            </td>
+            <td className="p-2 sm:p-3 text-right">
+              <div className="flex items-center justify-end gap-1 sm:gap-1.5">
+                <button
+                  onClick={() => openViewTransactionModal(trx)}
+                  className="p-1 sm:p-1.5 text-slate-600 hover:bg-slate-100 rounded transition-colors"
+                  title="View Transaction"
+                >
+                  <Eye size={14} />
+                </button>
+                <button
+                  onClick={() => generateReceipt(trx)}
+                  className="p-1 sm:p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  title="Download Receipt"
+                >
+                  <Receipt size={14} />
+                </button>
+                
+                {userRole === "staff" && trx.status === "completed" && isWarrantyValid(trx) && !hasPendingRequest && (
+                  <button
+                    onClick={() => {
+                      setTransactionForReplacementRequest(trx);
+                      setShowReplacementRequestModal(true);
+                    }}
+                    className="p-1 sm:p-1.5 text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                    title="Request Replacement (Under Warranty)"
+                  >
+                    <Repeat size={14} />
+                  </button>
+                )}
+                
+                {userRole === "staff" && trx.status === "completed" && hasPendingRequest && (
+                  <span className="p-1 sm:p-1.5 text-amber-400" title="Replacement request pending approval">
+                    <Repeat size={14} />
+                  </span>
+                )}
+              </div>
+            </td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
             )}
           </div>
 
@@ -2045,27 +2046,21 @@ export default function SalesPage() {
                     const pages: (number | string)[] = [];
                     const totalPages = transactionPaginationData.totalPages;
                     const currentPage = transactionPaginationData.currentPage;
-                    const pageRange = 2; // Pages to show on each side of current page
+                    const pageRange = 2;
                     
-                    // Always show first page
                     if (totalPages > 0) pages.push(1);
                     
-                    // Show pages around current page
                     const start = Math.max(2, currentPage - pageRange);
                     const end = Math.min(totalPages - 1, currentPage + pageRange);
                     
-                    // Add ellipsis if needed
                     if (start > 2) pages.push('...');
                     
-                    // Add range of pages
                     for (let i = start; i <= end; i++) {
                       if (!pages.includes(i)) pages.push(i);
                     }
                     
-                    // Add ellipsis if needed
                     if (end < totalPages - 1) pages.push('...');
                     
-                    // Always show last page
                     if (totalPages > 1 && !pages.includes(totalPages)) pages.push(totalPages);
                     
                     return pages.map((pageNum, idx) => (
@@ -2276,7 +2271,7 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* View Transaction Details Modal - UPDATED with Approve/Reject/Mark as Replaced buttons */}
+      {/* View Transaction Details Modal */}
       <AnimatePresence>
         {viewTransactionModalOpen && transactionToView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -2381,16 +2376,16 @@ export default function SalesPage() {
                           </div>
                         )}
 
-                        {replacementReq.status === "rejected" && replacementReq.reviewedAt && (
+                        {replacementReq.status === "declined" && replacementReq.reviewedAt && (
                           <div className="bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl p-3.5">
                             <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wide flex items-center gap-1">
-                              <XCircle size={12} /> Replacement Rejected
+                              <XCircle size={12} /> Replacement Declined
                             </p>
                             <p className="font-semibold text-red-700 text-sm mt-1">{formatDateTime(replacementReq.reviewedAt)}</p>
                             <p className="text-[9px] text-red-500 mt-0.5">by {replacementReq.reviewedBy}</p>
-                            {replacementReq.rejectionReason && (
+                            {replacementReq.declineReason && (
                               <p className="text-[11px] text-red-600 mt-2 p-2 bg-red-100 rounded-md">
-                                <strong>Reason:</strong> {replacementReq.rejectionReason}
+                                <strong>Reason:</strong> {replacementReq.declineReason}
                               </p>
                             )}
                           </div>
@@ -2540,7 +2535,7 @@ export default function SalesPage() {
                   <Receipt size={16} /> Download Receipt
                 </button>
                 
-                {/* Approval/Rejection/Replacement Button Logic */}
+                {/* Approval/Decline/Replacement Button Logic */}
                 {userRole === "admin" && (() => {
                   const replacementReq = getReplacementRequestForTransaction(transactionToView.id);
                   const hasPendingRequest = replacementReq && replacementReq.status === "pending";
@@ -2552,12 +2547,12 @@ export default function SalesPage() {
                       <div className="flex gap-3 flex-1">
                         <button
                           onClick={() => {
-                            setSelectedRequestForRejection(replacementReq);
-                            setRejectionReason("");
+                            setSelectedRequestForDecline(replacementReq);
+                            setDeclineReason("");
                           }}
                           className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
                         >
-                          <XCircle size={16} /> Reject Request
+                          <XCircle size={16} /> Decline Request
                         </button>
                         <button
                           onClick={() => handleApproveRequest(replacementReq)}
@@ -2572,7 +2567,10 @@ export default function SalesPage() {
                   if (hasApprovedRequest && isProcessingReplacement && transactionToView.status !== "replaced") {
                     return (
                       <button
-                        onClick={() => openCompleteReplacementModal(transactionToView)}
+                        onClick={() => {
+                          setTransactionToComplete(transactionToView);
+                          setCompleteReplacementModalOpen(true);
+                        }}
                         className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all duration-200 shadow-md flex items-center justify-center gap-2"
                       >
                         <CheckCheck size={16} /> Mark as Replaced
@@ -2728,9 +2726,9 @@ export default function SalesPage() {
         )}
       </AnimatePresence>
 
-      {/* Replacement Request Rejection Modal (Inline) */}
+      {/* Replacement Request Decline Modal (Inline) */}
       <AnimatePresence>
-        {selectedRequestForRejection && (
+        {selectedRequestForDecline && (
           <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -2741,10 +2739,10 @@ export default function SalesPage() {
               <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-slate-50">
                 <div className="flex items-center gap-2">
                   <XCircle size={18} className="text-red-600" />
-                  <h3 className="text-lg font-bold text-gray-800">Reject Replacement Request</h3>
+                  <h3 className="text-lg font-bold text-gray-800">Decline Replacement Request</h3>
                 </div>
                 <button
-                  onClick={() => { setSelectedRequestForRejection(null); setRejectionReason(""); }}
+                  onClick={() => { setSelectedRequestForDecline(null); setDeclineReason(""); }}
                   className="p-1 hover:bg-gray-200 rounded-full transition-colors"
                 >
                   <X size={18} />
@@ -2753,16 +2751,16 @@ export default function SalesPage() {
               <div className="p-5">
                 <div className="mb-4">
                   <p className="text-sm text-gray-600 mb-4">
-                    Are you sure you want to reject the replacement request for transaction <span className="font-mono font-bold">{selectedRequestForRejection.transactionReceiptNumber}</span>?
+                    Are you sure you want to decline the replacement request for transaction <span className="font-mono font-bold">{selectedRequestForDecline.transactionReceiptNumber}</span>?
                   </p>
                   <label className="block text-xs font-semibold text-gray-700 mb-2">
-                    Rejection Reason <span className="text-red-500">*</span>
+                    Decline Reason <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     rows={3}
-                    placeholder="Please provide a reason for rejecting this replacement request..."
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
+                    placeholder="Please provide a reason for declining this replacement request..."
+                    value={declineReason}
+                    onChange={(e) => setDeclineReason(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-700 placeholder-gray-400 resize-none"
                   />
                   <p className="text-[10px] text-gray-400 mt-1.5">
@@ -2772,16 +2770,16 @@ export default function SalesPage() {
               </div>
               <div className="p-4 border-t border-gray-100 bg-slate-50 flex gap-3">
                 <button
-                  onClick={() => { setSelectedRequestForRejection(null); setRejectionReason(""); }}
+                  onClick={() => { setSelectedRequestForDecline(null); setDeclineReason(""); }}
                   className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-100"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleRejectRequest(selectedRequestForRejection, rejectionReason)}
+                  onClick={() => handleDeclineRequest(selectedRequestForDecline, declineReason)}
                   className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors shadow-md"
                 >
-                  Reject Request
+                  Decline Request
                 </button>
               </div>
             </motion.div>

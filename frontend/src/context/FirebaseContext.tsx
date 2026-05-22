@@ -147,11 +147,11 @@ export interface ReplacementRequest {
   requestedBy: string;
   requestedById: string;
   requestedAt: Date;
-  status: "pending" | "approved" | "rejected" | "completed";
+  status: "pending" | "approved" | "declined" | "completed";
   reviewedBy?: string;
   reviewedById?: string;
   reviewedAt?: Date;
-  rejectionReason?: string;
+  declineReason?: string;
   completedAt?: Date;
   completedBy?: string;
   completedById?: string;
@@ -217,7 +217,7 @@ interface FirebaseContextType {
     requestedById: string
   ) => Promise<string>;
   approveReplacementRequest: (requestId: string, approvedBy: string, approvedById: string) => Promise<void>;
-  rejectReplacementRequest: (requestId: string, rejectedBy: string, rejectedById: string, rejectionReason: string) => Promise<void>;
+  declineReplacementRequest: (requestId: string, declinedBy: string, declinedById: string, declineReason: string) => Promise<void>;
   completeReplacementRequest: (requestId: string, completedBy: string, completedById: string) => Promise<void>;
   fetchReplacementRequests: (forceRefresh?: boolean) => Promise<void>;
   getPendingReplacementRequests: () => ReplacementRequest[];
@@ -628,13 +628,13 @@ const logReplacementRequestApproved = async (
   }
 };
 
-// Helper function to log replacement request rejection
-const logReplacementRequestRejected = async (
+// Helper function to log replacement request decline
+const logReplacementRequestDeclined = async (
   requestId: string,
   transactionId: string,
-  rejectedBy: string,
-  rejectedById: string,
-  rejectionReason: string,
+  declinedBy: string,
+  declinedById: string,
+  declineReason: string,
   patientName: string,
   total: number
 ) => {
@@ -643,20 +643,20 @@ const logReplacementRequestRejected = async (
     
     await addDoc(activityRef, {
       type: 'replacement_request',
-      action: 'replacement_request_rejected',
-      description: `${rejectedBy} rejected replacement request for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Reason: ${rejectionReason}`,
-      staffName: rejectedBy,
-      staffId: rejectedById,
+      action: 'replacement_request_declined',
+      description: `${declinedBy} declined replacement request for transaction #${transactionId.slice(-8).toUpperCase()} (${patientName || 'Walk-in Patient'} - ₱${total.toLocaleString()}). Reason: ${declineReason}`,
+      staffName: declinedBy,
+      staffId: declinedById,
       transactionId: transactionId,
       requestId: requestId,
       patientName: patientName || 'Walk-in Patient',
       total: total,
-      rejectionReason: rejectionReason,
+      declineReason: declineReason,
       timestamp: serverTimestamp()
     });
-    console.log(`✅ Replacement request rejected activity logged for request ${requestId}`);
+    console.log(`✅ Replacement request declined activity logged for request ${requestId}`);
   } catch (error) {
-    console.error('Error logging replacement request rejection:', error);
+    console.error('Error logging replacement request decline:', error);
   }
 };
 
@@ -1873,7 +1873,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
     
     const oldStock = currentProduct.stock || 0;
-    const stockDifference = newStock - oldStock;  // ADD THIS LINE - define stockDifference
+    const stockDifference = newStock - oldStock;
 
     const actingStaffName = staffName || userName || "System";
     const actingStaffId = staffId || userId || "system";
@@ -2290,11 +2290,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const rejectReplacementRequest = async (
+  const declineReplacementRequest = async (
     requestId: string,
-    rejectedBy: string,
-    rejectedById: string,
-    rejectionReason: string
+    declinedBy: string,
+    declinedById: string,
+    declineReason: string
   ): Promise<void> => {
     try {
       const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
@@ -2307,7 +2307,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const requestData = requestSnap.data() as ReplacementRequest;
       
       if (requestData.status !== "pending") {
-        throw new Error(`Cannot reject request with status: ${requestData.status}`);
+        throw new Error(`Cannot decline request with status: ${requestData.status}`);
       }
       
       // Update transaction status back to completed (no inventory change needed)
@@ -2326,20 +2326,20 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       );
       
       await updateDoc(requestRef, {
-        status: "rejected",
-        reviewedBy: rejectedBy,
-        reviewedById: rejectedById,
+        status: "declined",
+        reviewedBy: declinedBy,
+        reviewedById: declinedById,
         reviewedAt: serverTimestamp(),
-        rejectionReason: rejectionReason,
+        declineReason: declineReason,
         updatedAt: serverTimestamp()
       });
       
-      await logReplacementRequestRejected(
+      await logReplacementRequestDeclined(
         requestId,
         requestData.transactionId,
-        rejectedBy,
-        rejectedById,
-        rejectionReason,
+        declinedBy,
+        declinedById,
+        declineReason,
         requestData.patientName,
         requestData.originalTotal
       );
@@ -2348,7 +2348,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       await fetchTransactions(true);
       
     } catch (error) {
-      console.error("Error rejecting replacement request:", error);
+      console.error("Error declining replacement request:", error);
       throw error;
     }
   };
@@ -2618,7 +2618,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     replacementRequests,
     createReplacementRequest,
     approveReplacementRequest,
-    rejectReplacementRequest,
+    declineReplacementRequest,
     completeReplacementRequest,
     fetchReplacementRequests,
     getPendingReplacementRequests,
