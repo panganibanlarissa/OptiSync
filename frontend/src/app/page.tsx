@@ -453,8 +453,8 @@ export default function ClinicLandingPage() {
           <nav className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
             <a href="#best-sellers" className="hover:text-[#0B3C8A] transition-colors">Popular Items</a>
             <a href="#services" className="hover:text-[#0B3C8A] transition-colors">Services</a>
-            <a href="#location" className="hover:text-[#0B3C8A] transition-colors">Map</a>
-            <a href="#contact" className="hover:text-[#0B3C8A] transition-colors">Facebook</a>
+            <a href="#location" className="hover:text-[#0B3C8A] transition-colors">Location</a>
+            <a href="#contact" className="hover:text-[#0B3C8A] transition-colors">Contact Us</a>
             <a href="#products" className="hover:text-[#0B3C8A] transition-colors">Our Products</a>
           </nav>
 
@@ -476,8 +476,8 @@ export default function ClinicLandingPage() {
           <div className="md:hidden absolute top-full left-0 w-full bg-white border-b border-slate-100 p-5 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-top-5">
             <a href="#best-sellers" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Popular Items</a>
             <a href="#services" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Services</a>
-            <a href="#location" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Map</a>
-            <a href="#contact" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Facebook</a>
+            <a href="#location" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Location</a>
+            <a href="#contact" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Contact Us</a>
             <a href="#products" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Our Products</a>
             <div className="h-px bg-slate-100 my-1"></div>
             <a href="/login" className={`w-full text-center py-3.5 ${THEME_BG} text-white rounded-xl font-bold text-base`} onClick={() => setMobileMenuOpen(false)}>
@@ -610,7 +610,7 @@ export default function ClinicLandingPage() {
       <section id="services" className="py-16 sm:py-24 px-4 sm:px-6 bg-[#0B3C8A]">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
-            <h2 className="text-3xl md:text-4xl font-black text-slate-100 mb-3 sm:mb-4">What We Offer</h2>
+            <h2 className="text-3xl md:text-4xl font-black text-slate-100 mb-3 sm:mb-4">Services We Offer</h2>
             <p className="text-slate-300 text-base sm:text-lg font-medium px-2">
               Complete eye care services designed to help you see better and feel confident
             </p>
@@ -690,7 +690,7 @@ export default function ClinicLandingPage() {
       <section id="location" className="py-16 sm:py-24 px-4 sm:px-6 bg-slate-50">
         <div className="max-w-7xl mx-auto mb-10 sm:mb-16">
           <div className="text-center max-w-3xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Where to Find Us</h2>
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Clinic Location</h2>
             <p className="text-slate-600 text-base sm:text-lg font-medium px-2">
               Visit us at our clinic location. We're conveniently situated in Olongapo City.
             </p>
@@ -714,7 +714,7 @@ export default function ClinicLandingPage() {
       <section id="contact" className="py-12 sm:py-16 bg-[#0B3C8A] px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-10">
-            <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Connect With Us</h2>
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Contact Us</h2>
             <p className="text-slate-200 text-base sm:text-lg font-medium">
               Follow our Facebook page for the latest updates and clinic news.
             </p>
@@ -896,8 +896,8 @@ export default function ClinicLandingPage() {
                 <ul className="space-y-2 text-slate-200 text-xs">
                   <li><a href="#products" className="hover:text-white transition-colors">Our Products</a></li>
                   <li><a href="#services" className="hover:text-white transition-colors">Services</a></li>
-                  <li><a href="#location" className="hover:text-white transition-colors">Map</a></li>
-                  <li><a href="#contact" className="hover:text-white transition-colors">Facebook</a></li>
+                  <li><a href="#location" className="hover:text-white transition-colors">Location</a></li>
+                  <li><a href="#contact" className="hover:text-white transition-colors">Contact Us</a></li>
                 </ul>
               </div>
               <div>
