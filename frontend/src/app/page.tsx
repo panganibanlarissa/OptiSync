@@ -201,6 +201,100 @@ function ProductModal({ product, onClose }: { product: any; onClose: () => void 
   );
 }
 
+function AllProductsModal({
+  products,
+  onClose,
+  onProductClick,
+}: {
+  products: any[];
+  onClose: () => void;
+  onProductClick: (product: any) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <motion.div
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+      >
+        <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">Inventory</h2>
+            <p className="text-sm text-gray-500">All products currently available in the clinic inventory</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <XIcon size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {products.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+              {products.map((product, idx) => {
+                const productImage = product.image || product.productImage;
+                const isValidImage = productImage && typeof productImage === 'string' && productImage.startsWith('http');
+
+                return (
+                  <motion.button
+                    key={product.id}
+                    type="button"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                    onClick={() => onProductClick(product)}
+                    className="text-left group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg hover:border-[#0B3C8A] transition-all duration-300"
+                  >
+                    <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
+                      {isValidImage ? (
+                        <div className="relative w-full h-full">
+                          <Image
+                            src={productImage}
+                            alt={product.name}
+                            fill
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                            className="object-cover transition-transform duration-500 group-hover:scale-110"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+                          <Package className="w-16 h-16 text-slate-300" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className="text-sm font-bold text-slate-900 line-clamp-2 leading-snug">{product.name}</h3>
+                      <p className="text-xs text-slate-500 mt-1">{product.category}</p>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-16">
+              <Package className="w-16 h-16 mx-auto text-slate-300 mb-4" />
+              <p className="text-slate-500">No products found in the inventory.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="p-5 border-t border-gray-100 bg-gray-50">
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2.5 bg-[#0B3C8A] text-white rounded-lg font-medium hover:bg-[#082F6E] transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // Clinic ID - same as in FirebaseContext
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
@@ -215,6 +309,7 @@ export default function ClinicLandingPage() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showProductModal, setShowProductModal] = useState(false);
   const [bestSellers, setBestSellers] = useState<any[]>([]);
+  const [showAllProductsModal, setShowAllProductsModal] = useState(false);
 
   // Calculate best sellers based on product data
   const calculateBestSellers = (productsData: any[]) => {
@@ -356,7 +451,7 @@ export default function ClinicLandingPage() {
           </div>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-bold text-slate-600">
-            <a href="#best-sellers" className="hover:text-[#0B3C8A] transition-colors">Best Sellers</a>
+            <a href="#best-sellers" className="hover:text-[#0B3C8A] transition-colors">Popular Items</a>
             <a href="#services" className="hover:text-[#0B3C8A] transition-colors">Services</a>
             <a href="#location" className="hover:text-[#0B3C8A] transition-colors">Map</a>
             <a href="#contact" className="hover:text-[#0B3C8A] transition-colors">Facebook</a>
@@ -379,7 +474,7 @@ export default function ClinicLandingPage() {
 
         {mobileMenuOpen && (
           <div className="md:hidden absolute top-full left-0 w-full bg-white border-b border-slate-100 p-5 shadow-2xl flex flex-col gap-4 animate-in slide-in-from-top-5">
-            <a href="#best-sellers" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Best Sellers</a>
+            <a href="#best-sellers" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Popular Items</a>
             <a href="#services" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Services</a>
             <a href="#location" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Map</a>
             <a href="#contact" className="text-slate-700 font-bold text-base" onClick={() => setMobileMenuOpen(false)}>Facebook</a>
@@ -438,7 +533,7 @@ export default function ClinicLandingPage() {
           <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
             <div className="flex items-center justify-center gap-2 mb-3 sm:mb-4">
               <Star className="w-6 h-6 text-amber-500 fill-amber-500" />
-              <h2 className="text-3xl md:text-4xl font-black text-slate-900">Best Sellers</h2>
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900">Popular Items</h2>
               <Star className="w-6 h-6 text-amber-500 fill-amber-500" />
             </div>
             <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
@@ -463,7 +558,7 @@ export default function ClinicLandingPage() {
                 >
                   {/* Best Seller Badge */}
                   <div className="absolute top-2 right-2 z-10 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                    <Star size={14} className="fill-white" /> Best
+                    <Star size={14} className="fill-white" /> Popular
                   </div>
 
                   <div className="relative aspect-square w-full overflow-hidden bg-slate-100">
@@ -703,14 +798,24 @@ export default function ClinicLandingPage() {
         </div>
       </section>
 
-      {/* --- 3. OUR PRODUCTS SECTION (MOVED) --- */}
+      {/* --- 3. OUR PRODUCTS SECTION --- */}
       <section id="products" className="py-16 sm:py-24 px-4 sm:px-6 bg-white">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-16">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 text-center sm:text-left max-w-7xl mx-auto mb-10 sm:mb-16">
+            <div className="max-w-3xl mx-auto sm:mx-0">
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-4">Our Products</h2>
             <p className="text-slate-500 text-base sm:text-lg font-medium px-2">
               Explore our wide selection of premium frames, lenses, and accessories for every style and prescription need.
             </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAllProductsModal(true)}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#0B3C8A] text-white font-bold text-sm hover:bg-[#082F6E] transition-colors shadow-lg shadow-blue-900/10"
+            >
+              <Eye size={18} />
+              View All
+            </button>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
@@ -829,6 +934,20 @@ export default function ClinicLandingPage() {
             onClose={() => {
               setShowProductModal(false);
               setSelectedProduct(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* All Products Modal */}
+      <AnimatePresence>
+        {showAllProductsModal && (
+          <AllProductsModal
+            products={allProducts}
+            onClose={() => setShowAllProductsModal(false)}
+            onProductClick={(product) => {
+              setShowAllProductsModal(false);
+              handleProductClick(product);
             }}
           />
         )}
