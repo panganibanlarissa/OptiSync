@@ -1,5 +1,3 @@
-// src/app/(app)/dashboard/AdminDashboard.tsx
-
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
@@ -203,7 +201,6 @@ const modalVariants: Variants = {
 const CURRENT_PERIOD = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const MIN_TRANSACTIONS_FOR_ML = 10;
 
-// Helper function to get default lead time based on category
 const getDefaultLeadTime = (category: string): number => {
   const leadTimes: Record<string, number> = {
     'Contact Lenses': 5,
@@ -213,7 +210,7 @@ const getDefaultLeadTime = (category: string): number => {
     'Accessories': 5,
     'Vitamins': 3,
   };
-  return leadTimes[category] || 5; // Default 5 days
+  return leadTimes[category] || 5;
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -228,7 +225,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const FULL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-// Helper to get next three months starting from current month
 const getNextThreeMonths = (currentDate: Date = new Date()): string[] => {
   const months: string[] = [];
   for (let i = 1; i <= 3; i++) {
@@ -251,7 +247,6 @@ export default function AdminDashboard() {
   const [selectedSmartReorderItem, setSelectedSmartReorderItem] = useState<LowStockItem | null>(null);
   const [showSmartReorderModal, setShowSmartReorderModal] = useState(false);
   
-  // New state for Predictive Analytics tab
   const [activeDashboardTab, setActiveDashboardTab] = useState<'overview' | 'predictive'>('overview');
   const [selectedProductForInsight, setSelectedProductForInsight] = useState<PredictiveProduct | null>(null);
   const [showProductInsightModal, setShowProductInsightModal] = useState(false);
@@ -270,18 +265,11 @@ export default function AdminDashboard() {
 
   const nextThreeMonths = useMemo(() => getNextThreeMonths(), []);
 
-  // Filter out archived products from displays (but NOT from gross profit calculation)
   const activeProducts = useMemo(() => {
     return products.filter((p: any) => (p as any).archived !== true);
   }, [products]);
 
-  // CRITICAL FIX: Count ALL transactions for revenue and sales
-  // Replacements are NOT refunds - the patient paid and the clinic keeps the money
-  // The transaction status (completed, processing_replacement, replaced) should NOT affect revenue
-  // A replacement is just an exchange of product, not a financial reversal
   const allTransactions = useMemo(() => {
-    // Include ALL transactions regardless of status
-    // This ensures sales revenue is never deducted
     return transactions;
   }, [transactions]);
 
@@ -289,7 +277,6 @@ export default function AdminDashboard() {
     return allTransactions.length >= MIN_TRANSACTIONS_FOR_ML;
   }, [allTransactions]);
 
-  // Today's sales - ALL transactions (replacements don't affect revenue)
   const todaySales = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -303,7 +290,6 @@ export default function AdminDashboard() {
       .reduce((sum: number, t: any) => sum + t.total, 0);
   }, [allTransactions]);
 
-  // Low stock count - using smart reorder points (only in-demand items)
   const lowStockCount = useMemo(() => {
     return activeProducts.filter(p => {
       const leadTime = (p as any).leadTime || getDefaultLeadTime(p.category);
@@ -321,13 +307,10 @@ export default function AdminDashboard() {
         trend
       );
       
-      // Count ALL items below smart point (regardless of demand)
       return p.stock <= smartPoint && p.stock > 0;
     }).length;
   }, [activeProducts, recommendations, usingML, mlDataLoaded]);
 
-  // ALL Low stock items - from active products below reorder point (no demand filter)
-  // Low Stock Alerts displays these items
   const allLowStockItems = useMemo((): LowStockItem[] => {
     return activeProducts
       .map(p => {
@@ -338,7 +321,6 @@ export default function AdminDashboard() {
         const daysUntilStockout = recommendation?.daysUntilOut || 999;
         const trend = recommendation?.trend || 'stable';
 
-        // Calculate smart reorder point
         const { smartPoint, adjustmentReason } = calculateSmartReorderPoint(
           p.reorderPoint,
           p.stock,
@@ -371,19 +353,14 @@ export default function AdminDashboard() {
       .sort((a, b) => a.currentStock - b.currentStock);
   }, [activeProducts, recommendations, usingML, mlDataLoaded]);
 
-  // Low stock items - IN-DEMAND products below reorder point
-  // Smart Reorder Points container displays these items
-  // In-demand criteria: predictedDemand30d >= 5 OR daysUntilStockout <= 7
   const lowStockItems = useMemo((): LowStockItem[] => {
     return allLowStockItems.filter(item => {
-      // Must be in high demand (predicted demand >= 5 OR will stockout soon)
       const isInDemand = (item.predictedDemand30d !== undefined && item.predictedDemand30d >= 5) || 
                         (item.daysUntilStockout !== undefined && item.daysUntilStockout <= 7);
       return isInDemand;
     });
   }, [allLowStockItems]);
 
-  // Upcoming reorder recommendations - high-demand items approaching low stock threshold
   const upcomingReorderItems = useMemo((): LowStockItem[] => {
     return activeProducts
       .map(p => {
@@ -418,14 +395,11 @@ export default function AdminDashboard() {
           recommendedLeadTime: leadTime,
         } as LowStockItem;
       })
-      // Filter: HIGH DEMAND items approaching low stock
-      // Must have: upward trend OR high predicted demand (>= 5 units/month)
-      // AND: above smart point but will approach within 14 days OR within 30% buffer
       .filter(item => {
         const isAboveSmartPoint = item.currentStock > item.smartReorderPoint;
         const willBecomeLowSoon = item.daysUntilStockout !== undefined && item.daysUntilStockout <= 14;
         const withinBuffer = item.currentStock <= item.smartReorderPoint * 1.3;
-        const isHighDemand = (item.predictedDemand30d !== undefined && item.predictedDemand30d >= 5) || (item.daysUntilStockout !== undefined && item.daysUntilStockout <= 7); // High demand or will stockout soon
+        const isHighDemand = (item.predictedDemand30d !== undefined && item.predictedDemand30d >= 5) || (item.daysUntilStockout !== undefined && item.daysUntilStockout <= 7);
         
         return isAboveSmartPoint && isHighDemand && (willBecomeLowSoon || withinBuffer);
       })
@@ -434,7 +408,6 @@ export default function AdminDashboard() {
         : a.currentStock - b.currentStock);
   }, [activeProducts, recommendations, usingML, mlDataLoaded]);
 
-  // Gross profit - ALL transactions (replacements don't affect profit)
   const grossProfit = useMemo(() => {
     return allTransactions.reduce((sum: number, t: any) => {
       const profit = t.items.reduce((itemSum: number, item: any) => {
@@ -448,12 +421,10 @@ export default function AdminDashboard() {
     }, 0);
   }, [allTransactions, products]);
 
-  // Total revenue - ALL transactions (replacements are NOT refunds)
   const totalRevenue = useMemo(() => {
     return allTransactions.reduce((sum: number, t: any) => sum + t.total, 0);
   }, [allTransactions]);
 
-  // Previous period revenue for trend calculation - ALL transactions
   const previousPeriodRevenue = useMemo(() => {
     const now = new Date();
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -506,12 +477,10 @@ export default function AdminDashboard() {
     ];
   }, [todaySales, grossProfit, totalRevenue, lowStockCount, revenueTrend]);
 
-  // Forecast data - only from active (non-archived) products
   const FORECAST_DATA: ForecastDisplayData[] = useMemo(() => {
     if (usingML && hasEnoughDataForML && recommendations && recommendations.length > 0) {
       return recommendations
         .filter((r: Recommendation) => {
-          // Check if the product is active (not archived)
           const product = activeProducts.find(p => p.name === r.productName || p.id === r.productId);
           return product !== undefined;
         })
@@ -533,7 +502,6 @@ export default function AdminDashboard() {
     return item.predictedDemand30d;
   };
 
-  // HEATMAP_DATA - only from active (non-archived) products
   const HEATMAP_DATA = useMemo(() => {
     const categoryStats = activeProducts.reduce((acc: any, product: any) => {
       if (!acc[product.category]) {
@@ -553,7 +521,6 @@ export default function AdminDashboard() {
     const maxProfit = Math.max(...Object.values(categoryStats).map((c: any) => c.totalProfit), 1);
     const maxVolume = Math.max(...Object.values(categoryStats).map((c: any) => c.totalVolume), 1);
 
-    // Sort categories by profit (highest first)
     const sortedCategories = Object.entries(categoryStats)
       .map(([category, data]: [string, any]) => ({
         category,
@@ -592,9 +559,6 @@ export default function AdminDashboard() {
     return null;
   };
 
-  // DEADSTOCK_DATA - only from active (non-archived) products
-  // For deadstock calculation, we only care about completed sales
-  // Replacement transactions do not count as new sales for deadstock purposes
   const completedTransactionsForDeadstock = useMemo(() => {
     return transactions.filter((t: any) => t.status === 'completed');
   }, [transactions]);
@@ -602,14 +566,13 @@ export default function AdminDashboard() {
   const DEADSTOCK_DATA: DeadstockItem[] = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const DEADSTOCK_DAYS_THRESHOLD = 365;
 
     const deadstockItems: DeadstockItem[] = [];
 
     for (const p of activeProducts) {
       if (p.stock <= 0) continue;
       
-      // Only use COMPLETED transactions for deadstock calculation
-      // Replacement transactions do not count as sales for deadstock purposes
       const salesForProduct = completedTransactionsForDeadstock
         .filter((t: any) => t.items.some((item: any) => item.id === p.id))
         .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -637,7 +600,7 @@ export default function AdminDashboard() {
         lastSaleDate = null;
       }
       
-      if (daysSinceSale >= 30) {
+      if (daysSinceSale >= DEADSTOCK_DAYS_THRESHOLD) {
         const lockedCapital = p.stock * p.markupPrice;
         const mlSuggestion = deadstockSuggestions.get(p.id);
         
@@ -652,7 +615,7 @@ export default function AdminDashboard() {
           stock: p.stock,
           daysSinceSale: daysSinceSale,
           lockedCapital: lockedCapital,
-          priority: (daysSinceSale > 90 ? 'high' : daysSinceSale > 60 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+          priority: (daysSinceSale > 365 ? 'high' : daysSinceSale > 180 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
           lastSaleDate: lastSaleDate,
           aiSuggestion: mlSuggestion?.suggestion || null,
           aiSuggestionType: mlSuggestion?.suggestionType || null,
@@ -668,7 +631,6 @@ export default function AdminDashboard() {
     return deadstockItems;
   }, [activeProducts, completedTransactionsForDeadstock, usingML, deadstockSuggestions]);
 
-  // Generate forecast explanation with recommended order and stockout date
   const generateForecastExplanation = (item: ForecastDisplayData): ForecastExplanation => {
     const monthlyForecasts = [
       { month: nextThreeMonths[0], predictedDemand: item.predictedDemand30d }
@@ -684,8 +646,6 @@ export default function AdminDashboard() {
       trend: item.trend
     };
   };
-
-  // ================= PREDICTIVE ANALYTICS DATA =================
   
   const currentSalesByProduct = useMemo(() => {
     const thirtyDaysAgo = new Date();
@@ -773,7 +733,6 @@ export default function AdminDashboard() {
       .slice(0, 5);
   }, [predictiveProducts]);
   
-  // Chart data for top sellers comparison
   const topSellersChartData = useMemo(() => {
     const allTopSellers = new Map<string, { current: number; predicted: number; category: string; fullName: string }>();
     
@@ -924,7 +883,6 @@ export default function AdminDashboard() {
     return recs;
   }, [predictiveProducts, usingML]);
 
-  // Show loading only on first load when no data is available
   const isLoading = (!mlDataLoaded && mlLoading) || (products.length === 0 && !mlDataLoaded);
 
   if (isLoading) {
@@ -944,7 +902,6 @@ export default function AdminDashboard() {
     setShowForecastExplanationModal(true);
   };
 
-  // Render Predictive Analytics Tab Content
   const renderPredictiveAnalytics = () => (
     <motion.div
       initial="hidden"
@@ -966,7 +923,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Top Sellers Comparison Chart */}
       <motion.div variants={itemVariants} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center gap-2 mb-4">
           <div className="p-2 bg-blue-100 rounded-lg">
@@ -1223,7 +1179,6 @@ export default function AdminDashboard() {
 
   return (
     <>
-      {/* Dashboard Tab Navigation */}
       <div className="mb-4 border-b border-gray-200">
         <div className="flex gap-2">
           <button
@@ -1254,14 +1209,12 @@ export default function AdminDashboard() {
       </div>
 
       {activeDashboardTab === 'overview' ? (
-        // ORIGINAL OVERVIEW DASHBOARD - COMPLETELY UNCHANGED
         <motion.div
           initial="hidden"
           animate="visible"
           variants={containerVariants}
           className="min-h-screen p-4 space-y-4"
         >
-          {/* ML Status Message - Only show when data is loaded */}
           {mlDataLoaded && (
             <>
               {mlLoading && (
@@ -1306,7 +1259,6 @@ export default function AdminDashboard() {
             </>
           )}
 
-          {/* Stats Cards */}
           <motion.div
             variants={containerVariants}
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
@@ -1317,7 +1269,6 @@ export default function AdminDashboard() {
           </motion.div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Low Stock Alerts */}
             <motion.div
               variants={itemVariants}
               className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -1389,7 +1340,6 @@ export default function AdminDashboard() {
               </div>
             </motion.div>
 
-            {/* Deadstock Impact Card */}
             <motion.div
               variants={itemVariants}
               className="bg-white rounded-xl shadow-sm border border-red-100 overflow-hidden flex flex-col relative"
@@ -1406,7 +1356,7 @@ export default function AdminDashboard() {
                         Deadstock Items
                       </h2>
                       <p className="text-xs font-medium text-red-600">
-                        Items without sales (30+ days)
+                        Items without sales (365+ days)
                       </p>
                     </div>
                   </div>
@@ -1487,7 +1437,7 @@ export default function AdminDashboard() {
                     <div className="text-center py-8">
                       <Package size={32} className="mx-auto mb-3 text-gray-300" />
                       <p className="text-sm text-gray-500">No deadstock items identified</p>
-                      <p className="text-xs text-gray-400 mt-1">Items with no sales in 30+ days will appear here</p>
+                      <p className="text-xs text-gray-400 mt-1">Items with no sales in 365+ days will appear here</p>
                     </div>
                   )}
                 </div>
@@ -1496,7 +1446,6 @@ export default function AdminDashboard() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Demand Forecasting Card */}
             <motion.div
               variants={itemVariants}
               className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
@@ -1584,7 +1533,6 @@ export default function AdminDashboard() {
               </div>
             </motion.div>
 
-            {/* Smart Reorder Points - Upcoming Recommendations */}
             <motion.div
               variants={itemVariants}
               className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden flex flex-col"
@@ -1681,7 +1629,6 @@ export default function AdminDashboard() {
             </motion.div>
           </div>
 
-          {/* Performance Heatmap */}
           <motion.div
             variants={itemVariants}
             className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full"
@@ -1742,7 +1689,6 @@ export default function AdminDashboard() {
         renderPredictiveAnalytics()
       )}
 
-      {/* Smart Reorder Points Modal */}
       <AnimatePresence>
         {showUpcomingModal && (
           <Modal
@@ -1809,7 +1755,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Low Stock Modal */}
       <AnimatePresence>
         {showLowStockModal && (
           <Modal
@@ -1843,7 +1788,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Deadstock Modal */}
       <AnimatePresence>
         {showDeadstockModal && (
           <Modal
@@ -1903,7 +1847,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Forecast Modal */}
       <AnimatePresence>
         {showForecastModal && (
           <Modal
@@ -1927,7 +1870,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Forecast Explanation Modal with Stockout Date */}
       <AnimatePresence>
         {showForecastExplanationModal && selectedForecastProduct && (
           <SimplifiedForecastExplanationModal
@@ -1937,7 +1879,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Smart Reorder Point Explanation Modal */}
       <AnimatePresence>
         {showSmartReorderModal && selectedSmartReorderItem && (
           <SmartReorderExplanationModal
@@ -1950,7 +1891,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Deadstock Analysis Modal */}
       <AnimatePresence>
         {selectedDeadstock && (
           <DeadstockAnalysisModal
@@ -1961,7 +1901,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Predictive Analytics Product Insight Modal */}
       <AnimatePresence>
         {showProductInsightModal && selectedProductForInsight && (
           <PredictiveProductInsightModal
@@ -1978,7 +1917,6 @@ export default function AdminDashboard() {
   );
 }
 
-// Helper function for deadstock analysis
 function calculateDetailedAnalysis(item: DeadstockItem) {
   if (!item) return null;
   
@@ -2010,7 +1948,6 @@ function calculateDetailedAnalysis(item: DeadstockItem) {
   };
 }
 
-// Modal Component
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -2042,7 +1979,6 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-// Forecast Card Component
 function ForecastCard({ data, selectedMonth, onClick }: { 
   data: ForecastDisplayData; 
   selectedMonth: string;
@@ -2105,7 +2041,6 @@ function ForecastCard({ data, selectedMonth, onClick }: {
   );
 }
 
-// Forecast Explanation Modal
 function SimplifiedForecastExplanationModal({ 
   explanation, 
   onClose 
@@ -2294,7 +2229,6 @@ function StatCard({ data }: { data: StatData }) {
   );
 }
 
-// Deadstock Analysis Modal Component
 function DeadstockAnalysisModal({ 
   item, 
   onClose, 
@@ -2308,10 +2242,10 @@ function DeadstockAnalysisModal({
   
   const getDiscountProgression = () => {
     const days = item.daysSinceSale;
-    if (days >= 90) return "Maximum discount range (22-25%)";
-    if (days >= 70) return "Accelerated discount range (18-20%)";
-    if (days >= 50) return "Moderate discount range (12-15%)";
-    if (days >= 30) return "Initial discount range (5-8%)";
+    if (days >= 365) return "Maximum discount range";
+    if (days >= 300) return "Accelerated discount range";
+    if (days >= 240) return "Moderate discount range";
+    if (days >= 180) return "Initial discount range";
     return "No discount recommended";
   };
   
@@ -2412,16 +2346,16 @@ function DeadstockAnalysisModal({
                   <span className="text-lg font-bold text-orange-600">{item.daysSinceSale} days</span>
                 </div>
                 <p className="text-xs text-gray-600">
-                  {item.daysSinceSale >= 90 
-                    ? "Product has been unsold for over 3 months - maximum discount urgency" 
-                    : item.daysSinceSale >= 60 
-                    ? "Product has been unsold for 2-3 months - high discount urgency"
-                    : item.daysSinceSale >= 30 
-                    ? "Product has been unsold for 1-2 months - moderate discount urgency"
+                  {item.daysSinceSale >= 365 
+                    ? "Product has been unsold for over 1 year - maximum discount urgency" 
+                    : item.daysSinceSale >= 300 
+                    ? "Product has been unsold for 10+ months - high discount urgency"
+                    : item.daysSinceSale >= 180 
+                    ? "Product has been unsold for 6-10 months - moderate discount urgency"
                     : "Product recently sold - minimal discount needed"}
                 </p>
                 <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
-                  <div className="bg-orange-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, (item.daysSinceSale / 90) * 100)}%` }}></div>
+                  <div className="bg-orange-500 h-1.5 rounded-full" style={{ width: `${Math.min(100, (item.daysSinceSale / 365) * 100)}%` }}></div>
                 </div>
                 <p className="text-[10px] text-gray-500 mt-1">{getDiscountProgression()}</p>
               </div>
@@ -2504,7 +2438,6 @@ function DeadstockAnalysisModal({
   );
 }
 
-// Smart Reorder Point Explanation Modal
 function SmartReorderExplanationModal({ 
   item, 
   onClose
@@ -2538,7 +2471,6 @@ function SmartReorderExplanationModal({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Main Metrics */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-200">
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Current Stock</p>
@@ -2552,7 +2484,6 @@ function SmartReorderExplanationModal({
             </div>
           </div>
 
-          {/* Static vs Smart Comparison */}
           <div className="border border-gray-200 rounded-xl p-4 space-y-3">
             <h3 className="font-bold text-gray-800 flex items-center gap-2">
               <BarChart3 size={18} className="text-emerald-600" />
@@ -2591,14 +2522,12 @@ function SmartReorderExplanationModal({
             )}
           </div>
 
-          {/* Adjustment Factors */}
           <div className="border border-gray-200 rounded-xl p-4 space-y-3">
             <h3 className="font-bold text-gray-800 flex items-center gap-2">
               <Zap size={18} className="text-orange-600" />
               What's Affecting This Number?
             </h3>
             <div className="space-y-2">
-              {/* Delivery Wait Time */}
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-2">
                   <Clock size={16} className="text-blue-600" />
@@ -2609,7 +2538,6 @@ function SmartReorderExplanationModal({
                 </p>
               </div>
 
-              {/* Expected Sales */}
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-2">
                   <TrendingUp size={16} className="text-green-600" />
@@ -2620,7 +2548,6 @@ function SmartReorderExplanationModal({
                 </p>
               </div>
 
-              {/* Days Until We Run Out */}
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-2">
                   <AlertTriangle size={16} className="text-red-600" />
@@ -2633,7 +2560,6 @@ function SmartReorderExplanationModal({
             </div>
           </div>
 
-          {/* Why This Amount */}
           {item.isSmartAdjusted && item.adjustmentReason && (
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
               <h3 className="font-bold text-gray-800 mb-2 text-sm">Why We Recommend This Amount</h3>
@@ -2643,7 +2569,6 @@ function SmartReorderExplanationModal({
             </div>
           )}
 
-          {/* What You Should Do */}
           <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
             <div className="flex items-start gap-3">
               <CheckCircle2 size={20} className="text-emerald-600 flex-shrink-0 mt-0.5" />
@@ -2659,7 +2584,6 @@ function SmartReorderExplanationModal({
             </div>
           </div>
 
-          {/* How This Works */}
           <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
             <h3 className="font-bold text-gray-800 mb-3 text-sm">How We Calculate This Number</h3>
             <ul className="space-y-3 text-xs text-gray-600">
@@ -2693,7 +2617,6 @@ function SmartReorderExplanationModal({
   );
 }
 
-// Predictive Product Insight Modal Component
 function PredictiveProductInsightModal({
   product,
   onClose,
@@ -2762,7 +2685,6 @@ function PredictiveProductInsightModal({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Prediction Chart */}
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[
@@ -2785,7 +2707,6 @@ function PredictiveProductInsightModal({
             </ResponsiveContainer>
           </div>
 
-          {/* Key Metrics */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-gray-50 rounded-xl p-4 text-center">
               <p className="text-xs text-gray-500 uppercase tracking-wider">Growth Rate</p>
@@ -2807,7 +2728,6 @@ function PredictiveProductInsightModal({
             </div>
           </div>
 
-          {/* Current vs Predicted Performance */}
           <div className="border border-gray-200 rounded-xl p-4">
             <h3 className="font-bold text-gray-800 mb-3">Performance Comparison</h3>
             <div className="space-y-3">
@@ -2832,7 +2752,6 @@ function PredictiveProductInsightModal({
             </div>
           </div>
 
-          {/* AI Insights */}
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Brain size={18} className="text-purple-600" />
@@ -2872,7 +2791,6 @@ function PredictiveProductInsightModal({
             </ul>
           </div>
 
-          {/* Recommended Actions */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Zap size={18} className="text-amber-600" />

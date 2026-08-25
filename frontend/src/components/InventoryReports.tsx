@@ -1,5 +1,3 @@
-// src/components/InventoryReports.tsx
-
 "use client";
 
 import React, { useState, useMemo } from "react";
@@ -25,8 +23,6 @@ import QRScannerModal from "./QRScannerModal";
 import ProductDetailsModal from "./ProductDetailsModal";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useNotification } from "./NotificationProvider";
-
-// Use the Product type from FirebaseContext to ensure consistency
 import { calculateSmartReorderPoint } from "@/utils/reorderCalculations";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
 
@@ -36,7 +32,6 @@ type InventoryData = Product & {
   publicViewCount?: number;
 };
 
-// Helper function to get default lead time based on category
 const getDefaultLeadTime = (category: string): number => {
   const leadTimes: Record<string, number> = {
     'Contact Lenses': 5,
@@ -46,7 +41,7 @@ const getDefaultLeadTime = (category: string): number => {
     'Accessories': 5,
     'Vitamins': 3,
   };
-  return leadTimes[category] || 5; // Default 5 days
+  return leadTimes[category] || 5;
 };
 
 interface ReportFilters {
@@ -120,20 +115,17 @@ export default function InventoryReports({
   const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
   const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
   
-  // Date Range State for validation
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
 
-  // Handle from date change
   const handleFromDateChange = (value: string) => {
     setFromDate(value);
     setFilters(prev => ({
       ...prev,
       dateRange: { ...prev.dateRange, startDate: value }
     }));
-    // If toDate is set and is less than the new fromDate, clear toDate
     if (toDate && value && new Date(value) > new Date(toDate)) {
       setToDate("");
       setFilters(prev => ({
@@ -143,7 +135,6 @@ export default function InventoryReports({
     }
   };
   
-  // Handle to date change
   const handleToDateChange = (value: string) => {
     setToDate(value);
     setFilters(prev => ({
@@ -152,7 +143,6 @@ export default function InventoryReports({
     }));
   };
   
-  // Clear date range
   const clearDateRange = () => {
     setFromDate("");
     setToDate("");
@@ -162,12 +152,10 @@ export default function InventoryReports({
     }));
   };
 
-  // Helper function to check if a product is perishable
   const isProductPerishable = (product: InventoryData): boolean => {
     return product.category === "Solutions" || product.category === "Vitamins";
   };
 
-  // Helper function to calculate days since last sale for a product
   const getDaysSinceLastSale = (product: InventoryData, today: Date): number => {
     const completedTransactions = (transactions || []).filter(t => t.status === 'completed');
     
@@ -194,7 +182,6 @@ export default function InventoryReports({
             createdDate = new Date(product.createdAt);
           }
         } catch (e) {
-          // ignore
         }
       }
       
@@ -210,7 +197,8 @@ export default function InventoryReports({
   const isProductDeadstock = (product: InventoryData, today: Date): boolean => {
     if ((product as any).archived === true) return false;
     const daysSinceSale = getDaysSinceLastSale(product, today);
-    return daysSinceSale >= 30;
+    const DEADSTOCK_DAYS_THRESHOLD = 365;
+    return daysSinceSale >= DEADSTOCK_DAYS_THRESHOLD;
   };
 
   const filteredProducts = useMemo(() => {
@@ -335,12 +323,6 @@ export default function InventoryReports({
       ...prev,
       [key]: value,
     }));
-  };
-
-  const handleDateKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.currentTarget.blur();
-    }
   };
 
   const handleEditProduct = (product: InventoryData) => {
@@ -606,7 +588,6 @@ export default function InventoryReports({
     return "text-green-600 bg-green-50 border border-green-200";
   };
 
-  // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF({
       orientation: "landscape",
@@ -622,10 +603,8 @@ export default function InventoryReports({
       const marginRaw = product.markupPrice - product.baseCost;
       const marginPercent = product.baseCost > 0 ? ((marginRaw / product.baseCost) * 100).toFixed(1) : "0";
       
-      // Build expiry column based on product type
       let expiryDisplay = "N/A";
       if (isProductPerishable(product) && (product as any).batches && (product as any).batches.length > 0) {
-        // For perishable products, show all batch expiry dates
         const batchExpiries = (product as any).batches
           .map((batch: any, index: number) => {
             if (batch.expiryDate) {
@@ -638,7 +617,6 @@ export default function InventoryReports({
           .join("\n");
         expiryDisplay = batchExpiries || "N/A";
       } else if (!isProductPerishable(product) && product.expiryDate) {
-        // For non-perishable products, show the product expiry date
         const expDate = new Date(product.expiryDate);
         expiryDisplay = `${(expDate.getMonth() + 1).toString().padStart(2, '0')}/${expDate.getDate().toString().padStart(2, '0')}/${expDate.getFullYear()}`;
       }
@@ -815,7 +793,7 @@ export default function InventoryReports({
     doc.text(`Low Stock Items: ${lowStockCount}`, 14, finalY + 26);
     
     const deadstockCount = filteredProducts.filter(p => isProductDeadstock(p, new Date()) && p.stock > 0).length;
-    doc.text(`Deadstock Items (30+ days unsold): ${deadstockCount}`, 14, finalY + 32);
+    doc.text(`Deadstock Items (365+ days unsold): ${deadstockCount}`, 14, finalY + 32);
 
     doc.save(
       `Inventory_Report_${new Date().toISOString().split("T")[0]}.pdf`
@@ -837,7 +815,6 @@ export default function InventoryReports({
         animate={{ opacity: 1, y: 0 }}
         className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden"
       >
-        {/* Header */}
         <div className="shrink-0 p-3 sm:p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
             <div className="flex items-center gap-2 sm:gap-3">
@@ -919,7 +896,6 @@ export default function InventoryReports({
           </div>
         </div>
 
-        {/* Search and Filters Section */}
         <div className="shrink-0 px-3 sm:px-5 pt-3 sm:pt-4 bg-slate-50 border-b border-gray-100">
           <div className="relative mb-3">
             <div className="flex items-stretch">
@@ -1056,9 +1032,7 @@ export default function InventoryReports({
           )}
         </div>
 
-        {/* Results Summary and Table */}
         <div className="flex-1 overflow-auto p-3 sm:p-5 bg-gray-50/50">
-          {/* Inventory Value Summary Cards */}
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 mb-4">
             <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200">
               <p className="text-[9px] sm:text-[10px] text-gray-500 font-medium">
@@ -1241,7 +1215,6 @@ export default function InventoryReports({
           </div>
         </div>
 
-        {/* Archive List Modal */}
         {showArchiveList && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-auto max-h-[80vh]">
@@ -1294,7 +1267,6 @@ export default function InventoryReports({
           </div>
         )}
 
-        {/* Archive Confirmation Modal */}
         {pendingArchive && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
@@ -1332,7 +1304,6 @@ export default function InventoryReports({
           </div>
         )}
 
-        {/* Edit Product Modal */}
         {editingProduct && (
           <ProductModal
             mode="edit"
@@ -1346,7 +1317,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* Adjust Stock Modal */}
         {adjustingProduct && (
           <ProductModal
             mode="adjust"
@@ -1358,7 +1328,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* Add Product Modal */}
         {addingProduct && (
           <ProductModal
             mode="add"
@@ -1370,7 +1339,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* Local QR Scanner */}
         {showLocalScanner && (
           <QRScannerModal
             onClose={() => setShowLocalScanner(false)}
@@ -1396,7 +1364,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* QR Code Modal */}
         {selectedQRProduct && (
           <QRCodeModal
             productId={selectedQRProduct.id}
@@ -1409,7 +1376,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* Product Details Modal */}
         {viewingProduct && (
           <ProductDetailsModal
             product={viewingProduct}
@@ -1418,7 +1384,6 @@ export default function InventoryReports({
           />
         )}
 
-        {/* Batch Adjustment Modal */}
         {adjustingBatch && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <motion.div

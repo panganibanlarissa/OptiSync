@@ -1,5 +1,3 @@
-// src/app/(app)/inventory/page.tsx
-
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -71,7 +69,6 @@ export default function InventoryPage() {
   const [pendingRestockProduct, setPendingRestockProduct] = useState<{ product: InventoryData; batchId?: string; batchSku?: string } | null>(null);
   const [restockQuantity, setRestockQuantity] = useState("1");
   const [isApplyingRestock, setIsApplyingRestock] = useState(false);
-  // State for batch QR code after adding perishable product
   const [newBatchQR, setNewBatchQR] = useState<{ batchId: string; batchSku: string; productId: string; productName: string; productPrice: number; productSku: string } | null>(null);
 
   const { showNotification, showToastOnly } = useNotification();
@@ -133,7 +130,6 @@ export default function InventoryPage() {
     setIsApplyingRestock(true);
     try {
       if (isPerishable && batchId) {
-        // Update batch stock
         const batches = await getProductBatches(product.id);
         const batch = batches.find(b => b.id === batchId);
         if (!batch) {
@@ -149,11 +145,9 @@ export default function InventoryPage() {
         );
         showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} added to batch "${batchSku || batch.batchSku}" for "${product.name}"`, "success", "Stock Updated");
         
-        // Refresh the product in local state
         const freshBatches = await getProductBatches(product.id);
         const totalStock = freshBatches.reduce((sum, b) => sum + b.stock, 0);
         
-        // Get updated product data
         const productRef = doc(db, `clinics/${CLINIC_ID}/products`, product.id);
         const productSnap = await getDoc(productRef);
         const freshProductData = productSnap.exists() ? productSnap.data() : {};
@@ -171,7 +165,6 @@ export default function InventoryPage() {
             : p
         ));
       } else {
-        // Update parent product stock (non-perishable)
         const newStock = product.stock + quantity;
         await adjustStock(product.id, newStock, `Received via QR Scan (+${quantity})`, userName || 'Staff', userId || 'system');
         showNotification(`+${quantity} unit${quantity > 1 ? 's' : ''} added to "${product.name}"`, "success", "Stock Updated");
@@ -186,7 +179,6 @@ export default function InventoryPage() {
     }
   };
 
-  // Handle add product with proper error handling and batch QR for perishable products
   const handleAddProduct = async (data: ProductFormData): Promise<string> => {
     try {
       console.log("📦 Adding product:", data.name);
@@ -194,10 +186,8 @@ export default function InventoryPage() {
       console.log("✅ Product added successfully with ID:", newId);
       showToastOnly(`New product "${data.name}" added to inventory list`, "success");
       
-      // For perishable products, fetch the newly created batch and show QR code
       const isPerishable = data.category === "Solutions" || data.category === "Vitamins";
       if (isPerishable && data.batchNumber && data.expiryDate && data.stock > 0) {
-        // Fetch the batches for this new product
         const batches = await getProductBatches(newId);
         if (batches.length > 0) {
           const firstBatch = batches[0];
@@ -251,22 +241,18 @@ export default function InventoryPage() {
             const isPerishable = product.category === "Solutions" || product.category === "Vitamins";
 
             if (batchId && isPerishable) {
-              // Batch adjustment - update specific batch
               console.log(`Updating batch ${batchId} for product ${product.name}`);
               try {
                 await updateBatchStock(batchId, newStock, reason, userName || 'Staff', userId || 'system');
                 showNotification(`Stock updated for batch`, "success", "Stock Updated");
                 
-                // Refresh product batches to update the UI
                 const freshBatches = await getProductBatches(id);
                 const totalStock = freshBatches.reduce((sum, b) => sum + b.stock, 0);
                 
-                // Get updated product data
                 const productRef = doc(db, `clinics/${CLINIC_ID}/products`, id);
                 const productSnap = await getDoc(productRef);
                 const freshProductData = productSnap.exists() ? productSnap.data() : {};
                 
-                // Update local state with all fresh data
                 setProducts(prev => prev.map(p => 
                   p.id === id 
                     ? { 
@@ -284,7 +270,6 @@ export default function InventoryPage() {
                 showNotification("Failed to adjust batch stock.", "error", "Error");
               }
             } else {
-              // Regular product adjustment (non-perishable)
               try {
                 await adjustStock(id, newStock, reason, userName || 'Staff', userId || 'system');
                 showNotification(`Stock adjusted for "${product.name}"`, "success", "Stock Updated");
@@ -312,7 +297,6 @@ export default function InventoryPage() {
         />
       </motion.div>
 
-      {/* QR Code Modal for newly created batch (perishable products only) */}
       <AnimatePresence>
         {newBatchQR && (
           <QRCodeModal

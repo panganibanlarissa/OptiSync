@@ -47,7 +47,7 @@ import { db } from "@/lib/firebase";
 const THEME_BG = "bg-[#0B3C8A]";
 const THEME_HOVER = "hover:bg-[#082F6E]";
 const THEME_TEXT = "text-[#0B3C8A]";
-const DEADSTOCK_DAYS_THRESHOLD = 30;
+const DEADSTOCK_DAYS_THRESHOLD = 365;
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
 const toValidDate = (value: unknown): Date | null => {
