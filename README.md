@@ -31,41 +31,35 @@ OptiSync addresses the operational challenges faced by optical clinics by provid
 ---
 
 ## Key Features
-### **Landing Page & Authentication**
-- Responsive, animated landing page with Framer Motion
-- Secure role-based authentication (Admin vs. Staff) via Firebase
-- RA 10173 compliance with explicit terms and privacy policy agreements
-- Password recovery and account management
+### **Authentication & Access Control**
+- Role-based authentication using Firebase (Admin & Staff)
+- Login page, password recovery, and session management
 
-### **Intelligent Dashboard**
-- Real-time KPI tracking: Revenue, Gross Profit, Sales Trends
-- ML-powered forecasting for demand and inventory optimization
-- Automated alerts: low-stock, deadstock, and expiry notifications
-- Visual analytics with interactive charts and graphs
+### **Dashboards & Analytics**
+- Admin and Staff dashboards with KPIs and quick actions (`AdminDashboard.tsx`, `StaffDashboard.tsx`)
+- Visual charts and activity logs for products, scans, and transactions
 
 ### **Inventory Management**
-- Complete CRUD operations for products (frames, solutions, accessories, vitamins, and related items)
-- QR code generation with immediate QR tag display after product creation
-- QR scan-in and scan-out flows with quantity confirmation
-- Scan-out entries are tracked as damaged/exchanged units for accurate inventory accounting
-- Cloud-based image management via Cloudinary
-- Color-coded inventory status and automated deadstock detection
-- Product categorization and filtering (including Vitamins in POS filters)
-- Inventory report export to PDF
+- Full product CRUD with categories (frames, solutions, accessories, vitamins)
+- QR code generation and scanning flows (scan-in / scan-out) via QR components
+- Cloudinary image upload and storage integration
+- Expiry alerts, low-stock/deadstock detection, and PDF export of reports
 
 ### **Point of Sale (POS)**
-- Streamlined patient checkout with cart management
-- Multiple payment methods (Cash, Online/Reference-based)
-- Discount support (Loyalty, PWD/Senior)
-- Official, printable PDF receipts
-- Transaction history and warranty replacement processing
+- Patient checkout with cart management and transaction history
+- Multiple payment flows (cash and reference/online), discount handling, and printable receipts
+- Warranty replacement workflows and replacement request approval UI
 
-### **Security & Reliability**
-- AES encryption for sensitive data (`crypto-js`)
-- Automated backup services with recovery options
-- Encrypted local storage for session integrity
-- Secure API endpoints with role-based access control
-- Audit logging for compliance
+### **Machine Learning & Forecasting**
+- ML forecasting integration for demand and reorder recommendations (`useMLForecasting.ts`, `mlApiClient.ts`)
+
+### **Security & Data Protection**
+- AES-based encryption for sensitive data and encrypted local storage (`encryption.ts`, `useEncryptedStorage.ts`)
+- Role-based API protections and audit logging
+
+### **Platform & Integrations**
+- Frontend: Next.js (App Router) + Tailwind CSS; Backend: Flask ML service
+- Integrations: Firebase (Auth & Firestore), Cloudinary (images), Docker Compose for local orchestration
 
 ---
 
@@ -218,12 +212,12 @@ docker-compose up -d
 5. Add Firebase config to your frontend `.env.local`:
 
 ```env
-NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_auth_domain
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_storage_bucket
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_FIREBASE_API_KEY
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=YOUR_FIREBASE_AUTH_DOMAIN
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=YOUR_FIREBASE_PROJECT_ID
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=YOUR_FIREBASE_STORAGE_BUCKET
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=YOUR_FIREBASE_MESSAGING_SENDER_ID
+NEXT_PUBLIC_FIREBASE_APP_ID=YOUR_FIREBASE_APP_ID
 ```
 
 ### **Cloudinary Setup**
@@ -233,9 +227,22 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
 3. Add to frontend `.env.local`:
 
 ```env
-NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
+NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=YOUR_CLOUDINARY_CLOUD_NAME
+NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=YOUR_CLOUDINARY_UPLOAD_PRESET
+CLOUDINARY_API_KEY=YOUR_CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET=YOUR_CLOUDINARY_API_SECRET
+```
+
+### **Other Frontend Environment Variables**
+
+Add these to your frontend `.env.local` as well:
+
+```env
+# ML Service URL (used by the frontend to call the ML forecasting service)
+NEXT_PUBLIC_ML_SERVICE_URL=http://localhost:8000
+
+# AES-256 encryption key used by the frontend utilities
+NEXT_PUBLIC_ENCRYPTION_KEY=YOUR_ENCRYPTION_KEY
 ```
 
 ### **Backend ML Service Configuration**
