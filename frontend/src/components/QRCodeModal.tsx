@@ -4,6 +4,9 @@
 import React, { useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Printer } from 'lucide-react';
+import QRCode from 'qrcode';
+
+const PESO_SIGN = '\u20B1';
 
 const THEME_BG = 'bg-[#0B3C8A]';
 const THEME_HOVER = 'hover:bg-[#082F6E]';
@@ -46,16 +49,27 @@ export default function QRCodeModal({
     }
   }
 
-  const printQRCode = () => {
+  const printQRCode = async () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrValue)}`;
-
-    const isBatch = batchId && batchSku;
-    const displaySku = isBatch ? `${productSku} (Batch: ${batchSku})` : productSku;
-    const displayName = isBatch ? `${productName} (Batch: ${batchSku})` : productName;
-    const additionalInfo = isBatch && batchExpiry ? `<div class="batch-expiry">Expiry: ${new Date(batchExpiry).toLocaleDateString()}</div>` : '';
+    const qrImageUrl = await QRCode.toDataURL(qrValue, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 300,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    });
+    const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;',
+    }[character] || character));
+    const formattedExpiry = batchExpiry ? new Date(batchExpiry).toLocaleDateString() : '';
+    const batchMarkup = batchSku ? `<div class="detail">Batch: ${escapeHtml(batchSku)}</div>` : '';
+    const expiryMarkup = formattedExpiry ? `<div class="detail">Expiry: ${escapeHtml(formattedExpiry)}</div>` : '';
+    const priceMarkup = productPrice !== undefined ? `${PESO_SIGN}${productPrice.toFixed(2)}` : 'N/A';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -71,50 +85,36 @@ export default function QRCodeModal({
             box-sizing: border-box;
           }
           body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            padding: 20px;
-            background: #f5f5f5;
+            font-family: Arial, sans-serif;
+            padding: 10mm;
+            background: white;
           }
           @media print {
             body {
-              padding: 10px;
+              padding: 0;
               background: white;
             }
             .tag {
               page-break-after: avoid;
               break-inside: avoid;
-              margin: 10px 0;
+              margin: 0;
             }
           }
-          .container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            justify-content: center;
-          }
           .tag {
-            width: 400px;
+            width: 68mm;
+            height: 22mm;
             background: white;
-            border-radius: 12px;
-            padding: 0;
+            padding: 2mm;
             display: flex;
             align-items: stretch;
-            gap: 0;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            border: 2px solid #e5e7eb;
+            gap: 2mm;
+            border: 0.25mm solid #000;
             overflow: hidden;
           }
-          .qr-section {
-            flex: 0 0 150px;
-            background: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-          }
           .qr-code-container {
-            width: 140px;
-            height: 140px;
+            flex: 0 0 12.7mm;
+            width: 12.7mm;
+            height: 12.7mm;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -126,87 +126,41 @@ export default function QRCodeModal({
           }
           .info-section {
             flex: 1;
-            padding: 20px 24px;
+            min-width: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            justify-content: space-between;
-            background: white;
-          }
-          .product-info {
-            margin-bottom: 16px;
-          }
-          .product-label {
-            font-size: 11px;
-            color: #6B7280;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            justify-content: center;
           }
           .product-name {
-            font-size: 18px;
+            font-size: 7pt;
             font-weight: 700;
-            color: #1F2937;
-            line-height: 1.3;
-            margin-bottom: 8px;
+            line-height: 1.1;
+            overflow-wrap: anywhere;
           }
-          .product-sku {
-            font-size: 10px;
-            color: #9CA3AF;
-            font-family: 'Courier New', monospace;
-            letter-spacing: 0.5px;
+          .detail {
+            font-size: 5.5pt;
+            line-height: 1.2;
+            overflow-wrap: anywhere;
           }
-          .batch-expiry {
-            font-size: 10px;
-            color: #D97706;
-            margin-top: 4px;
-          }
-          .price-section {
-            background: #FBBF24;
-            border-radius: 8px;
-            padding: 12px 16px;
-            text-align: center;
-          }
-          .price-label {
-            font-size: 10px;
-            color: #78350F;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-          }
-          .price-value {
-            font-size: 28px;
+          .price {
+            font-size: 6pt;
             font-weight: 700;
-            color: #78350F;
-          }
-          .price-currency {
-            font-size: 16px;
+            margin-top: 1mm;
           }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="tag">
-            <div class="qr-section">
-              <div class="qr-code-container">
-                <img src="${qrImageUrl}" alt="QR Code for ${displayName}" />
-              </div>
-            </div>
-            <div class="info-section">
-              <div class="product-info">
-                <div class="product-label">Product</div>
-                <div class="product-name">${displayName}</div>
-                <div class="product-sku">SKU: ${displaySku}</div>
-                ${additionalInfo}
-              </div>
-              <div class="price-section">
-                <div class="price-label">Retail Price</div>
-                <div class="price-value">
-                  <span class="price-currency">₱</span>${productPrice ? productPrice.toFixed(2) : 'N/A'}
-                </div>
-              </div>
-            </div>
+        <div class="tag">
+          <div class="qr-code-container">
+            <img src="${qrImageUrl}" alt="QR Code for ${escapeHtml(productName)}" />
+          </div>
+          <div class="info-section">
+            <div class="product-name">${escapeHtml(productName)}</div>
+            <div class="detail">SKU: ${escapeHtml(productSku)}</div>
+            ${batchMarkup}
+            ${expiryMarkup}
+            <div class="price">Retail: ${priceMarkup}</div>
           </div>
         </div>
       </body>

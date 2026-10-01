@@ -13,6 +13,7 @@ import {
   Edit2,
   QrCode,
   ArrowRightLeft,
+  Download,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import "@/lib/fonts/NotoSans-Regular-normal.js";
@@ -25,6 +26,7 @@ import { useFirebase } from "@/context/FirebaseContext";
 import { useNotification } from "./NotificationProvider";
 import { calculateSmartReorderPoint } from "@/utils/reorderCalculations";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
+import { downloadInventoryQrPdf } from "@/utils/inventoryQrPdf";
 
 import type { Product, ProductBatch } from "@/context/FirebaseContext";
 
@@ -114,11 +116,26 @@ export default function InventoryReports({
   const [adjustmentQuantity, setAdjustmentQuantity] = useState<number>(1);
   const [adjustmentType, setAdjustmentType] = useState<"restock" | "damaged">("restock");
   const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
+  const [isDownloadingQrPdf, setIsDownloadingQrPdf] = useState(false);
   
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
   
   const effectiveSearchQuery = typeof searchQuery !== "undefined" ? searchQuery : filters.searchQuery;
+
+  const handleDownloadInventoryQrPdf = async () => {
+    if (isDownloadingQrPdf || products.length === 0) return;
+    setIsDownloadingQrPdf(true);
+    try {
+      await downloadInventoryQrPdf(products);
+      showToastOnly("Inventory QR codes downloaded as PDF", "success");
+    } catch (error) {
+      console.error("Failed to create inventory QR PDF:", error);
+      showNotification("Failed to create the inventory QR PDF.", "error", "Download Failed");
+    } finally {
+      setIsDownloadingQrPdf(false);
+    }
+  };
 
   const handleFromDateChange = (value: string) => {
     setFromDate(value);
@@ -889,6 +906,17 @@ export default function InventoryReports({
                     <FileText size={14} />
                     <span className="hidden sm:inline"> Download PDF</span>
                     <span className="sm:hidden">PDF</span>
+                  </button>
+
+                  <button
+                    onClick={handleDownloadInventoryQrPdf}
+                    disabled={products.length === 0 || isDownloadingQrPdf}
+                    className="flex items-center justify-center gap-1.5 sm:gap-2 border border-[#0B3C8A] hover:border-blue-400 bg-blue-50 text-[#0B3C8A] px-3 py-2 rounded-md sm:rounded-lg text-[10px] sm:text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    title="Download QR codes for all inventory products"
+                  >
+                    <Download size={14} />
+                    <span className="hidden sm:inline">{isDownloadingQrPdf ? "Creating QR PDF..." : "Download QR PDF"}</span>
+                    <span className="sm:hidden">QR PDF</span>
                   </button>
                 </>
               )}
