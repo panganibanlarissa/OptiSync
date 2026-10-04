@@ -756,6 +756,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const listenersSetupRef = useRef(false);
   const initialStaffFetchDoneRef = useRef(false);
   const replacementRequestsListenerRef = useRef<(() => void) | null>(null);
+  const currentUserDocListenerRef = useRef<(() => void) | null>(null);
 
   // ================= AUTH =================
 
@@ -929,6 +930,79 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [user]);
+
+  // ================= CURRENT USER DOC REAL-TIME LISTENER =================
+  // Watches the logged-in user's own document so that if an admin
+  // deactivates or deletes the account, the active session is terminated
+  // immediately instead of waiting for a manual refresh.
+  useEffect(() => {
+    if (!user) {
+      if (currentUserDocListenerRef.current) {
+        currentUserDocListenerRef.current();
+        currentUserDocListenerRef.current = null;
+      }
+      return;
+    }
+
+    // Clean up any previous listener before starting a new one
+    if (currentUserDocListenerRef.current) {
+      currentUserDocListenerRef.current();
+      currentUserDocListenerRef.current = null;
+    }
+
+    const userDocRef = doc(db, "users", user.uid);
+
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      async (snap) => {
+        if (!snap.exists()) return;
+
+        const data = snap.data();
+        const newStatus = data?.status;
+
+        if (newStatus === "Inactive" || newStatus === "Deleted") {
+          console.warn(
+            `🔒 Session revoked: user status is "${newStatus}". Logging out immediately.`
+          );
+
+          // Log the forced logout so it appears in the activity log
+          try {
+            await logLogout(
+              data?.name || userName || "User",
+              user.uid,
+              user.email || null,
+              sessionStartTimeRef.current
+                ? Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)
+                : undefined
+            );
+          } catch (err) {
+            console.error("Failed to log forced logout:", err);
+          }
+
+          // Stop the listener before signing out to avoid double-fire
+          if (currentUserDocListenerRef.current) {
+            currentUserDocListenerRef.current();
+            currentUserDocListenerRef.current = null;
+          }
+
+          // Sign out — AuthWrapper will redirect to /login
+          await signOut(auth);
+        }
+      },
+      (error) => {
+        console.error("Error in current user doc listener:", error);
+      }
+    );
+
+    currentUserDocListenerRef.current = unsubscribe;
+
+    return () => {
+      if (currentUserDocListenerRef.current) {
+        currentUserDocListenerRef.current();
+        currentUserDocListenerRef.current = null;
+      }
+    };
+  }, [user, userName]);
 
   // ================= FETCH STAFF USERS =================
 
@@ -1671,6 +1745,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       if (replacementRequestsListenerRef.current) {
         replacementRequestsListenerRef.current();
         replacementRequestsListenerRef.current = null;
+      }
+      
+      if (currentUserDocListenerRef.current) {
+        currentUserDocListenerRef.current();
+        currentUserDocListenerRef.current = null;
       }
       
       pendingUserPasswords.current.clear();

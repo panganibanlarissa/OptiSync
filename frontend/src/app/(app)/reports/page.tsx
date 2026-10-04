@@ -2,7 +2,8 @@
 
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase } from "@/context/FirebaseContext";
 import { useMLForecasting } from "@/hooks/useMLForecasting";
@@ -19,7 +20,8 @@ import {
   TrendingUp,
   Calendar,
   Repeat,
-  CheckCheck
+  CheckCheck,
+  Shield
 } from "lucide-react";
 
 
@@ -181,6 +183,7 @@ const formatPdfCurrency = (amount: number): string => {
 };
 
 export default function ReportsPage() {
+  const router = useRouter();
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedDay, setSelectedDay] = useState<string>("all");
@@ -200,10 +203,18 @@ export default function ReportsPage() {
     transactions: firebaseTransactions,
     products: firebaseProducts,
     userRole,
-    appUser
+    appUser,
+    loading: firebaseLoading
   } = useFirebase();
 
   const { recommendations, usingML } = useMLForecasting();
+
+  // Route protection: redirect non-admins away from /reports
+  useEffect(() => {
+    if (!firebaseLoading && userRole && userRole !== 'admin') {
+      router.push('/dashboard');
+    }
+  }, [userRole, firebaseLoading, router]);
 
   // CRITICAL: ALL transactions are counted for revenue - replacements are NOT refunds
   const transactions = useMemo(() => {
@@ -654,7 +665,7 @@ export default function ReportsPage() {
         const { days, lastSaleDate, hasSales, totalSalesCount } = getDaysSinceLastSale(p, rangeFilteredTransactions, today);
         return { ...p, daysSinceSale: days, lastSaleDate, hasSales, totalSalesCount };
       })
-      .filter(p => p.daysSinceSale >= 30)
+      .filter(p => p.daysSinceSale >= 365)
       .sort((a, b) => b.daysSinceSale - a.daysSinceSale);
 
     const periodText = getPeriodText();
@@ -772,7 +783,7 @@ export default function ReportsPage() {
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
     doc.text(`- Identified ${priorityNeeds.length} items requiring restock within the next 30 days to prevent stockouts.`, 14, summaryY + 7);
-    doc.text(`- Identified ${liquidationItems.length} deadstock items (30+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
+    doc.text(`- Identified ${liquidationItems.length} deadstock items (365+ days unsold) consuming warehouse space.`, 14, summaryY + 12);
     doc.text(`- Potential capital recovery from liquidation: ${formatPdfCurrency(liquidationItems.reduce((s, i) => s + (i.stock * i.markupPrice), 0))}`, 14, summaryY + 17);
     doc.text(`- Stock turnover rate: ${stockAccuracyRate.toFixed(1)}% of inventory has moved during the selected period.`, 14, summaryY + 22);
     
@@ -890,11 +901,11 @@ export default function ReportsPage() {
       });
     
     const deadstockData = allProductsData
-    .filter(item => item.daysSinceLastSale >= 30)
+    .filter(item => item.daysSinceLastSale >= 365)
     .sort((a, b) => b.daysSinceLastSale - a.daysSinceLastSale);
 
     if (deadstockData.length === 0) {
-      showNotification("No deadstock inventory (30+ days unsold or never sold) identified in this period.", "info");
+      showNotification("No deadstock inventory (365+ days unsold or never sold) identified in this period.", "info");
       return;
     }
 
@@ -1031,6 +1042,21 @@ export default function ReportsPage() {
   };
 
   const hasActiveFilters = searchQuery || statusFilter !== 'all' || selectedMonth !== 'all' || selectedYear !== new Date().getFullYear() || selectedDay !== 'all' || fromDate || toDate;
+
+  // Route protection: render access-denied screen for non-admins
+  if (userRole !== 'admin') {
+    return (
+      <div className="min-h-screen w-full font-sans p-4 flex items-center justify-center">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md text-center">
+          <Shield className="w-12 h-12 text-red-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-gray-800 mb-2">Access Denied</h2>
+          <p className="text-sm text-gray-600">
+            You need administrator privileges to access this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full font-sans p-2 sm:p-4 box-border pb-20 space-y-4">
