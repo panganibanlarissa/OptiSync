@@ -111,6 +111,7 @@ export default function SettingsPage() {
     fetchStaffUsers, 
     userRole, 
     userId,
+    userEmail: currentUserEmail,
     createStaffUser, 
     updateStaffUser, 
     deleteStaffUser,
@@ -119,8 +120,7 @@ export default function SettingsPage() {
     resetStaffPassword,
     resendVerificationEmail,
     loading: firebaseLoading,
-    userName: currentUserName,
-    userEmail: currentUserEmail
+    userName: currentUserName
   } = useFirebase();
   
   const { showNotification, showToastOnly } = useNotification();
@@ -510,6 +510,7 @@ export default function SettingsPage() {
                       const isActive = user.status === "Active";
                       const isDeleted = user.status === "Deleted";
                       const isResending = resendingEmail === user.email;
+                      const isCurrentUser = user.uid === userId || (!!currentUserEmail && user.email === currentUserEmail);
                       
                       return (
                         <motion.tr 
@@ -525,7 +526,7 @@ export default function SettingsPage() {
                         >
                           <td className="p-4 sm:p-5">
                             <div className="font-bold text-gray-800 flex items-center gap-2">
-                              {user.uid === userId && (
+                              {isCurrentUser && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">
                                   YOU
                                 </span>
@@ -577,8 +578,9 @@ export default function SettingsPage() {
                           </td>
                           <td className="p-4 sm:p-5 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              {user.uid !== userId && !isDeleted && (
+                              {!isDeleted && (
                                 <>
+                                  {/* Reset Password: available for all users including current admin */}
                                   <button 
                                     onClick={() => handleResetPassword(user.email)}
                                     className="p-1.5 sm:p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -586,7 +588,9 @@ export default function SettingsPage() {
                                   >
                                     <Key size={16}/>
                                   </button>
-                                  {isPendingVerification && (
+
+                                  {/* Resend Verification: only for pending accounts */}
+                                  {isPendingVerification && !isCurrentUser && (
                                     <button 
                                       onClick={() => handleResendVerification(user.email)}
                                       disabled={isResending}
@@ -596,6 +600,8 @@ export default function SettingsPage() {
                                       <RefreshCw size={16}/>
                                     </button>
                                   )}
+
+                                  {/* Edit Details: available for all users including current admin */}
                                   <button 
                                     onClick={() => openEditUserModal(user)}
                                     className="p-1.5 sm:p-2 text-gray-400 hover:text-[#0B3C8A] hover:bg-blue-50 rounded-lg transition-colors"
@@ -603,22 +609,28 @@ export default function SettingsPage() {
                                   >
                                     <Edit3 size={16}/>
                                   </button>
-                                  {user.status === 'Active' || user.status === 'PendingVerification' ? (
-                                    <button 
-                                      onClick={() => openDeactivateModal(user)}
-                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
-                                      title="Deactivate User"
-                                    >
-                                      <Ban size={16}/>
-                                    </button>
-                                  ) : (
-                                    <button 
-                                      onClick={() => handleReactivateUser(user)}
-                                      className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                      title="Reactivate User"
-                                    >
-                                      <UserCheck size={16}/>
-                                    </button>
+
+                                  {/* Deactivate / Reactivate: NOT available for current admin */}
+                                  {!isCurrentUser && (
+                                    <>
+                                      {user.status === 'Active' || user.status === 'PendingVerification' ? (
+                                        <button 
+                                          onClick={() => openDeactivateModal(user)}
+                                          className="p-1.5 sm:p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                                          title="Deactivate User"
+                                        >
+                                          <Ban size={16}/>
+                                        </button>
+                                      ) : (
+                                        <button 
+                                          onClick={() => handleReactivateUser(user)}
+                                          className="p-1.5 sm:p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                          title="Reactivate User"
+                                        >
+                                          <UserCheck size={16}/>
+                                        </button>
+                                      )}
+                                    </>
                                   )}
                                 </>
                               )}
@@ -654,7 +666,10 @@ export default function SettingsPage() {
                 <div className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-100 bg-slate-50">
                   <h2 className="text-lg font-black text-gray-800 flex items-center gap-2">
                     <Users size={20} className={THEME_TEXT}/> 
-                    {modalMode === "add" ? "Add Staff Member" : "Edit Staff Details"}
+                    {modalMode === "add" 
+                      ? "Add Staff Member" 
+                      : (userForm.role === "Admin" ? "Edit Admin Details" : "Edit Staff Details")
+                    }
                   </h2>
                   <button 
                     onClick={() => setIsUserModalOpen(false)} 
