@@ -7,18 +7,18 @@ import { useState, useEffect, Suspense } from "react";
 import { useNotification } from "@/components/NotificationProvider";
 import { useFirebase } from "@/context/FirebaseContext";
 import { motion, AnimatePresence, Variants } from "framer-motion";
-import { 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  CheckCircle, 
-  Mail, 
+import {
+  Lock,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  Mail,
   FileText,
   Shield,
-  AlertCircle
+  AlertCircle,
+  X
 } from "lucide-react";
 
-// --- ANIMATION VARIANTS ---
 const fadeIn: Variants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: "easeOut" } },
@@ -28,12 +28,8 @@ const staggerContainer: Variants = {
   visible: { transition: { staggerChildren: 0.1 } },
 };
 
-// Define error type
-interface ErrorWithMessage {
-  message: string;
-}
+const DEACTIVATED_STORAGE_KEY = "olaso_deactivated_account";
 
-// Inner component that uses useSearchParams
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -43,54 +39,97 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Check for verification pending parameter
+
+  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
+  const [deactivatedEmail, setDeactivatedEmail] = useState("");
+
   const verificationPending = searchParams?.get('verification') === 'pending';
-  
-  // Modal States
+
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
 
   const { showNotification } = useNotification();
 
-  // Redirect if already logged in
+  // Restore deactivated modal state from sessionStorage on mount.
+  // This survives the remount caused by AuthWrapper re-rendering when
+  // the login() function calls signOut(auth) and sets user to null.
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(DEACTIVATED_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.email) {
+          setDeactivatedEmail(parsed.email);
+          setShowDeactivatedModal(true);
+        }
+        sessionStorage.removeItem(DEACTIVATED_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     if (user) {
       router.push("/dashboard");
     }
   }, [user, router]);
 
-  // Handle login attempt
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (email && password) {
       setIsLoading(true);
       setError("");
-      
+
       try {
         await login(email, password);
-        // Success - user will be redirected by the useEffect above
       } catch (err: unknown) {
         console.error("Login error:", err);
-        
-        const error = err as ErrorWithMessage;
-        
-        if (error.message === "This account has been deactivated. Please contact an administrator.") {
-          setError("This account has been deactivated. Please contact an administrator.");
+
+        let errorMessage = "";
+        if (typeof err === "string") {
+          errorMessage = err;
+        } else if (err && typeof err === "object") {
+          const anyErr = err as any;
+          errorMessage = anyErr.message || anyErr.toString?.() || "";
+        }
+        if (!errorMessage && err) {
+          errorMessage = String(err);
+        }
+
+        const lower = errorMessage.toLowerCase();
+
+        if (
+          lower.includes("deactivated") ||
+          lower.includes("has been deleted") ||
+          lower.includes("contact an administrator")
+        ) {
+          // Persist BEFORE setting state, so it survives any remount
+          try {
+            sessionStorage.setItem(
+              DEACTIVATED_STORAGE_KEY,
+              JSON.stringify({ email })
+            );
+          } catch {
+            // ignore
+          }
+          setDeactivatedEmail(email);
+          setShowDeactivatedModal(true);
+          setError("");
           showNotification("Account deactivated. Contact admin.", "error");
-        } else if (error.message === "EMAIL_VERIFICATION_REQUIRED") {
-          setError("Please verify your email address before logging in. Check your inbox for the verification link.");
-          showNotification("Email verification required. Check your inbox.", "warning");
-        } else if (error.message.includes("verify your email")) {
+        } else if (
+          errorMessage === "EMAIL_VERIFICATION_REQUIRED" ||
+          lower.includes("verify your email")
+        ) {
           setError("Please verify your email address before logging in. Check your inbox for the verification link.");
           showNotification("Email verification required. Check your inbox.", "warning");
         } else {
           setError("Invalid username or password.");
           showNotification("Login failed. Please check your credentials.", "error");
         }
-        
+
         setIsLoading(false);
       }
     } else {
@@ -98,7 +137,6 @@ function LoginContent() {
     }
   };
 
-  // Clear error when user starts typing
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEmail(e.target.value);
     if (error) setError("");
@@ -117,25 +155,34 @@ function LoginContent() {
     setIsTermsModalOpen(false);
   };
 
+  const handleCloseDeactivatedModal = () => {
+    setShowDeactivatedModal(false);
+    setDeactivatedEmail("");
+    setPassword("");
+    try {
+      sessionStorage.removeItem(DEACTIVATED_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex flex-col font-sans text-gray-800">
-      
-      {/* BACKGROUND DECORATION */}
+
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
         <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-[#0B3C8A]/5 rounded-full blur-3xl" />
         <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-blue-200/20 rounded-full blur-3xl" />
       </div>
 
-      {/* HEADER */}
       <header className="z-10 bg-white/80 backdrop-blur-md border-b border-gray-100 px-6 md:px-12 py-4 flex items-center gap-3 sticky top-0">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.8 }} 
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
         >
           <Image src="/logo.png?v=1" alt="MT Olaso Logo" width={42} height={42} className="drop-shadow-sm" />
         </motion.div>
-        <motion.h1 
-          initial={{ opacity: 0, x: -10 }} 
+        <motion.h1
+          initial={{ opacity: 0, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
           className="text-base md:text-lg font-bold text-[#0B3C8A] tracking-tight"
@@ -144,12 +191,10 @@ function LoginContent() {
         </motion.h1>
       </header>
 
-      {/* MAIN CONTENT */}
       <section className="relative z-10 flex-1 flex items-center justify-center p-4 md:p-8">
         <div className="w-full max-w-6xl flex flex-col md:flex-row items-center justify-center gap-12 md:gap-24">
 
-          {/* LEFT CONTENT (Hero) */}
-          <motion.div 
+          <motion.div
             initial="hidden"
             animate="visible"
             variants={staggerContainer}
@@ -157,8 +202,8 @@ function LoginContent() {
           >
             <motion.div variants={fadeIn} className="relative mb-8 group cursor-default">
               <div className="absolute inset-0 bg-blue-400/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-              <Image 
-                src="/logo.png?v=1" 
+              <Image
+                src="/logo.png?v=1"
                 alt="MT Olaso Logo"
                 width={600}
                 height={300}
@@ -176,8 +221,7 @@ function LoginContent() {
             </motion.p>
           </motion.div>
 
-          {/* LOGIN CARD */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.3, duration: 0.6 }}
@@ -189,7 +233,6 @@ function LoginContent() {
                 <p className="text-sm text-gray-500 mt-2">Please enter your details to sign in.</p>
               </div>
 
-              {/* Verification Pending Message */}
               {verificationPending && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
@@ -207,7 +250,6 @@ function LoginContent() {
               )}
 
               <form onSubmit={handleLogin} className="space-y-4">
-                {/* Email Input */}
                 <div>
                   <div className="relative group">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-[#0B3C8A] transition-colors" />
@@ -221,7 +263,6 @@ function LoginContent() {
                   </div>
                 </div>
 
-                {/* Password Input */}
                 <div>
                   <div className="relative group">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-[#0B3C8A] transition-colors" />
@@ -242,27 +283,25 @@ function LoginContent() {
                   </div>
                 </div>
 
-                {/* Terms and Privacy Policy Statement - CENTERED */}
                 <div className="text-xs text-gray-600 leading-tight pt-2 pb-1 text-center">
                   By logging in, you agree to OlasoSync&apos;s{" "}
-                  <button 
-                    type="button" 
-                    onClick={(e) => { e.preventDefault(); setIsTermsModalOpen(true); }} 
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); setIsTermsModalOpen(true); }}
                     className="text-[#0B3C8A] font-semibold hover:underline"
                   >
                     Terms & Conditions
                   </button>
                   {" "}and{" "}
-                  <button 
-                    type="button" 
-                    onClick={(e) => { e.preventDefault(); setIsPrivacyModalOpen(true); }} 
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); setIsPrivacyModalOpen(true); }}
                     className="text-[#0B3C8A] font-semibold hover:underline"
                   >
                     Privacy Policy
                   </button>.
                 </div>
 
-                {/* Error Message */}
                 <AnimatePresence>
                   {error && (
                     <motion.div
@@ -276,7 +315,6 @@ function LoginContent() {
                   )}
                 </AnimatePresence>
 
-                {/* Login Button */}
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
@@ -301,7 +339,75 @@ function LoginContent() {
         </div>
       </section>
 
-      {/* --- MODALS --- */}
+      <AnimatePresence>
+        {showDeactivatedModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 to-orange-400" />
+
+              <button
+                onClick={handleCloseDeactivatedModal}
+                className="absolute top-4 right-4 p-1.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="p-8 text-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 200, delay: 0.1 }}
+                  className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6"
+                >
+                  <AlertCircle className="w-10 h-10 text-red-600" />
+                </motion.div>
+
+                <h3 className="text-2xl font-bold text-gray-900 mb-3">
+                  Account Deactivated
+                </h3>
+
+                <p className="text-sm text-gray-600 leading-relaxed mb-2">
+                  Your account has been deactivated. Please contact the administrator for assistance.
+                </p>
+
+                {deactivatedEmail && (
+                  <p className="text-xs text-gray-400 mb-6">
+                    Account: <span className="font-medium text-gray-600">{deactivatedEmail}</span>
+                  </p>
+                )}
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-left">
+                  <p className="text-xs font-semibold text-amber-800 mb-1.5">What does this mean?</p>
+                  <ul className="text-xs text-amber-700 space-y-1">
+                    <li>• Your access to OlasoSync has been temporarily suspended</li>
+                    <li>• You cannot log in until an administrator reactivates your account</li>
+                    <li>• Contact your clinic administrator to restore access</li>
+                  </ul>
+                </div>
+
+                <button
+                  onClick={handleCloseDeactivatedModal}
+                  className="w-full rounded-xl bg-[#0B3C8A] py-3 text-white font-bold hover:bg-[#092e6b] shadow-lg transition-all"
+                >
+                  I Understand
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isForgotPasswordOpen && (
           <ForgotPasswordModal
@@ -390,7 +496,6 @@ function LoginContent() {
   );
 }
 
-// Main export wrapped in Suspense
 export default function LoginPage() {
   return (
     <Suspense fallback={
@@ -403,7 +508,6 @@ export default function LoginPage() {
   );
 }
 
-// --- REUSABLE LEGAL MODAL COMPONENT ---
 function LegalModal({
   title,
   icon,
@@ -418,13 +522,13 @@ function LegalModal({
   onAgree: () => void;
 }) {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
     >
-      <motion.div 
+      <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 10 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 10 }}
@@ -465,7 +569,6 @@ function LegalModal({
   );
 }
 
-// --- FORGOT PASSWORD MODAL COMPONENT ---
 function ForgotPasswordModal({
   onClose,
 }: {
@@ -508,7 +611,7 @@ function ForgotPasswordModal({
       showNotification(`Password reset email sent to ${email}`, "success");
     } catch (err: unknown) {
       console.error("Password reset error:", err);
-      
+
       const error = err as { message: string };
       setError(error.message);
       showNotification("Failed to send reset email", "error");
@@ -524,13 +627,13 @@ function ForgotPasswordModal({
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
     >
-      <motion.div 
+      <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 10 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 10 }}
@@ -538,8 +641,8 @@ function ForgotPasswordModal({
         className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8 relative overflow-hidden"
       >
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#0B3C8A] to-blue-400" />
-        <button 
-          onClick={handleClose} 
+        <button
+          onClick={handleClose}
           className="absolute top-4 right-4 p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition"
         >
           ✕
@@ -605,12 +708,12 @@ function ForgotPasswordModal({
             </div>
           </div>
         ) : (
-          <motion.div 
-            initial={{ scale: 0.8, opacity: 0 }} 
-            animate={{ scale: 1, opacity: 1 }} 
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
             className="text-center py-6"
           >
-            <motion.div 
+            <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
@@ -634,7 +737,7 @@ function ForgotPasswordModal({
               >
                 Back to Login
               </button>
-              
+
               <button
                 onClick={() => {
                   setIsSent(false);

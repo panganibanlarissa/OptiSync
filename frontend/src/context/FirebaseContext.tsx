@@ -48,10 +48,8 @@ import {
 import { app as firebaseApp, auth, db } from "@/lib/firebase";
 import { initializeApp, getApps } from "firebase/app";
 
-// 🔥 CONFIG
 const CLINIC_ID = process.env.NEXT_PUBLIC_CLINIC_ID || "rlDgfGc4fZYrriUVdGnYI6Zhj3a2";
 
-// 🔐 SECONDARY AUTH - Used for creating users without affecting main auth
 const getSecondaryAuth = () => {
   const name = "secondary-auth-app";
   const existing = getApps().find((app) => app.name === name);
@@ -63,8 +61,6 @@ const getSecondaryAuth = () => {
     persistence: browserLocalPersistence
   });
 };
-
-// ================= BATCH TYPES =================
 
 export interface ProductBatch {
   id: string;
@@ -180,8 +176,6 @@ export interface AppUser {
   emailVerified?: boolean;
 }
 
-// ================= CONTEXT =================
-
 interface FirebaseContextType {
   user: User | null;
   appUser: AppUser | null;
@@ -197,7 +191,6 @@ interface FirebaseContextType {
   adjustStock: (id: string, newStock: number, reason: string, staffName?: string, staffId?: string, batchId?: string) => Promise<void>;
   archiveProduct: (id: string, archived: boolean, reason?: string, markDeleted?: boolean) => Promise<void>;
 
-  // Batch Management
   addProductBatch: (productId: string, batchSku: string, expiryDate: string, initialStock: number, staffName?: string, staffId?: string) => Promise<string>;
   updateBatchStock: (batchId: string, newStock: number, reason: string, staffName?: string, staffId?: string) => Promise<void>;
   getProductBatches: (productId: string) => Promise<ProductBatch[]>;
@@ -208,7 +201,6 @@ interface FirebaseContextType {
   processReplacement: (id: string, reason: string, processedBy: string) => Promise<void>;
   markReplacementAsCompleted: (id: string, replacedBy: string) => Promise<void>;
 
-  // Replacement Request methods
   replacementRequests: ReplacementRequest[];
   createReplacementRequest: (
     transactionId: string,
@@ -244,11 +236,8 @@ interface FirebaseContextType {
   isOnline: boolean;
 }
 
-const FirebaseContext = createContext<FirebaseContextType | undefined>(
-  undefined
-);
+const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
 
-// Helper function to format last login date
 const formatLastLogin = (date: Date): string => {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -259,20 +248,19 @@ const formatLastLogin = (date: Date): string => {
   if (diffMins < 1) return 'Just now';
   if (diffMins < 60) return `${diffMins} min${diffMins === 1 ? '' : 's'} ago`;
   if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
-  
-  return date.toLocaleDateString('en-US', { 
-    month: 'short', 
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
   });
 };
 
-// Helper function to create or update user document
 const ensureUserDocument = async (uid: string, email: string | null, name?: string) => {
   const userRef = doc(db, "users", uid);
   const userSnap = await getDoc(userRef);
-  
+
   if (!userSnap.exists()) {
     await setDoc(userRef, {
       email: email || "",
@@ -288,15 +276,14 @@ const ensureUserDocument = async (uid: string, email: string | null, name?: stri
     });
     console.log("Created user document for existing account:", uid);
   }
-  
+
   return userRef;
 };
 
-// Helper function to log logout events
 const logLogout = async (staffName: string, staffId: string, userEmail: string | null, sessionDuration?: number) => {
   try {
     const logoutRef = collection(db, `clinics/${CLINIC_ID}/logout_logs`);
-    
+
     const logoutData = {
       staffName: staffName || 'Unknown User',
       staffId: staffId || 'unknown',
@@ -307,7 +294,7 @@ const logLogout = async (staffName: string, staffId: string, userEmail: string |
       logoutDate: new Date().toISOString().split('T')[0],
       createdAt: serverTimestamp()
     };
-    
+
     const docRef = await addDoc(logoutRef, logoutData);
     console.log("✅ Logout event logged successfully with ID:", docRef.id);
     return docRef.id;
@@ -317,13 +304,12 @@ const logLogout = async (staffName: string, staffId: string, userEmail: string |
   }
 };
 
-// Helper function to log stock adjustments
 const logStockAdjustment = async (
-  productId: string, 
-  oldStock: number, 
-  newStock: number, 
-  reason: string, 
-  staffId: string, 
+  productId: string,
+  oldStock: number,
+  newStock: number,
+  reason: string,
+  staffId: string,
   staffName: string,
   productName?: string,
   batchId?: string,
@@ -349,24 +335,22 @@ const logStockAdjustment = async (
   }
 };
 
-// Helper function to get product details string for activity logging
 const getProductDetailsForLog = (items: any[]): string => {
   if (!items || items.length === 0) return '';
-  
+
   const productDetails = items.map(item => {
     const itemName = item.name || 'Unknown Product';
     const itemQuantity = item.quantity || 1;
     return `${itemQuantity}x ${itemName}`;
   }).join(', ');
-  
+
   return productDetails;
 };
 
-// Helper function to log product deletion
 const logProductDeletion = async (productId: string, productName: string, staffName: string, staffId: string) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'product_delete',
       action: 'product_deleted',
@@ -383,12 +367,11 @@ const logProductDeletion = async (productId: string, productName: string, staffN
   }
 };
 
-// Helper function to log product archival/unarchival
 const logProductArchive = async (productId: string, productName: string, archived: boolean, staffName: string, staffId: string, reason?: string) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
     const actionText = archived ? 'archived' : 'restored from archive';
-    
+
     await addDoc(activityRef, {
       type: 'product_archive',
       action: archived ? 'product_archived' : 'product_unarchived',
@@ -407,11 +390,10 @@ const logProductArchive = async (productId: string, productName: string, archive
   }
 };
 
-// Helper function to log product addition
 const logProductAddition = async (productId: string, productName: string, productSku: string, productCategory: string, productPrice: number, staffName: string, staffId: string) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'product_add',
       action: 'product_added',
@@ -431,11 +413,10 @@ const logProductAddition = async (productId: string, productName: string, produc
   }
 };
 
-// Helper function to log batch addition
 const logBatchAddition = async (productId: string, productName: string, batchSku: string, expiryDate: string, initialStock: number, staffName: string, staffId: string) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'batch_add',
       action: 'batch_added',
@@ -455,25 +436,24 @@ const logBatchAddition = async (productId: string, productName: string, batchSku
   }
 };
 
-// Helper function to log product edit with changes
 const logProductEdit = async (
-  productId: string, 
-  productName: string, 
-  changes: Array<{ field: string; oldValue: any; newValue: any }>, 
-  staffName: string, 
+  productId: string,
+  productName: string,
+  changes: Array<{ field: string; oldValue: any; newValue: any }>,
+  staffName: string,
   staffId: string
 ) => {
   try {
     if (changes.length === 0) return;
-    
+
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     const changesText = changes.map(change => {
-      const fieldName = change.field === 'markupPrice' ? 'price' : 
+      const fieldName = change.field === 'markupPrice' ? 'price' :
                         change.field === 'baseCost' ? 'cost' :
                         change.field === 'reorderPoint' ? 'reorder point' :
                         change.field === 'leadTimeDays' ? 'lead time' : change.field;
-      
+
       if (typeof change.oldValue === 'number' && typeof change.newValue === 'number') {
         if (change.field === 'markupPrice' || change.field === 'baseCost') {
           return `${fieldName}: ₱${change.oldValue.toLocaleString()} → ₱${change.newValue.toLocaleString()}`;
@@ -482,7 +462,7 @@ const logProductEdit = async (
       }
       return `${fieldName}: "${change.oldValue}" → "${change.newValue}"`;
     }).join(', ');
-    
+
     await addDoc(activityRef, {
       type: 'product_edit',
       action: 'product_edited',
@@ -500,7 +480,6 @@ const logProductEdit = async (
   }
 };
 
-// Helper function to log scan in/out activity
 const logScanActivity = async (
   productId: string,
   productName: string,
@@ -520,7 +499,7 @@ const logScanActivity = async (
     const description = scanType === 'in'
       ? `${staffName} scanned in ${changeAmount} unit(s) of "${productName}"${batchInfo}. Stock updated from ${oldStock} to ${newStock}.`
       : `${staffName} scanned out ${changeAmount} unit(s) of "${productName}"${batchInfo}. Stock updated from ${oldStock} to ${newStock}.`;
-    
+
     await addDoc(activityRef, {
       type: scanType === 'in' ? 'scan_in' : 'scan_out',
       action: actionText,
@@ -542,12 +521,11 @@ const logScanActivity = async (
   }
 };
 
-// Helper function to log sale completed activity
 const logSaleCompleted = async (transactionId: string, staffName: string, patientName: string, total: number, items: any[]) => {
   try {
     const productDetails = getProductDetailsForLog(items);
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'transaction',
       action: 'sale_completed',
@@ -566,7 +544,6 @@ const logSaleCompleted = async (transactionId: string, staffName: string, patien
   }
 };
 
-// Helper function to log replacement request created
 const logReplacementRequestCreated = async (
   transactionId: string,
   requestId: string,
@@ -578,7 +555,7 @@ const logReplacementRequestCreated = async (
 ) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'replacement_request',
       action: 'replacement_request_created',
@@ -598,7 +575,6 @@ const logReplacementRequestCreated = async (
   }
 };
 
-// Helper function to log replacement request approval
 const logReplacementRequestApproved = async (
   requestId: string,
   transactionId: string,
@@ -609,7 +585,7 @@ const logReplacementRequestApproved = async (
 ) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'replacement_request',
       action: 'replacement_request_approved',
@@ -628,7 +604,6 @@ const logReplacementRequestApproved = async (
   }
 };
 
-// Helper function to log replacement request decline
 const logReplacementRequestDeclined = async (
   requestId: string,
   transactionId: string,
@@ -640,7 +615,7 @@ const logReplacementRequestDeclined = async (
 ) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'replacement_request',
       action: 'replacement_request_declined',
@@ -660,7 +635,6 @@ const logReplacementRequestDeclined = async (
   }
 };
 
-// Helper function to log replacement request completion
 const logReplacementRequestCompleted = async (
   requestId: string,
   transactionId: string,
@@ -671,7 +645,7 @@ const logReplacementRequestCompleted = async (
 ) => {
   try {
     const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-    
+
     await addDoc(activityRef, {
       type: 'replacement_request',
       action: 'replacement_request_completed',
@@ -690,18 +664,17 @@ const logReplacementRequestCompleted = async (
   }
 };
 
-// Helper function to compare objects for changes
 const getChangedFields = (oldData: any, newData: any, ignoredFields: string[] = ['updatedAt', 'createdAt', 'id']): Array<{ field: string; oldValue: any; newValue: any }> => {
   const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
-  
+
   const allKeys = new Set([...Object.keys(oldData || {}), ...Object.keys(newData || {})]);
-  
+
   for (const key of allKeys) {
     if (ignoredFields.includes(key)) continue;
-    
+
     const oldValue = oldData?.[key];
     const newValue = newData?.[key];
-    
+
     if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
       changes.push({
         field: key,
@@ -710,11 +683,9 @@ const getChangedFields = (oldData: any, newData: any, ignoredFields: string[] = 
       });
     }
   }
-  
+
   return changes;
 };
-
-// ================= PROVIDER =================
 
 export function FirebaseProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -733,22 +704,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
   const [isOnline, setIsOnline] = useState(true);
 
-  // Cache flags
   const hasFetchedProductsRef = useRef(false);
   const hasFetchedTransactionsRef = useRef(false);
   const hasFetchedUsersRef = useRef(false);
   const hasFetchedReplacementRequestsRef = useRef(false);
-  
+
   const isFetchingProductsRef = useRef(false);
   const isFetchingTransactionsRef = useRef(false);
   const isFetchingUsersRef = useRef(false);
   const isFetchingReplacementRequestsRef = useRef(false);
-  
+
   const lastProductsFetchRef = useRef<number>(0);
   const lastTransactionsFetchRef = useRef<number>(0);
   const lastUsersFetchRef = useRef<number>(0);
   const lastReplacementRequestsFetchRef = useRef<number>(0);
-  
+
   const CACHE_TTL = 10 * 60 * 1000;
 
   const sessionStartTimeRef = useRef<number | null>(null);
@@ -758,7 +728,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const replacementRequestsListenerRef = useRef<(() => void) | null>(null);
   const currentUserDocListenerRef = useRef<(() => void) | null>(null);
 
-  // ================= AUTH =================
+  const isLoggingInRef = useRef(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -767,22 +737,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       if (u) {
         setUserId(u.uid);
         setUserEmail(u.email || "");
-        
+
         sessionStartTimeRef.current = Date.now();
 
         await ensureUserDocument(u.uid, u.email);
-        
+
         const ref = doc(db, "users", u.uid);
         const snap = await getDoc(ref);
 
         if (snap.exists()) {
           const data = snap.data();
           const isLegacy = data.isLegacyAccount === true;
-          
+
           const createdAt = data.createdAt?.toDate?.() || new Date(0);
           const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
           const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
-          
+
           setUserRole(data.role || "staff");
           setUserName(data.name || "Staff");
 
@@ -821,7 +791,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         listenersSetupRef.current = false;
         initialStaffFetchDoneRef.current = false;
         sessionStartTimeRef.current = null;
-        
+
         if (replacementRequestsListenerRef.current) {
           replacementRequestsListenerRef.current();
           replacementRequestsListenerRef.current = null;
@@ -834,38 +804,34 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
-  // ================= NETWORK =================
-
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-    
+
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
-    
+
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
 
-  // ================= FETCH REPLACEMENT REQUESTS =================
-
   const fetchReplacementRequests = useCallback(async (forceRefresh = false) => {
     const now = Date.now();
-    
+
     if (!forceRefresh && hasFetchedReplacementRequestsRef.current && (now - lastReplacementRequestsFetchRef.current) < CACHE_TTL) {
       return;
     }
-    
+
     if (isFetchingReplacementRequestsRef.current) return;
-    
+
     isFetchingReplacementRequestsRef.current = true;
 
     try {
       const requestsRef = collection(db, `clinics/${CLINIC_ID}/replacementRequests`);
       const q = query(requestsRef, orderBy("requestedAt", "desc"), limit(200));
-      
+
       const snap = await getDocs(q);
 
       const fetchedRequests = snap.docs.map((d) => {
@@ -889,19 +855,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ================= REPLACEMENT REQUESTS REAL-TIME LISTENER =================
-  
   useEffect(() => {
     if (!user) return;
-    
+
     if (replacementRequestsListenerRef.current) {
       replacementRequestsListenerRef.current();
       replacementRequestsListenerRef.current = null;
     }
-    
+
     const requestsRef = collection(db, `clinics/${CLINIC_ID}/replacementRequests`);
     const q = query(requestsRef, orderBy("requestedAt", "desc"), limit(200));
-    
+
     const unsubscribe = onSnapshot(q, (snap) => {
       const fetchedRequests = snap.docs.map((d) => {
         const data = d.data();
@@ -913,16 +877,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           completedAt: data.completedAt?.toDate() || null,
         };
       }) as ReplacementRequest[];
-      
+
       setReplacementRequests(fetchedRequests);
       hasFetchedReplacementRequestsRef.current = true;
       lastReplacementRequestsFetchRef.current = Date.now();
     }, (error) => {
       console.error("Error in replacement requests listener:", error);
     });
-    
+
     replacementRequestsListenerRef.current = unsubscribe;
-    
+
     return () => {
       if (replacementRequestsListenerRef.current) {
         replacementRequestsListenerRef.current();
@@ -931,10 +895,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  // ================= CURRENT USER DOC REAL-TIME LISTENER =================
-  // Watches the logged-in user's own document so that if an admin
-  // deactivates or deletes the account, the active session is terminated
-  // immediately instead of waiting for a manual refresh.
   useEffect(() => {
     if (!user) {
       if (currentUserDocListenerRef.current) {
@@ -944,7 +904,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Clean up any previous listener before starting a new one
     if (currentUserDocListenerRef.current) {
       currentUserDocListenerRef.current();
       currentUserDocListenerRef.current = null;
@@ -961,11 +920,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         const newStatus = data?.status;
 
         if (newStatus === "Inactive" || newStatus === "Deleted") {
+          if (isLoggingInRef.current) {
+            console.log(
+              `⏭️ Skipping auto sign-out for status "${newStatus}" because a login attempt is in progress.`
+            );
+            return;
+          }
+
           console.warn(
             `🔒 Session revoked: user status is "${newStatus}". Logging out immediately.`
           );
 
-          // Log the forced logout so it appears in the activity log
           try {
             await logLogout(
               data?.name || userName || "User",
@@ -979,13 +944,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             console.error("Failed to log forced logout:", err);
           }
 
-          // Stop the listener before signing out to avoid double-fire
           if (currentUserDocListenerRef.current) {
             currentUserDocListenerRef.current();
             currentUserDocListenerRef.current = null;
           }
 
-          // Sign out — AuthWrapper will redirect to /login
           await signOut(auth);
         }
       },
@@ -1004,27 +967,25 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     };
   }, [user, userName]);
 
-  // ================= FETCH STAFF USERS =================
-
   const fetchStaffUsers = useCallback(async (forceRefresh = false) => {
     if (userRole !== "admin") {
       return;
     }
-    
+
     const now = Date.now();
-    
+
     if (!forceRefresh && hasFetchedUsersRef.current && (now - lastUsersFetchRef.current) < CACHE_TTL) {
       return;
     }
-    
+
     if (isFetchingUsersRef.current) return;
-    
+
     isFetchingUsersRef.current = true;
 
     try {
       const usersRef = collection(db, "users");
       const q = query(usersRef, orderBy("createdAt", "desc"), limit(50));
-      
+
       const snap = await getDocs(q);
 
       const fetchedUsers = snap.docs.map((d) => {
@@ -1033,16 +994,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         const createdAt = data.createdAt?.toDate?.() || new Date(0);
         const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
         const isLegacy = data.isLegacyAccount === true;
-        
+
         let displayStatus = data.status;
         const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
-        
+
         if (isNewAccount && displayStatus !== "Inactive" && displayStatus !== "Deleted") {
           displayStatus = "PendingVerification";
         } else if (!isNewAccount && displayStatus === "PendingVerification") {
           displayStatus = "Active";
         }
-        
+
         return {
           uid: d.id,
           ...data,
@@ -1064,14 +1025,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [userRole]);
 
-  // ================= BATCH HELPER FUNCTIONS =================
-
   const getProductBatches = useCallback(async (productId: string): Promise<ProductBatch[]> => {
     try {
       const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
       const q = query(batchesRef, orderBy("expiryDate", "asc"));
       const snapshot = await getDocs(q);
-      
+
       const batches: ProductBatch[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -1090,7 +1049,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           updatedAt: data.updatedAt,
         } as ProductBatch);
       });
-      
+
       return batches;
     } catch (error) {
       console.error("Error fetching batches:", error);
@@ -1102,17 +1061,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const batches = await getProductBatches(productId);
       const totalStock = batches.reduce((sum, batch) => sum + (batch.isActive !== false ? batch.stock : 0), 0);
-      
+
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
       await updateDoc(productRef, {
         stock: totalStock,
         updatedAt: serverTimestamp()
       });
-      
-      setProducts(prev => prev.map(p => 
+
+      setProducts(prev => prev.map(p =>
         p.id === productId ? { ...p, stock: totalStock } : p
       ));
-      
+
       return totalStock;
     } catch (error) {
       console.error("Error updating parent product stock:", error);
@@ -1131,16 +1090,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
       const productSnap = await getDoc(productRef);
-      
+
       if (!productSnap.exists()) {
         throw new Error(`Product not found: ${productId}`);
       }
-      
+
       const productData = productSnap.data();
       const productName = productData.name || "Unknown Product";
-      
+
       const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${productId}/batches`);
-      
+
       const batchData = {
         batchSku,
         expiryDate,
@@ -1154,11 +1113,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
-      
+
       const docRef = await addDoc(batchesRef, batchData);
-      
+
       await updateParentProductStock(productId);
-      
+
       await logBatchAddition(
         productId,
         productName,
@@ -1168,22 +1127,22 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         staffName || userName || 'System',
         staffId || userId || 'system'
       );
-      
+
       const updatedProduct = await getDoc(productRef);
       if (updatedProduct.exists()) {
         const batches = await getProductBatches(productId);
-        setProducts(prev => prev.map(p => 
-          p.id === productId 
-            ? { 
-                ...p, 
-                ...updatedProduct.data(), 
+        setProducts(prev => prev.map(p =>
+          p.id === productId
+            ? {
+                ...p,
+                ...updatedProduct.data(),
                 batches,
                 stock: batches.reduce((sum, b) => sum + (b.isActive !== false ? b.stock : 0), 0)
               }
             : p
         ));
       }
-      
+
       return docRef.id;
     } catch (error) {
       console.error("Error adding product batch:", error);
@@ -1204,14 +1163,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       let batchSku: string = "";
       let productName: string = "";
       let currentProductData: any = null;
-      
+
       const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
       const productsSnapshot = await getDocs(productsRef);
-      
+
       for (const productDoc of productsSnapshot.docs) {
         const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productDoc.id}/batches`, batchId);
         const batchDoc = await getDoc(batchRef);
-        
+
         if (batchDoc.exists()) {
           productId = productDoc.id;
           batch = { id: batchDoc.id, ...batchDoc.data() } as ProductBatch;
@@ -1221,56 +1180,56 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           break;
         }
       }
-      
+
       if (!productId || !batch) {
         throw new Error(`Batch not found: ${batchId}`);
       }
-      
+
       const oldStock = batch.stock;
       const stockDifference = newStock - oldStock;
-      
+
       const reasonLower = reason?.toLowerCase() || '';
       const isRestock = stockDifference > 0 && (
         reasonLower.includes('restock') ||
         reasonLower.includes('received') ||
         reasonLower.includes('qr scan')
       );
-      
+
       const isDamage = stockDifference < 0 && (
         reasonLower.includes('damaged') ||
         reasonLower.includes('damage') ||
         reasonLower.includes('waste')
       );
-      
+
       const isSale = stockDifference < 0 && (
         reasonLower.includes('sale') ||
         reasonLower.includes('deducted') ||
         reasonLower.includes('purchase')
       );
-      
+
       const batchUpdateData: any = {
         stock: newStock,
         updatedAt: serverTimestamp()
       };
-      
+
       if (isRestock && stockDifference > 0) {
         const unitsAdded = stockDifference;
         const currentBatchRestockCount = batch.restockCount || 0;
         batchUpdateData.restockCount = currentBatchRestockCount + unitsAdded;
       }
-      
+
       if (isDamage && stockDifference < 0) {
         const unitsRemoved = Math.abs(stockDifference);
         const currentBatchDamageCount = batch.damageExchanged || 0;
         batchUpdateData.damageExchanged = currentBatchDamageCount + unitsRemoved;
       }
-      
+
       if (isSale && stockDifference < 0) {
         const unitsSold = Math.abs(stockDifference);
         const currentBatchTotalSold = batch.totalSold || 0;
         batchUpdateData.totalSold = currentBatchTotalSold + unitsSold;
       }
-      
+
       if (!isRestock && !isDamage && !isSale) {
         if (stockDifference > 0) {
           const unitsAdded = stockDifference;
@@ -1282,39 +1241,39 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           batchUpdateData.damageExchanged = currentBatchDamageCount + unitsRemoved;
         }
       }
-      
+
       const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productId}/batches`, batchId);
       await updateDoc(batchRef, batchUpdateData);
-      
+
       const productUpdateData: any = {
         updatedAt: serverTimestamp()
       };
-      
+
       if (isRestock && currentProductData) {
         const currentRestockCount = currentProductData.restockCount || 0;
         const unitsAdded = Math.abs(stockDifference);
         productUpdateData.restockCount = currentRestockCount + unitsAdded;
       }
-      
+
       if (isDamage && currentProductData) {
         const currentDamageExchanged = currentProductData.damageExchanged || 0;
         const unitsRemoved = Math.abs(stockDifference);
         productUpdateData.damageExchanged = currentDamageExchanged + unitsRemoved;
       }
-      
+
       if (isSale && currentProductData) {
         const currentTotalSold = currentProductData.totalSold || 0;
         const unitsSold = Math.abs(stockDifference);
         productUpdateData.totalSold = currentTotalSold + unitsSold;
       }
-      
+
       if (Object.keys(productUpdateData).length > 1) {
         const productRef = doc(db, `clinics/${CLINIC_ID}/products`, productId);
         await updateDoc(productRef, productUpdateData);
       }
-      
+
       await updateParentProductStock(productId);
-      
+
       await logStockAdjustment(
         productId,
         oldStock,
@@ -1326,19 +1285,19 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         batchId,
         batchSku
       );
-      
+
       const updatedBatchDoc = await getDoc(batchRef);
       const updatedProductDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, productId));
-      
+
       if (updatedProductDoc.exists()) {
         const updatedBatches = await getProductBatches(productId);
         const totalStock = updatedBatches.reduce((sum, b) => sum + (b.isActive !== false ? b.stock : 0), 0);
-        
-        setProducts(prev => prev.map(p => 
-          p.id === productId 
-            ? { 
-                ...p, 
-                ...updatedProductDoc.data(), 
+
+        setProducts(prev => prev.map(p =>
+          p.id === productId
+            ? {
+                ...p,
+                ...updatedProductDoc.data(),
                 batches: updatedBatches,
                 stock: totalStock,
                 restockCount: productUpdateData.restockCount !== undefined ? productUpdateData.restockCount : p.restockCount,
@@ -1348,7 +1307,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             : p
         ));
       }
-      
+
     } catch (error) {
       console.error("Error updating batch stock:", error);
       throw error;
@@ -1359,7 +1318,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const batchRef = doc(db, `clinics/${CLINIC_ID}/products/${productId}/batches`, batchId);
       await deleteDoc(batchRef);
-      
+
       await updateParentProductStock(productId);
     } catch (error) {
       console.error("Error deleting batch:", error);
@@ -1367,34 +1326,32 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [updateParentProductStock]);
 
-  // ================= FETCH PRODUCTS =================
-
   const fetchProducts = useCallback(async (forceRefresh = false) => {
     const now = Date.now();
-    
+
     if (!forceRefresh && hasFetchedProductsRef.current && (now - lastProductsFetchRef.current) < CACHE_TTL) {
       return;
     }
-    
+
     if (isFetchingProductsRef.current) return;
-    
+
     isFetchingProductsRef.current = true;
-    
+
     try {
       const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
       const q = query(productsRef, orderBy("createdAt", "desc"), limit(100));
-      
+
       const snap = await getDocs(q);
 
       const fetchedProducts = await Promise.all(snap.docs.map(async (d) => {
         const productData = d.data();
         const isPerishable = productData.category === "Solutions" || productData.category === "Vitamins";
-        
+
         let batches: ProductBatch[] = [];
         if (isPerishable) {
           batches = await getProductBatches(d.id);
         }
-        
+
         return {
           id: d.id,
           ...productData,
@@ -1413,17 +1370,15 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [getProductBatches]);
 
-  // ================= FETCH TRANSACTIONS =================
-
   const fetchTransactions = useCallback(async (forceRefresh = false) => {
     if (!user) return;
-    
+
     const now = Date.now();
-    
+
     if (!forceRefresh && hasFetchedTransactionsRef.current && (now - lastTransactionsFetchRef.current) < CACHE_TTL) {
       return;
     }
-    
+
     if (isFetchingTransactionsRef.current) return;
 
     isFetchingTransactionsRef.current = true;
@@ -1431,7 +1386,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
       const q = query(transactionsRef, orderBy("date", "desc"), limit(200));
-      
+
       const snap = await getDocs(q);
 
       const fetchedTransactions = snap.docs.map((d) => {
@@ -1457,25 +1412,24 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // ================= REAL-TIME LISTENERS =================
   useEffect(() => {
     if (!user || listenersSetupRef.current) return;
-    
+
     listenersSetupRef.current = true;
-    
+
     const productsRef = collection(db, `clinics/${CLINIC_ID}/products`);
     const productsQuery = query(productsRef, orderBy("createdAt", "desc"), limit(100));
-    
+
     const unsubProducts = onSnapshot(productsQuery, async (snap) => {
       const fetchedProducts = await Promise.all(snap.docs.map(async (d) => {
         const productData = d.data();
         const isPerishable = productData.category === "Solutions" || productData.category === "Vitamins";
-        
+
         let batches: ProductBatch[] = [];
         if (isPerishable) {
           batches = await getProductBatches(d.id);
         }
-        
+
         return {
           id: d.id,
           ...productData,
@@ -1493,7 +1447,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
 
     const transactionsRef = collection(db, `clinics/${CLINIC_ID}/transactions`);
     const transactionsQuery = query(transactionsRef, orderBy("date", "desc"), limit(200));
-    
+
     const unsubTransactions = onSnapshot(transactionsQuery, (snap) => {
       const fetchedTransactions = snap.docs.map((d) => {
         const rawData = d.data();
@@ -1522,13 +1476,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     };
   }, [user, getProductBatches]);
 
-  // ================= STAFF USERS REAL-TIME LISTENER =================
   useEffect(() => {
     if (!user || userRole !== "admin") return;
-    
+
     const usersRef = collection(db, "users");
     const usersQuery = query(usersRef, orderBy("createdAt", "desc"), limit(50));
-    
+
     const unsubscribe = onSnapshot(usersQuery, (snap) => {
       const fetchedUsers = snap.docs.map((d) => {
         const data = d.data();
@@ -1536,16 +1489,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         const createdAt = data.createdAt?.toDate?.() || new Date(0);
         const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
         const isLegacy = data.isLegacyAccount === true;
-        
+
         let displayStatus = data.status;
         const isNewAccount = !isLegacy && data.emailVerified === false && daysSinceCreation < 30;
-        
+
         if (isNewAccount && displayStatus !== "Inactive" && displayStatus !== "Deleted") {
           displayStatus = "PendingVerification";
         } else if (!isNewAccount && displayStatus === "PendingVerification") {
           displayStatus = "Active";
         }
-        
+
         return {
           uid: d.id,
           ...data,
@@ -1566,7 +1519,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [user, userRole]);
 
-  // Initial data fetch
   useEffect(() => {
     if (user && !hasFetchedProductsRef.current && !isFetchingProductsRef.current) {
       fetchProducts(false);
@@ -1591,24 +1543,23 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const timer = setTimeout(() => {
         fetchStaffUsers(false);
       }, 500);
-      
+
       return () => clearTimeout(timer);
     }
   }, [user, userRole, fetchStaffUsers]);
 
-  // ================= AUTH ACTIONS =================
-
   const login = async (email: string, password: string) => {
+    isLoggingInRef.current = true;
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const loggedInUser = userCredential.user;
-      
+
       const userRef = doc(db, "users", loggedInUser.uid);
       const userSnap = await getDoc(userRef);
-      
+
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        
+
         if (userData.status === "Inactive") {
           await signOut(auth);
           throw new Error("This account has been deactivated. Please contact an administrator.");
@@ -1617,35 +1568,35 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           await signOut(auth);
           throw new Error("This account has been deleted. Please contact an administrator.");
         }
-        
+
         if (userData.emailVerified === false && loggedInUser.emailVerified === true) {
-          await setDoc(userRef, { 
-            emailVerified: true, 
+          await setDoc(userRef, {
+            emailVerified: true,
             status: "Active",
             updatedAt: serverTimestamp()
           }, { merge: true });
-          
+
           setAppUser(prev => prev ? {
             ...prev,
             emailVerified: true,
             status: "Active"
           } : prev);
         }
-        
+
         const isLegacy = userData.isLegacyAccount === true;
         const createdAt = userData.createdAt?.toDate?.() || new Date(0);
         const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-        
-        const requiresVerification = !isLegacy && 
-                                      userData.emailVerified === false && 
-                                      loggedInUser.emailVerified === false && 
+
+        const requiresVerification = !isLegacy &&
+                                      userData.emailVerified === false &&
+                                      loggedInUser.emailVerified === false &&
                                       daysSinceCreation < 30;
-        
+
         if (requiresVerification) {
           await signOut(auth);
           throw new Error("EMAIL_VERIFICATION_REQUIRED");
         }
-        
+
       } else {
         await setDoc(userRef, {
           email: loggedInUser.email || email,
@@ -1660,17 +1611,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           isLegacyAccount: true
         });
       }
-      
+
       const now = new Date();
       const formattedLastLogin = formatLastLogin(now);
-      
+
       await setDoc(userRef, {
         lastLogin: formattedLastLogin,
         lastLoginAt: Timestamp.fromDate(now),
         lastActive: Timestamp.fromDate(now),
         updatedAt: Timestamp.fromDate(now)
       }, { merge: true });
-      
+
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
@@ -1681,10 +1632,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       lastReplacementRequestsFetchRef.current = 0;
       listenersSetupRef.current = false;
       initialStaffFetchDoneRef.current = false;
-      
+
     } catch (error) {
       console.error("Login error:", error);
       throw error;
+    } finally {
+      isLoggingInRef.current = false;
     }
   };
 
@@ -1694,12 +1647,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const currentUserName = userName;
       const currentUserEmail = userEmail;
       const currentAppUser = appUser;
-      
+
       let sessionDuration: number | undefined;
       if (sessionStartTimeRef.current) {
         sessionDuration = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
       }
-      
+
       try {
         if (currentUserId && currentUserName) {
           await logLogout(currentUserName, currentUserId, currentUserEmail, sessionDuration);
@@ -1711,10 +1664,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       } catch (logError) {
         console.error("Failed to record logout:", logError);
       }
-      
+
       await new Promise(resolve => setTimeout(resolve, 500));
       await signOut(auth);
-      
+
       setProducts([]);
       setTransactions([]);
       setStaffUsers([]);
@@ -1725,7 +1678,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setUserEmail("");
       setAppUser(null);
       setUser(null);
-      
+
       hasFetchedProductsRef.current = false;
       hasFetchedTransactionsRef.current = false;
       hasFetchedUsersRef.current = false;
@@ -1741,32 +1694,30 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       listenersSetupRef.current = false;
       initialStaffFetchDoneRef.current = false;
       sessionStartTimeRef.current = null;
-      
+
       if (replacementRequestsListenerRef.current) {
         replacementRequestsListenerRef.current();
         replacementRequestsListenerRef.current = null;
       }
-      
+
       if (currentUserDocListenerRef.current) {
         currentUserDocListenerRef.current();
         currentUserDocListenerRef.current = null;
       }
-      
+
       pendingUserPasswords.current.clear();
-      
+
     } catch (error) {
       console.error("Logout error:", error);
       throw error;
     }
   };
 
-  // ================= PRODUCT ACTIONS =================
-
   const addProduct = async (data: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
       const beginningInventory = data.stock || 0;
       const isPerishable = data.category === "Solutions" || data.category === "Vitamins";
-      
+
       const docRef = await addDoc(
         collection(db, `clinics/${CLINIC_ID}/products`),
         {
@@ -1780,12 +1731,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           updatedAt: serverTimestamp()
         }
       );
-      
+
       const newProductId = docRef.id;
 
       if (isPerishable && data.batchNumber && data.expiryDate && data.stock > 0) {
         const batchesRef = collection(db, `clinics/${CLINIC_ID}/products/${newProductId}/batches`);
-        
+
         const batchData = {
           batchSku: data.batchNumber,
           expiryDate: data.expiryDate,
@@ -1799,12 +1750,12 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         };
-        
+
         await addDoc(batchesRef, batchData);
       }
-      
-      const newProduct: Product = { 
-        ...data, 
+
+      const newProduct: Product = {
+        ...data,
         id: newProductId,
         beginningInventory: beginningInventory,
         totalSold: 0,
@@ -1815,9 +1766,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       };
-      
+
       setProducts((prev) => [newProduct, ...prev]);
-      
+
       await logProductAddition(
         newProductId,
         data.name,
@@ -1827,7 +1778,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         userName || 'System',
         userId || 'system'
       );
-      
+
       return newProductId;
     } catch (error) {
       console.error("Error adding product:", error);
@@ -1838,16 +1789,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
       const currentProduct = products.find(p => p.id === id);
-      
+
       const { beginningInventory, batches, ...safeUpdates } = updates as any;
-      
+
       const newIsPerishable = safeUpdates.category === "Solutions" || safeUpdates.category === "Vitamins";
       const wasPerishable = currentProduct?.category === "Solutions" || currentProduct?.category === "Vitamins";
-      
+
       if (!wasPerishable && newIsPerishable) {
         safeUpdates.isPerishable = true;
       }
-      
+
       await updateDoc(
         doc(db, `clinics/${CLINIC_ID}/products`, id),
         {
@@ -1859,11 +1810,11 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       setProducts((prev) =>
         prev.map((p) => (p.id === id ? { ...p, ...safeUpdates } : p))
       );
-      
+
       if (currentProduct) {
         const updatedProduct = { ...currentProduct, ...safeUpdates };
         const changes = getChangedFields(currentProduct, updatedProduct);
-        
+
         if (changes.length > 0) {
           await logProductEdit(
             id,
@@ -1884,7 +1835,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       const productName = productDoc.exists() ? productDoc.data().name : 'Unknown Product';
-      
+
       const productRef = doc(db, `clinics/${CLINIC_ID}/products`, id);
       await updateDoc(productRef, {
         archived,
@@ -1919,17 +1870,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       const productName = productDoc.exists() ? productDoc.data().name : 'Unknown Product';
-      
+
       const batches = await getProductBatches(id);
       for (const batch of batches) {
         await deleteBatch(batch.id, id);
       }
-      
+
       await deleteDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
       setProducts((prev) => prev.filter((p) => p.id !== id));
-      
+
       await logProductDeletion(id, productName, userName || 'System', userId || 'system');
-      
+
     } catch (error) {
       console.error("Error deleting product:", error);
       throw error;
@@ -1937,120 +1888,118 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
   };
 
   const adjustStock = async (id: string, newStock: number, reason: string, staffName?: string, staffId?: string, batchId?: string) => {
-  try {
-    const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
-    if (!productDoc.exists()) {
-      throw new Error("Product not found");
-    }
-
-    const currentProduct = productDoc.data() as any;
-    const isPerishable = currentProduct.category === "Solutions" || currentProduct.category === "Vitamins";
-    
-    if (isPerishable && batchId) {
-      await updateBatchStock(batchId, newStock, reason, staffName, staffId);
-      return;
-    }
-    
-    const oldStock = currentProduct.stock || 0;
-    const stockDifference = newStock - oldStock;
-
-    const actingStaffName = staffName || userName || "System";
-    const actingStaffId = staffId || userId || "system";
-    
-    const reasonLower = reason?.toLowerCase() || '';
-    const isScanIn = reasonLower.includes('received via qr scan') || 
-                     reasonLower.includes('scanned in') ||
-                     (reasonLower.includes('qr scan') && newStock > oldStock);
-    const isScanOut = reasonLower.includes('dispatched via qr scan') || 
-                      reasonLower.includes('scanned out') ||
-                      (reasonLower.includes('qr scan') && newStock < oldStock);
-    
-    const isDamageAdjustment = reasonLower.includes('damaged') || 
-                               reasonLower.includes('damage') ||
-                               reasonLower.includes('waste');
-
-    let appliedUpdateData: any = null;
-
-    if (oldStock !== newStock) {
-      const updateData: any = {
-        stock: newStock,
-        updatedAt: serverTimestamp()
-      };
-
-      const isDamageOrExchange = isDamageAdjustment || 
-                                  reasonLower.includes('damage') || 
-                                  reasonLower.includes('damaged') ||
-                                  reasonLower.includes('exchange') ||
-                                  reasonLower.includes('return') ||
-                                  isScanOut;
-
-      const isRestock = !isDamageOrExchange && stockDifference > 0 && 
-                       (reasonLower.includes('restock') ||
-                        reasonLower.includes('received'));
-
-      if (isDamageOrExchange && stockDifference < 0) {
-        const itemsRemoved = Math.abs(stockDifference);
-        const currentDamageExchanged = currentProduct.damageExchanged || 0;
-        updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
+    try {
+      const productDoc = await getDoc(doc(db, `clinics/${CLINIC_ID}/products`, id));
+      if (!productDoc.exists()) {
+        throw new Error("Product not found");
       }
 
-      if (isRestock && stockDifference > 0) {
-        const unitsAdded = stockDifference;
-        const currentRestockCount = currentProduct.restockCount || 0;
-        updateData.restockCount = currentRestockCount + unitsAdded;
-      } else if (stockDifference > 0 && (reasonLower.includes('qr scan') || reasonLower.includes('scanned in'))) {
-        const unitsAdded = stockDifference;
-        const currentRestockCount = currentProduct.restockCount || 0;
-        updateData.restockCount = currentRestockCount + unitsAdded;
+      const currentProduct = productDoc.data() as any;
+      const isPerishable = currentProduct.category === "Solutions" || currentProduct.category === "Vitamins";
+
+      if (isPerishable && batchId) {
+        await updateBatchStock(batchId, newStock, reason, staffName, staffId);
+        return;
       }
 
-      await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
-      appliedUpdateData = updateData;
+      const oldStock = currentProduct.stock || 0;
+      const stockDifference = newStock - oldStock;
 
-      if (isScanIn || isScanOut) {
-        const productName = currentProduct.name || 'Unknown Product';
-        await logScanActivity(
-          id,
-          productName,
-          oldStock,
-          newStock,
-          isScanIn ? 'in' : 'out',
-          actingStaffName,
-          actingStaffId
-        );
-      } else {
-        try {
-          const productName = currentProduct.name || null;
-          await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
-        } catch (logErr) {
-          console.error("Failed to log stock adjustment:", logErr);
+      const actingStaffName = staffName || userName || "System";
+      const actingStaffId = staffId || userId || "system";
+
+      const reasonLower = reason?.toLowerCase() || '';
+      const isScanIn = reasonLower.includes('received via qr scan') ||
+                       reasonLower.includes('scanned in') ||
+                       (reasonLower.includes('qr scan') && newStock > oldStock);
+      const isScanOut = reasonLower.includes('dispatched via qr scan') ||
+                        reasonLower.includes('scanned out') ||
+                        (reasonLower.includes('qr scan') && newStock < oldStock);
+
+      const isDamageAdjustment = reasonLower.includes('damaged') ||
+                                 reasonLower.includes('damage') ||
+                                 reasonLower.includes('waste');
+
+      let appliedUpdateData: any = null;
+
+      if (oldStock !== newStock) {
+        const updateData: any = {
+          stock: newStock,
+          updatedAt: serverTimestamp()
+        };
+
+        const isDamageOrExchange = isDamageAdjustment ||
+                                    reasonLower.includes('damage') ||
+                                    reasonLower.includes('damaged') ||
+                                    reasonLower.includes('exchange') ||
+                                    reasonLower.includes('return') ||
+                                    isScanOut;
+
+        const isRestock = !isDamageOrExchange && stockDifference > 0 &&
+                         (reasonLower.includes('restock') ||
+                          reasonLower.includes('received'));
+
+        if (isDamageOrExchange && stockDifference < 0) {
+          const itemsRemoved = Math.abs(stockDifference);
+          const currentDamageExchanged = currentProduct.damageExchanged || 0;
+          updateData.damageExchanged = currentDamageExchanged + itemsRemoved;
+        }
+
+        if (isRestock && stockDifference > 0) {
+          const unitsAdded = stockDifference;
+          const currentRestockCount = currentProduct.restockCount || 0;
+          updateData.restockCount = currentRestockCount + unitsAdded;
+        } else if (stockDifference > 0 && (reasonLower.includes('qr scan') || reasonLower.includes('scanned in'))) {
+          const unitsAdded = stockDifference;
+          const currentRestockCount = currentProduct.restockCount || 0;
+          updateData.restockCount = currentRestockCount + unitsAdded;
+        }
+
+        await updateDoc(doc(db, `clinics/${CLINIC_ID}/products`, id), updateData);
+        appliedUpdateData = updateData;
+
+        if (isScanIn || isScanOut) {
+          const productName = currentProduct.name || 'Unknown Product';
+          await logScanActivity(
+            id,
+            productName,
+            oldStock,
+            newStock,
+            isScanIn ? 'in' : 'out',
+            actingStaffName,
+            actingStaffId
+          );
+        } else {
+          try {
+            const productName = currentProduct.name || null;
+            await logStockAdjustment(id, oldStock, newStock, reason, actingStaffId, actingStaffName, productName || undefined);
+          } catch (logErr) {
+            console.error("Failed to log stock adjustment:", logErr);
+          }
         }
       }
+
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                stock: newStock,
+                damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged !== undefined)
+                  ? appliedUpdateData.damageExchanged
+                  : p.damageExchanged,
+                restockCount: (appliedUpdateData && appliedUpdateData.restockCount !== undefined)
+                  ? appliedUpdateData.restockCount
+                  : p.restockCount,
+              }
+            : p
+        )
+      );
+    } catch (error) {
+      console.error("Error adjusting stock:", error);
+      throw error;
     }
-
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              stock: newStock,
-              damageExchanged: (appliedUpdateData && appliedUpdateData.damageExchanged !== undefined) 
-                ? appliedUpdateData.damageExchanged 
-                : p.damageExchanged,
-              restockCount: (appliedUpdateData && appliedUpdateData.restockCount !== undefined) 
-                ? appliedUpdateData.restockCount 
-                : p.restockCount,
-            }
-          : p
-      )
-    );
-  } catch (error) {
-    console.error("Error adjusting stock:", error);
-    throw error;
-  }
-};
-
-  // ================= TRANSACTION ACTIONS =================
+  };
 
   const addTransaction = async (data: Omit<Transaction, 'id' | 'createdAt'>) => {
     try {
@@ -2062,13 +2011,13 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      const newTransaction: Transaction = { 
-        ...data, 
+      const newTransaction: Transaction = {
+        ...data,
         id: docRef.id,
         createdAt: Timestamp.now()
       };
       setTransactions((prev) => [newTransaction, ...prev]);
-      
+
       await logSaleCompleted(
         docRef.id,
         data.staffName || 'Staff',
@@ -2076,7 +2025,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         data.total,
         data.items
       );
-      
+
       return docRef.id;
     } catch (error) {
       console.error("Error adding transaction:", error);
@@ -2088,19 +2037,19 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, id);
       const transactionSnap = await getDoc(transactionRef);
-      
+
       if (!transactionSnap.exists()) {
         throw new Error("Transaction not found");
       }
-      
+
       const transactionData = transactionSnap.data();
-      
+
       if (transactionData.status !== "completed" && transactionData.status !== "replaced") {
         throw new Error("Only completed or previously replaced transactions can be processed for replacement");
       }
-      
+
       const processedTimestamp = new Date();
-      
+
       await updateDoc(transactionRef, {
         status: "processing_replacement",
         replacementReason: reason,
@@ -2108,21 +2057,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         processedBy: processedBy,
         updatedAt: serverTimestamp()
       });
-      
+
       setTransactions((prev) =>
         prev.map((t) =>
-          t.id === id 
-            ? { 
-                ...t, 
+          t.id === id
+            ? {
+                ...t,
                 status: "processing_replacement",
                 replacementReason: reason,
                 processedAt: processedTimestamp,
                 processedBy: processedBy
-              } 
+              }
             : t
         )
       );
-      
+
       await logReplacementInitiated(
         id,
         reason,
@@ -2131,7 +2080,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         transactionData.total || 0,
         transactionData.items || []
       );
-      
+
     } catch (error) {
       console.error("Error processing replacement:", error);
       throw error;
@@ -2142,39 +2091,39 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, id);
       const transactionSnap = await getDoc(transactionRef);
-      
+
       if (!transactionSnap.exists()) {
         throw new Error("Transaction not found");
       }
-      
+
       const transactionData = transactionSnap.data();
-      
+
       if (transactionData.status !== "processing_replacement") {
         throw new Error("Only transactions in 'Processing Replacement' status can be marked as replaced");
       }
-      
+
       const replacedTimestamp = new Date();
-      
+
       await updateDoc(transactionRef, {
         status: "replaced",
         replacedAt: Timestamp.fromDate(replacedTimestamp),
         replacedBy: replacedBy,
         updatedAt: serverTimestamp()
       });
-      
+
       setTransactions((prev) =>
         prev.map((t) =>
-          t.id === id 
-            ? { 
-                ...t, 
+          t.id === id
+            ? {
+                ...t,
                 status: "replaced",
                 replacedAt: replacedTimestamp,
                 replacedBy: replacedBy
-              } 
+              }
             : t
         )
       );
-      
+
       await logReplacementCompleted(
         id,
         replacedBy,
@@ -2182,19 +2131,18 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         transactionData.total || 0,
         transactionData.items || []
       );
-      
+
     } catch (error) {
       console.error("Error completing replacement:", error);
       throw error;
     }
   };
 
-  // Helper functions for replacement logging (legacy)
   const logReplacementInitiated = async (transactionId: string, reason: string, staffName: string, patientName: string, total: number, items: any[]) => {
     try {
       const productDetails = getProductDetailsForLog(items);
       const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-      
+
       await addDoc(activityRef, {
         type: 'replacement',
         action: 'replacement_initiated',
@@ -2217,7 +2165,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const productDetails = getProductDetailsForLog(items);
       const activityRef = collection(db, `clinics/${CLINIC_ID}/activityLogs`);
-      
+
       await addDoc(activityRef, {
         type: 'replacement',
         action: 'replacement_completed',
@@ -2235,8 +2183,6 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ================= REPLACEMENT REQUEST ACTIONS =================
-
   const createReplacementRequest = async (
     transactionId: string,
     reason: string,
@@ -2246,21 +2192,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, transactionId);
       const transactionSnap = await getDoc(transactionRef);
-      
+
       if (!transactionSnap.exists()) {
         throw new Error("Transaction not found");
       }
-      
+
       const transactionData = transactionSnap.data();
-      
+
       const existingRequests = replacementRequests.filter(
         r => r.transactionId === transactionId && r.status === "pending"
       );
-      
+
       if (existingRequests.length > 0) {
         throw new Error("A replacement request already exists for this transaction");
       }
-      
+
       const requestId = await addDoc(
         collection(db, `clinics/${CLINIC_ID}/replacementRequests`),
         {
@@ -2278,7 +2224,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
           updatedAt: serverTimestamp()
         }
       ).then(docRef => docRef.id);
-      
+
       await updateDoc(transactionRef, {
         status: "processing_replacement",
         replacementReason: reason,
@@ -2286,7 +2232,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         processedBy: requestedBy,
         updatedAt: serverTimestamp()
       });
-      
+
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === transactionId
@@ -2300,7 +2246,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             : t
         )
       );
-      
+
       await logReplacementRequestCreated(
         transactionId,
         requestId,
@@ -2310,9 +2256,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         transactionData.patientName || "Walk-in Patient",
         transactionData.total || 0
       );
-      
+
       await fetchReplacementRequests(true);
-      
+
       return requestId;
     } catch (error) {
       console.error("Error creating replacement request:", error);
@@ -2328,21 +2274,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
       const requestSnap = await getDoc(requestRef);
-      
+
       if (!requestSnap.exists()) {
         throw new Error("Replacement request not found");
       }
-      
+
       const requestData = requestSnap.data() as ReplacementRequest;
-      
+
       if (requestData.status !== "pending") {
         throw new Error(`Cannot approve request with status: ${requestData.status}`);
       }
-      
-      // IMPORTANT: Do NOT adjust inventory on approval
-      // Stock was already deducted during the original sale
-      // Only update the request status
-      
+
       await updateDoc(requestRef, {
         status: "approved",
         reviewedBy: approvedBy,
@@ -2350,7 +2292,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         reviewedAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      
+
       await logReplacementRequestApproved(
         requestId,
         requestData.transactionId,
@@ -2359,10 +2301,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.patientName,
         requestData.originalTotal
       );
-      
+
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
-      
+
     } catch (error) {
       console.error("Error approving replacement request:", error);
       throw error;
@@ -2378,24 +2320,23 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
       const requestSnap = await getDoc(requestRef);
-      
+
       if (!requestSnap.exists()) {
         throw new Error("Replacement request not found");
       }
-      
+
       const requestData = requestSnap.data() as ReplacementRequest;
-      
+
       if (requestData.status !== "pending") {
         throw new Error(`Cannot decline request with status: ${requestData.status}`);
       }
-      
-      // Update transaction status back to completed (no inventory change needed)
+
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
       await updateDoc(transactionRef, {
         status: "completed",
         updatedAt: serverTimestamp()
       });
-      
+
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === requestData.transactionId
@@ -2403,7 +2344,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             : t
         )
       );
-      
+
       await updateDoc(requestRef, {
         status: "declined",
         reviewedBy: declinedBy,
@@ -2412,7 +2353,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         declineReason: declineReason,
         updatedAt: serverTimestamp()
       });
-      
+
       await logReplacementRequestDeclined(
         requestId,
         requestData.transactionId,
@@ -2422,10 +2363,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.patientName,
         requestData.originalTotal
       );
-      
+
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
-      
+
     } catch (error) {
       console.error("Error declining replacement request:", error);
       throw error;
@@ -2440,21 +2381,17 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const requestRef = doc(db, `clinics/${CLINIC_ID}/replacementRequests`, requestId);
       const requestSnap = await getDoc(requestRef);
-      
+
       if (!requestSnap.exists()) {
         throw new Error("Replacement request not found");
       }
-      
+
       const requestData = requestSnap.data() as ReplacementRequest;
-      
+
       if (requestData.status !== "approved") {
         throw new Error(`Cannot complete request with status: ${requestData.status}. Request must be approved first.`);
       }
-      
-      // IMPORTANT: Do NOT adjust inventory when completing replacement
-      // Stock was already deducted during the original sale
-      // Only update the transaction status and request status
-      
+
       const transactionRef = doc(db, `clinics/${CLINIC_ID}/transactions`, requestData.transactionId);
       await updateDoc(transactionRef, {
         status: "replaced",
@@ -2462,7 +2399,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         replacedBy: completedBy,
         updatedAt: serverTimestamp()
       });
-      
+
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === requestData.transactionId
@@ -2475,7 +2412,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
             : t
         )
       );
-      
+
       await updateDoc(requestRef, {
         status: "completed",
         completedAt: serverTimestamp(),
@@ -2483,7 +2420,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         completedById: completedById,
         updatedAt: serverTimestamp()
       });
-      
+
       await logReplacementRequestCompleted(
         requestId,
         requestData.transactionId,
@@ -2492,11 +2429,10 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         requestData.patientName,
         requestData.originalTotal
       );
-      
+
       await fetchReplacementRequests(true);
       await fetchTransactions(true);
-      // No need to fetch products as stock hasn't changed
-      
+
     } catch (error) {
       console.error("Error completing replacement request:", error);
       throw error;
@@ -2507,21 +2443,19 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return replacementRequests.filter(r => r.status === "pending");
   };
 
-  // ================= STAFF ACTIONS =================
-
   const createStaffUser = async (email: string, password: string, name: string, role: "admin" | "staff") => {
     try {
       const secondaryAuth = getSecondaryAuth();
-      
+
       const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
       const newUser = userCredential.user;
-      
+
       pendingUserPasswords.current.set(email, password);
-      
+
       await sendEmailVerification(newUser);
-      
+
       await signOut(secondaryAuth);
-      
+
       await setDoc(doc(db, "users", newUser.uid), {
         email,
         name,
@@ -2534,9 +2468,9 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         emailVerified: false,
         isLegacyAccount: false
       });
-      
+
       await updateProfile(newUser, { displayName: name });
-      
+
       return newUser.uid;
     } catch (error) {
       console.error("Error creating staff user:", error);
@@ -2550,7 +2484,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         ...data,
         updatedAt: serverTimestamp()
       });
-      
+
       setStaffUsers((prev) =>
         prev.map((u) => (u.uid === uid ? { ...u, ...data } : u))
       );
@@ -2566,7 +2500,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         status: "Deleted",
         updatedAt: serverTimestamp()
       });
-      
+
       setStaffUsers((prev) =>
         prev.map((u) => (u.uid === uid ? { ...u, status: "Deleted" } : u))
       );
@@ -2582,7 +2516,7 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         status: "Inactive",
         updatedAt: serverTimestamp()
       });
-      
+
       setStaffUsers((prev) =>
         prev.map((u) => (u.uid === uid ? { ...u, status: "Inactive" } : u))
       );
@@ -2597,15 +2531,15 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
       const userRef = doc(db, "users", uid);
       const userSnap = await getDoc(userRef);
       const userData = userSnap.data();
-      
+
       const isLegacy = userData?.isLegacyAccount === true;
       const newStatus = (!isLegacy && userData?.emailVerified === false) ? "PendingVerification" : "Active";
-      
+
       await updateDoc(userRef, {
         status: newStatus,
         updatedAt: serverTimestamp()
       });
-      
+
       setStaffUsers((prev) =>
         prev.map((u) => (u.uid === uid ? { ...u, status: newStatus } : u))
       );
@@ -2629,21 +2563,21 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     try {
       const secondaryAuth = getSecondaryAuth();
       const password = providedPassword || pendingUserPasswords.current.get(email);
-      
+
       if (!password) {
         throw new Error("Cannot resend verification email. Please contact support or create a new account.");
       }
-      
+
       const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
       const user = userCredential.user;
-      
+
       await sendEmailVerification(user);
-      
+
       await signOut(secondaryAuth);
-      
+
     } catch (error: any) {
       console.error("Error resending verification email:", error);
-      
+
       if (error.code === 'auth/email-already-verified' || error.message?.includes('verified')) {
         const userToUpdate = staffUsers.find(u => u.email === email);
         if (userToUpdate) {
@@ -2655,20 +2589,16 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
         }
         throw new Error("Email already verified. Status has been updated to Active.");
       }
-      
+
       throw error;
     }
   };
-
-  // ================= ANALYTICS =================
 
   const getLowStockProducts = () =>
     products.filter((p) => p.stock <= p.reorderPoint && p.stock > 0 && !p.archived);
 
   const getDeadstockProducts = () =>
     products.filter((p) => (p.lastMovedDaysAgo || 0) >= 30 && p.stock > 0 && !p.archived);
-
-  // ================= VALUE =================
 
   const value: FirebaseContextType = {
     user,
